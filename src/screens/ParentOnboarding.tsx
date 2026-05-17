@@ -328,12 +328,21 @@ function Step2AssignChores({
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const [customChores, setCustomChores] = useState<Record<string, SuggestedChore[]>>({});
+  const [removedIds, setRemovedIds] = useState<Record<string, string[]>>({});
   const [choreInput, setChoreInput] = useState('');
   const { open: addSheetOpen, openSheet: openAddSheet, closeSheet: closeAddSheet, sheetY: addSheetY, scrimOpacity: addScrimOpacity } = useBottomSheet(320);
 
   const child = children[activeTab];
-  const suggested = CHORES_BY_AGE[child.ageRange];
-  const extras = customChores[child.id] ?? [];
+  const excluded = removedIds[child.id] ?? [];
+  const suggested = CHORES_BY_AGE[child.ageRange].filter(c => !excluded.includes(c.id));
+  const extras = (customChores[child.id] ?? []).filter(c => !excluded.includes(c.id));
+
+  const removeChore = (choreId: string) => {
+    setRemovedIds(prev => ({ ...prev, [child.id]: [...(prev[child.id] ?? []), choreId] }));
+    setChildren(prev => prev.map((c, i) =>
+      i === activeTab ? { ...c, selectedChoreIds: c.selectedChoreIds.filter(id => id !== choreId) } : c
+    ));
+  };
 
   const toggleChore = (choreId: string) => {
     setChildren(prev => prev.map((c, i) =>
@@ -409,6 +418,9 @@ function Step2AssignChores({
                   </View>
                   <Text style={s.choreName}>{chore.name}</Text>
                   <Text style={s.choreXp}>+{chore.xp} XP</Text>
+                  <TouchableOpacity onPress={() => removeChore(chore.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.6}>
+                    <Text style={s.choreRemove}>×</Text>
+                  </TouchableOpacity>
                 </TouchableOpacity>
               );
             })}
@@ -802,6 +814,12 @@ const s = StyleSheet.create({
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
     color: PURPLE,
+  },
+  choreRemove: {
+    fontSize: 20,
+    color: colors.muted,
+    lineHeight: 22,
+    marginLeft: 4,
   },
 
   // Reward row
