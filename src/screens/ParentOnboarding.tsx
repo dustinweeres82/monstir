@@ -90,6 +90,16 @@ const CHORES_BY_AGE: Record<OnboardingChild['ageRange'], SuggestedChore[]> = {
   ],
 };
 
+const CHORE_ICONS: { icon: ReturnType<typeof require>; bg: string }[] = [
+  { icon: require('../../assets/icons/chore=iconBed.png'),     bg: '#FEF3D7' },
+  { icon: require('../../assets/icons/chore=iconBroom.png'),   bg: '#F5F0FB' },
+  { icon: require('../../assets/icons/chore=iconDishes.png'),  bg: '#FFF9E6' },
+  { icon: require('../../assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0' },
+  { icon: require('../../assets/icons/chore=iconLaundry.png'), bg: '#EEF6FF' },
+  { icon: require('../../assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB' },
+  { icon: require('../../assets/icons/chore=iconVacuum.png'),  bg: '#EAF3FB' },
+];
+
 const REWARD_TYPES = [
   { id: 'screen_time',       label: 'Screen time',       desc: 'e.g. 30 mins extra',  icon: '🎮' },
   { id: 'allowance',         label: 'Allowance',         desc: 'e.g. $5 per week',    icon: '💵' },
@@ -330,7 +340,8 @@ function Step2AssignChores({
   const [customChores, setCustomChores] = useState<Record<string, SuggestedChore[]>>({});
   const [removedIds, setRemovedIds] = useState<Record<string, string[]>>({});
   const [choreInput, setChoreInput] = useState('');
-  const { open: addSheetOpen, openSheet: openAddSheet, closeSheet: closeAddSheet, sheetY: addSheetY, scrimOpacity: addScrimOpacity } = useBottomSheet(320);
+  const [selectedIconIdx, setSelectedIconIdx] = useState(0);
+  const { open: addSheetOpen, openSheet: openAddSheet, closeSheet: closeAddSheet, sheetY: addSheetY, scrimOpacity: addScrimOpacity } = useBottomSheet(380);
 
   const child = children[activeTab];
   const excluded = removedIds[child.id] ?? [];
@@ -361,18 +372,14 @@ function Step2AssignChores({
     const name = choreInput.trim();
     if (!name) return;
     const id = `custom_${Date.now()}`;
-    const chore: SuggestedChore = {
-      id,
-      name,
-      xp: 15,
-      icon: require('../../assets/icons/chore=iconBroom.png'),
-      iconBg: '#F5F0FB',
-    };
+    const { icon, bg } = CHORE_ICONS[selectedIconIdx];
+    const chore: SuggestedChore = { id, name, xp: 15, icon, iconBg: bg };
     setCustomChores(prev => ({ ...prev, [child.id]: [...(prev[child.id] ?? []), chore] }));
     setChildren(prev => prev.map((c, i) =>
       i === activeTab ? { ...c, selectedChoreIds: [...c.selectedChoreIds, id] } : c
     ));
     setChoreInput('');
+    setSelectedIconIdx(0);
     closeAddSheet();
   };
 
@@ -440,6 +447,18 @@ function Step2AssignChores({
                 <View style={s.sheetHandle} />
                 <Text style={s.sheetHeading}>Add a chore</Text>
                 <View style={s.addChoreBody}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.iconPickerRow}>
+                    {CHORE_ICONS.map(({ icon, bg }, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        style={[s.iconPickerCell, { backgroundColor: bg }, selectedIconIdx === i && s.iconPickerCellActive]}
+                        onPress={() => setSelectedIconIdx(i)}
+                        activeOpacity={0.8}
+                      >
+                        <Image source={icon} style={{ width: 28, height: 28 }} resizeMode="contain" />
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                   <TextInput
                     style={s.addChoreInput}
                     value={choreInput}
@@ -673,7 +692,10 @@ const s = StyleSheet.create({
   sheetCheck:     { fontSize: 17, color: PURPLE, fontWeight: fontWeight.bold },
 
   // Add chore sheet
-  addChoreBody:        { paddingHorizontal: 16, gap: 12 },
+  addChoreBody:        { paddingHorizontal: 16, gap: 14 },
+  iconPickerRow:       { gap: 10, paddingHorizontal: 2 },
+  iconPickerCell:      { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+  iconPickerCellActive: { borderColor: PURPLE },
   addChoreInput:       { borderWidth: 1.5, borderColor: colors.border, borderRadius: radii.lg, paddingHorizontal: 16, paddingVertical: 14, fontSize: fontSize.lg, fontWeight: fontWeight.medium, color: colors.black, backgroundColor: colors.white },
   addChoreBtn:         { backgroundColor: PURPLE, borderRadius: radii.full, paddingVertical: 14, alignItems: 'center' },
   addChoreBtnDisabled: { opacity: 0.4 },
