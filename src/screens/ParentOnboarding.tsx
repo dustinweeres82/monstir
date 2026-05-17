@@ -472,7 +472,9 @@ function Step4AllSet({
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
           {children.map(child => (
             <View key={child.id} style={s.summaryCard}>
-              <AvatarCircle name={child.name} color={child.avatarColor} size={52} />
+              <View style={{ width: 52, height: 52, borderRadius: 26, overflow: 'hidden', borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.08)' }}>
+                <Image source={AVATARS[child.avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+              </View>
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={s.summaryName}>{child.name}</Text>
                 <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
