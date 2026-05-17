@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Image, Modal, Platform, ActionSheetIOS,
-  Animated, Easing,
+  Animated, Easing, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, radii, spacing } from '../design-system/tokens';
@@ -327,9 +327,13 @@ function Step2AssignChores({
   onBack: () => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
-  const [customInput, setCustomInput] = useState('');
+  const [customChores, setCustomChores] = useState<Record<string, SuggestedChore[]>>({});
+  const [choreInput, setChoreInput] = useState('');
+  const { open: addSheetOpen, openSheet: openAddSheet, closeSheet: closeAddSheet, sheetY: addSheetY, scrimOpacity: addScrimOpacity } = useBottomSheet(320);
+
   const child = children[activeTab];
   const suggested = CHORES_BY_AGE[child.ageRange];
+  const extras = customChores[child.id] ?? [];
 
   const toggleChore = (choreId: string) => {
     setChildren(prev => prev.map((c, i) =>
@@ -342,6 +346,25 @@ function Step2AssignChores({
           }
         : c
     ));
+  };
+
+  const addCustomChore = () => {
+    const name = choreInput.trim();
+    if (!name) return;
+    const id = `custom_${Date.now()}`;
+    const chore: SuggestedChore = {
+      id,
+      name,
+      xp: 15,
+      icon: require('../../assets/icons/chore=iconBroom.png'),
+      iconBg: '#F5F0FB',
+    };
+    setCustomChores(prev => ({ ...prev, [child.id]: [...(prev[child.id] ?? []), chore] }));
+    setChildren(prev => prev.map((c, i) =>
+      i === activeTab ? { ...c, selectedChoreIds: [...c.selectedChoreIds, id] } : c
+    ));
+    setChoreInput('');
+    closeAddSheet();
   };
 
   return (
@@ -374,7 +397,7 @@ function Step2AssignChores({
           <Text style={s.sectionLabel}>Suggested for {child.name} ({child.ageRange})</Text>
 
           <View style={{ gap: 10, marginTop: 8 }}>
-            {suggested.map(chore => {
+            {[...suggested, ...extras].map(chore => {
               const checked = child.selectedChoreIds.includes(chore.id);
               return (
                 <TouchableOpacity key={chore.id} style={s.choreRow} onPress={() => toggleChore(chore.id)} activeOpacity={0.8}>
@@ -391,10 +414,44 @@ function Step2AssignChores({
             })}
           </View>
 
-          <TouchableOpacity style={[s.addChildBtn, { marginTop: 16 }]} activeOpacity={0.7}>
+          <TouchableOpacity style={[s.addChildBtn, { marginTop: 16 }]} onPress={openAddSheet} activeOpacity={0.7}>
             <Text style={s.addChildLabel}>+ Add a chore</Text>
           </TouchableOpacity>
         </ScrollView>
+
+        {/* Add chore sheet */}
+        <Modal visible={addSheetOpen} transparent animationType="none" onRequestClose={() => closeAddSheet()}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <Animated.View style={[s.sheetScrim, { opacity: addScrimOpacity }]}>
+              <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => { setChoreInput(''); closeAddSheet(); }} />
+              <Animated.View style={[s.sheet, { transform: [{ translateY: addSheetY }] }]} onStartShouldSetResponder={() => true}>
+                <View style={s.sheetHandle} />
+                <Text style={s.sheetHeading}>Add a chore</Text>
+                <View style={s.addChoreBody}>
+                  <TextInput
+                    style={s.addChoreInput}
+                    value={choreInput}
+                    onChangeText={setChoreInput}
+                    placeholder="e.g. Clean the car"
+                    placeholderTextColor={colors.hint}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={addCustomChore}
+                  />
+                  <TouchableOpacity
+                    style={[s.addChoreBtn, !choreInput.trim() && s.addChoreBtnDisabled]}
+                    onPress={addCustomChore}
+                    disabled={!choreInput.trim()}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.addChoreBtnLabel}>Add chore</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={{ height: Platform.OS === 'ios' ? 28 : 16 }} />
+              </Animated.View>
+            </Animated.View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         <View style={s.footer}>
           <Button label="Continue →" onPress={onNext} />
@@ -602,6 +659,13 @@ const s = StyleSheet.create({
   sheetRowLabel:  { flex: 1, fontSize: 17, fontWeight: fontWeight.semibold, color: colors.black },
   sheetRowLabelActive: { color: PURPLE },
   sheetCheck:     { fontSize: 17, color: PURPLE, fontWeight: fontWeight.bold },
+
+  // Add chore sheet
+  addChoreBody:        { paddingHorizontal: 16, gap: 12 },
+  addChoreInput:       { borderWidth: 1.5, borderColor: colors.border, borderRadius: radii.lg, paddingHorizontal: 16, paddingVertical: 14, fontSize: fontSize.lg, fontWeight: fontWeight.medium, color: colors.black, backgroundColor: colors.white },
+  addChoreBtn:         { backgroundColor: PURPLE, borderRadius: radii.full, paddingVertical: 14, alignItems: 'center' },
+  addChoreBtnDisabled: { opacity: 0.4 },
+  addChoreBtnLabel:    { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: '#fff' },
 
   // Avatar grid in sheet
   avatarGrid:         { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
