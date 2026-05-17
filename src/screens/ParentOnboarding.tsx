@@ -351,7 +351,7 @@ function Step2AssignChores({
 
         {/* Child tabs */}
         {children.length > 1 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8, alignItems: 'center' }}>
             {children.map((c, i) => (
               <TouchableOpacity
                 key={c.id}
@@ -359,7 +359,9 @@ function Step2AssignChores({
                 onPress={() => setActiveTab(i)}
                 activeOpacity={0.8}
               >
-                <AvatarCircle name={c.name} color={c.avatarColor} size={28} />
+                <View style={s.childTabAvatar}>
+                  <Image source={AVATARS[c.avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                </View>
                 <Text style={[s.childTabLabel, i === activeTab && s.childTabLabelActive]}>{c.name}</Text>
               </TouchableOpacity>
             ))}
@@ -670,6 +672,9 @@ const s = StyleSheet.create({
   childTabActive: {
     borderColor: PURPLE,
     backgroundColor: LAVENDER,
+  },
+  childTabAvatar: {
+    width: 26, height: 26, borderRadius: 13, overflow: 'hidden',
   },
   childTabLabel: {
     fontSize: fontSize.base,
