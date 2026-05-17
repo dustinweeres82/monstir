@@ -347,28 +347,30 @@ function Step2AssignChores({
   return (
     <CreamBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={2} total={4} title="Assign chores" subtitle="Tailored for each child's age." />
+        <View style={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 }}>
+          <Text style={s.stepCounter}>2 OF 4</Text>
+          <Text style={s.heading}>Assign chores</Text>
+          <Text style={s.subtitle}>Tailored for each child's age.</Text>
+          {children.length > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 12, alignItems: 'center' }}>
+              {children.map((c, i) => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[s.childTab, i === activeTab && s.childTabActive]}
+                  onPress={() => setActiveTab(i)}
+                  activeOpacity={0.8}
+                >
+                  <View style={s.childTabAvatar}>
+                    <Image source={AVATARS[c.avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                  </View>
+                  <Text style={[s.childTabLabel, i === activeTab && s.childTabLabelActive]}>{c.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </View>
 
-        {/* Child tabs */}
-        {children.length > 1 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8, alignItems: 'center' }}>
-            {children.map((c, i) => (
-              <TouchableOpacity
-                key={c.id}
-                style={[s.childTab, i === activeTab && s.childTabActive]}
-                onPress={() => setActiveTab(i)}
-                activeOpacity={0.8}
-              >
-                <View style={s.childTabAvatar}>
-                  <Image source={AVATARS[c.avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                </View>
-                <Text style={[s.childTabLabel, i === activeTab && s.childTabLabelActive]}>{c.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
           <Text style={s.sectionLabel}>Suggested for {child.name} ({child.ageRange})</Text>
 
           <View style={{ gap: 10, marginTop: 8 }}>
