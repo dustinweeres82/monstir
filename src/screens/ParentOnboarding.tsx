@@ -466,6 +466,7 @@ function Step2AssignChores({
                     placeholder="e.g. Clean the car"
                     placeholderTextColor={colors.hint}
                     autoFocus
+                    autoCapitalize="sentences"
                     returnKeyType="done"
                     onSubmitEditing={addCustomChore}
                   />
