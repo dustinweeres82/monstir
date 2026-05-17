@@ -309,56 +309,140 @@ const sw = StyleSheet.create({
 // ─── Avatar picker + age range ────────────────────────────────────────────────
 
 const AGE_RANGES = ['Ages 4–6', 'Ages 7–9', 'Ages 10–12', 'Ages 13+'];
+const AVATAR_INDICES = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 
-function AvatarPickerSheet({ visible, selected, onSelect, onClose }: {
-  visible: boolean; selected: number;
-  onSelect: (idx: number) => void; onClose: () => void;
+function useSheet(initialY = 300) {
+  const [open, setOpen] = useState(false);
+  const scrimOpacity = useRef(new Animated.Value(0)).current;
+  const sheetY       = useRef(new Animated.Value(initialY)).current;
+
+  const openSheet = () => {
+    setOpen(true);
+    scrimOpacity.setValue(1);
+    sheetY.setValue(initialY);
+    Animated.spring(sheetY, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
+  };
+
+  const closeSheet = (cb?: () => void) => {
+    Animated.timing(sheetY, { toValue: initialY, duration: 220, useNativeDriver: true, easing: Easing.in(Easing.ease) }).start(() => {
+      setOpen(false);
+      cb?.();
+    });
+  };
+
+  return { open, openSheet, closeSheet, scrimOpacity, sheetY };
+}
+
+function AvatarPickerSheet({ selected, onSelect }: {
+  selected: number;
+  onSelect: (idx: number) => void;
 }) {
-  const sheetY = useRef(new Animated.Value(400)).current;
-
-  const open  = () => Animated.spring(sheetY, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
-  const close = (cb?: () => void) =>
-    Animated.timing(sheetY, { toValue: 400, duration: 220, useNativeDriver: true, easing: Easing.in(Easing.ease) }).start(() => { onClose(); cb?.(); });
+  const { open, openSheet, closeSheet, scrimOpacity, sheetY } = useSheet();
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={() => close()} onShow={open}>
-      <View style={av.scrim}>
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => close()} />
-        <Animated.View style={[av.sheet, { transform: [{ translateY: sheetY }] }]} onStartShouldSetResponder={() => true}>
-          <View style={av.handle} />
-          <Text style={av.title}>Choose avatar</Text>
-          <FlatList
-            data={[0,1,2,3,4,5,6,7]}
-            keyExtractor={String}
-            numColumns={4}
-            scrollEnabled={false}
-            contentContainerStyle={av.grid}
-            renderItem={({ item: idx }) => (
-              <TouchableOpacity
-                style={[av.cell, selected === idx && av.cellActive]}
-                onPress={() => { onSelect(idx); close(); }}
-                activeOpacity={0.8}
-              >
-                <Image source={getAvatarImage(idx)} style={av.cellImg} resizeMode="cover" />
-              </TouchableOpacity>
-            )}
-          />
-          <View style={{ height: Platform.OS === 'ios' ? 28 : 12 }} />
+    <>
+      <TouchableOpacity style={av.trigger} onPress={openSheet} activeOpacity={0.8}>
+        <Image source={getAvatarImage(selected)} style={av.triggerImg} resizeMode="cover" />
+      </TouchableOpacity>
+
+      <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet()}>
+        <Animated.View style={[av.scrim, { opacity: scrimOpacity }]}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => closeSheet()} />
+          <Animated.View style={[av.sheet, { transform: [{ translateY: sheetY }] }]} onStartShouldSetResponder={() => true}>
+            <View style={av.handle} />
+            <Text style={av.title}>Choose avatar</Text>
+            <View style={av.grid}>
+              {AVATAR_INDICES.map(idx => (
+                <TouchableOpacity
+                  key={idx}
+                  style={[av.cell, selected === idx && av.cellActive]}
+                  onPress={() => { onSelect(idx); closeSheet(); }}
+                  activeOpacity={0.8}
+                >
+                  <Image source={getAvatarImage(idx)} style={av.cellImg} resizeMode="cover" />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={{ height: Platform.OS === 'ios' ? 28 : 12 }} />
+          </Animated.View>
         </Animated.View>
-      </View>
-    </Modal>
+      </Modal>
+    </>
   );
 }
 
+function AgeRangeSheet({ selected, onSelect }: {
+  selected: string;
+  onSelect: (range: string) => void;
+}) {
+  const { open, openSheet, closeSheet, scrimOpacity, sheetY } = useSheet();
+
+  function handlePress() {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: [...AGE_RANGES, 'Cancel'], cancelButtonIndex: AGE_RANGES.length, title: 'Age range' },
+        (i) => { if (i < AGE_RANGES.length) onSelect(AGE_RANGES[i]); },
+      );
+    } else {
+      openSheet();
+    }
+  }
+
+  return (
+    <>
+      <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
+        <Text style={av.ageLabel}>{selected} ▾</Text>
+      </TouchableOpacity>
+
+      <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet()}>
+        <Animated.View style={[av.scrim, { opacity: scrimOpacity }]}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => closeSheet()} />
+          <Animated.View style={[av.sheet, { transform: [{ translateY: sheetY }] }]} onStartShouldSetResponder={() => true}>
+            <View style={av.handle} />
+            <Text style={av.title}>Age range</Text>
+            {AGE_RANGES.map((range, i) => (
+              <TouchableOpacity
+                key={range}
+                style={[av.ageRow, i < AGE_RANGES.length - 1 && av.ageRowBorder]}
+                activeOpacity={0.7}
+                onPress={() => closeSheet(() => onSelect(range))}
+              >
+                <Text style={[av.ageRowLabel, selected === range && av.ageRowLabelActive]}>{range}</Text>
+                {selected === range && <Text style={av.ageCheck}>✓</Text>}
+              </TouchableOpacity>
+            ))}
+            <View style={{ height: Platform.OS === 'ios' ? 28 : 12 }} />
+          </Animated.View>
+        </Animated.View>
+      </Modal>
+    </>
+  );
+}
+
+const PURPLE = '#6B35F0';
+
 const av = StyleSheet.create({
+  // Avatar trigger
+  trigger:    { width: 50, height: 50, borderRadius: 25, overflow: 'hidden', borderWidth: 2.5, borderColor: '#1A1A1A', backgroundColor: '#fff' },
+  triggerImg: { width: '100%', height: '100%' },
+  // Age range trigger
+  ageLabel:   { fontSize: 13, fontWeight: '600', color: '#1A1A1A', opacity: 0.55 },
+  // Shared sheet chrome
   scrim:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet:      { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  title:      { fontSize: 12, fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10 },
-  grid:       { paddingHorizontal: 16, gap: 10 },
-  cell:       { flex: 1, margin: 5, aspectRatio: 1, borderRadius: 14, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
-  cellActive: { borderColor: '#6B35F0' },
+  title:      { fontSize: 12, fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
+  // Avatar grid
+  grid:       { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
+  cell:       { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: 14, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
+  cellActive: { borderColor: PURPLE },
   cellImg:    { width: '100%', height: '100%' },
+  // Age range rows
+  ageRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16 },
+  ageRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
+  ageRowLabel:  { flex: 1, fontSize: 17, fontWeight: '600', color: '#1A1A1A' },
+  ageRowLabelActive: { color: PURPLE },
+  ageCheck:     { fontSize: 17, color: PURPLE, fontWeight: '700' },
 });
 
 function ChoreIcon({ icon, size }: { icon: string | number; size: number }) {
@@ -518,18 +602,8 @@ function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent,
   const [dbgMonsterSize,  setDbgMonsterSize]  = useState(300);
   const [dbgPlatformSize, setDbgPlatformSize] = useState(340);
   const [dbgPlatformY,    setDbgPlatformY]    = useState(0);
-  const [kidAvatarIdx,    setKidAvatarIdx]    = useState(0);
-  const [kidAgeRange,     setKidAgeRange]     = useState('Ages 7–9');
-  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
-
-  function openAgeSheet() {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: [...AGE_RANGES, 'Cancel'], cancelButtonIndex: AGE_RANGES.length, title: 'Age range' },
-        (i) => { if (i < AGE_RANGES.length) setKidAgeRange(AGE_RANGES[i]); },
-      );
-    }
-  }
+  const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
+  const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
 
   // Monster idle bob
   const bobAnim = useRef(new Animated.Value(0)).current;
@@ -599,10 +673,8 @@ function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent,
       {/* Header */}
       <View style={s.homeHeader}>
         <View style={s.homeHeaderLeft}>
-          <TouchableOpacity style={s.homeAvatar} onPress={() => setAvatarPickerOpen(true)} activeOpacity={0.8}>
-            <Image source={getAvatarImage(kidAvatarIdx)} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-          </TouchableOpacity>
-          <View style={{ gap: 1 }}>
+          <AvatarPickerSheet selected={kidAvatarIdx} onSelect={setKidAvatarIdx} />
+          <View style={{ gap: 2 }}>
             <ViewSwitcher
               selected="Kid view"
               options={[
@@ -611,9 +683,7 @@ function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent,
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); }}
             />
-            <TouchableOpacity onPress={openAgeSheet} activeOpacity={0.7}>
-              <Text style={s.homeAgeRange}>{kidAgeRange} ▾</Text>
-            </TouchableOpacity>
+            <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
           </View>
         </View>
         <View style={s.homeBalancePill}>
@@ -794,12 +864,6 @@ function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent,
         </TouchableOpacity>
       )}
 
-      <AvatarPickerSheet
-        visible={avatarPickerOpen}
-        selected={kidAvatarIdx}
-        onSelect={setKidAvatarIdx}
-        onClose={() => setAvatarPickerOpen(false)}
-      />
     </View>
   );
 }
@@ -3238,9 +3302,7 @@ const s = StyleSheet.create({
   homeRoot:           { flex: 1, backgroundColor: 'transparent' },
   homeHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
   homeHeaderLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  homeAvatar:         { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', overflow: 'hidden' },
   homeKidView:        { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
-  homeAgeRange:       { fontSize: 13, fontWeight: '600', color: '#1A1A1A', opacity: 0.5 },
   homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
   homeBalanceText:    { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 },
