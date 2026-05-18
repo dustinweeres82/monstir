@@ -150,7 +150,7 @@ function BackButton({ onPress }: { onPress: () => void }) {
 function StepWelcome({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   return (
     <KidSafeScreen>
-      <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 44 }}>
         <Text style={s.chooseHeading}>Let's create{'\n'}your profile!</Text>
         <Text style={s.chooseSubtitle}>This helps personalize your Monstir experience.</Text>
       </View>
@@ -175,7 +175,7 @@ function StepName({ onNext, onBack, name, setName }: {
 }) {
   return (
     <KidSafeScreen>
-      <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 44 }}>
         <BackButton onPress={onBack} />
         <Text style={s.chooseHeading}>What's your{'\n'}name?</Text>
         <Text style={s.chooseSubtitle}>We'll use this to personalise your experience.</Text>
@@ -245,7 +245,7 @@ function StepAge({ onNext, onBack, ageRange, setAgeRange }: {
 
   return (
     <KidSafeScreen>
-      <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 44 }}>
         <BackButton onPress={onBack} />
         <Text style={s.chooseHeading}>How old{'\n'}are you?</Text>
         <Text style={s.chooseSubtitle}>This helps us set the right difficulty.</Text>
@@ -315,7 +315,7 @@ function StepAvatar({ onNext, onBack, avatarIdx, setAvatarIdx, accentColor, setA
 
   return (
     <KidSafeScreen>
-      <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 44 }}>
         <BackButton onPress={onBack} />
         <Text style={s.chooseHeading}>Pick your{'\n'}avatar.</Text>
         <Text style={s.chooseSubtitle}>Tap to choose.</Text>
@@ -418,7 +418,7 @@ function StepMonsterCarousel({ onChoose, onBack }: {
   return (
     <KidSafeScreen>
       {/* Header */}
-      <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 44 }}>
         <BackButton onPress={onBack} />
         <Text style={s.chooseHeading}>Choose your{'\n'}monster.</Text>
         <Text style={s.chooseSubtitle}>It grows as you do chores.</Text>
@@ -539,7 +539,7 @@ function StepMonsterName({ onNext, onBack, nickname, setNickname, monsterKey }: 
 
   return (
     <KidSafeScreen>
-      <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 44 }}>
         <BackButton onPress={onBack} />
         <Text style={s.chooseHeading}>Name your{'\n'}monster.</Text>
         <Text style={s.chooseSubtitle}>Give your monster a cool name!</Text>
@@ -588,7 +588,7 @@ function StepItsOfficial({ onDone, onBack, monsterKey, nickname, avatarIdx }: {
 
   return (
     <KidSafeScreen>
-      <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 44 }}>
         <BackButton onPress={onBack} />
         <Text style={s.chooseHeading}>It's official!</Text>
         <Text style={s.chooseSubtitle}>You and {dispName} are a team now!</Text>

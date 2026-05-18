@@ -126,7 +126,7 @@ function makeChild(index: number): OnboardingChild {
 
 function StepHeader({ step, total, title, subtitle }: { step: number; total: number; title: string; subtitle: string }) {
   return (
-    <View style={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 }}>
+    <View style={{ paddingHorizontal: 24, paddingTop: 48, paddingBottom: 4 }}>
       <Text style={s.stepCounter}>{step} OF {total}</Text>
       <Text style={s.heading}>{title}</Text>
       <Text style={s.subtitle}>{subtitle}</Text>
@@ -386,7 +386,7 @@ function Step2AssignChores({
   return (
     <CreamBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <View style={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 }}>
+        <View style={{ paddingHorizontal: 24, paddingTop: 48, paddingBottom: 4 }}>
           <Text style={s.stepCounter}>2 OF 4</Text>
           <Text style={s.heading}>Assign chores</Text>
           <Text style={s.subtitle}>Tailored for each child's age.</Text>
