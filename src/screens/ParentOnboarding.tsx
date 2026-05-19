@@ -579,7 +579,7 @@ function Step4AllSet({
           ))}
 
           <Image
-            source={require('../../assets/robot monstir/robot_popout.png')}
+            source={require('../../assets/monstirs/robot monstir/robot_popout.png')}
             style={{ width: 180, height: 180, alignSelf: 'center', marginTop: 16 }}
             resizeMode="contain"
           />

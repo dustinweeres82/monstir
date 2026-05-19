@@ -93,7 +93,7 @@ const STARTER_MONSTERS = [
     name: 'Botling',
     type: 'Tech ⚡',
     description: 'Smart and precise,\nloves a challenge.',
-    image: require('../../assets/robot monstir/robot_1.png'),
+    image: require('../../assets/monstirs/robot monstir/robot_1.png'),
     stats: { power: 0.8, speed: 0.4, defence: 0.8 },
   },
   {
@@ -101,7 +101,7 @@ const STARTER_MONSTERS = [
     name: 'Robo Jr.',
     type: 'Tech ⚡',
     description: 'Zippy and energetic,\nalways on the move!',
-    image: require('../../assets/robot monstir/robot_2.png'),
+    image: require('../../assets/monstirs/robot monstir/robot_2.png'),
     stats: { power: 0.9, speed: 0.55, defence: 0.85 },
   },
   {
@@ -109,7 +109,7 @@ const STARTER_MONSTERS = [
     name: 'Flamer',
     type: 'Fire 🔥',
     description: 'Blazing fast and\nfull of heart!',
-    image: require('../../assets/flamer/flamer_2.png'),
+    image: require('../../assets/monstirs/flamer/flamer_2.png'),
     stats: { power: 1.0, speed: 0.6, defence: 0.4 },
   },
 ];
@@ -156,7 +156,7 @@ function StepWelcome({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
       </View>
       <View style={s.content}>
         <Image
-          source={require('../../assets/robot monstir/robot_popout.png')}
+          source={require('../../assets/monstirs/robot monstir/robot_popout.png')}
           style={{ width: 160, height: 160 }}
           resizeMode="contain"
         />

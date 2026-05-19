@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, Platform, Image, TextInput, Switch, Modal,
-  Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList,
+  Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
 } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import Svg, { Ellipse, Circle, Path, Polygon, Line, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
@@ -11,7 +11,17 @@ import { MascotBanner } from './src/components/MascotBanner';
 import { CreamBg } from './src/components/CreamBg';
 import { KidProfileCreation, getAvatarImage } from './src/screens/KidProfileCreation';
 import { ParentOnboarding } from './src/screens/ParentOnboarding';
-import { shadows } from './src/design-system/tokens';
+import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
+import { shadows, scale } from './src/design-system/tokens';
+import * as Clipboard from 'expo-clipboard';
+
+// ─── Disable system accessibility font scaling globally ───────────────────────
+// Our scale() utility handles all proportional sizing; allowing the OS to also
+// scale fonts causes double-scaling on accessibility text-size settings.
+// @ts-ignore
+Text.defaultProps = { ...(Text.defaultProps ?? {}), allowFontScaling: false };
+// @ts-ignore
+TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: false };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,28 +144,63 @@ function battleScript(monsterName: string, bossName: string, won: boolean) {
   ];
 }
 
-// ─── Monster images (robot evolutions 1–8) ───────────────────────────────────
+// ─── Monster images ───────────────────────────────────────────────────────────
 
-const ROBOT_IMAGES = [
-  require('./assets/robot monstir/robot_1.png'),
-  require('./assets/robot monstir/robot_2.png'),
-  require('./assets/robot monstir/robot_3.png'),
-  require('./assets/robot monstir/robot_4.png'),
-  require('./assets/robot monstir/robot_5.png'),
-  require('./assets/robot monstir/robot_6.png'),
-  require('./assets/robot monstir/robot_7.png'),
-  require('./assets/robot monstir/robot_8.png'),
+type MonsterId = 'slime' | 'robot' | 'flamer';
+
+const SLIME_IMAGES = [
+  require('./assets/monstirs/slime/slimer_1.png'),
+  require('./assets/monstirs/slime/slimer_2.png'),
+  require('./assets/monstirs/slime/slimer_3.png'),
+  require('./assets/monstirs/slime/slimer_4.png'),
+  require('./assets/monstirs/slime/slimer_5.png'),
+  require('./assets/monstirs/slime/slimer_6.png'),
+  require('./assets/monstirs/slime/slimer_7.png'),
+  require('./assets/monstirs/slime/slimer_8.png'),
 ];
 
-function RobotMonster({ idx, size = 90 }: { idx: MonsterIdx; size?: number }) {
-  return (
-    <Image
-      source={ROBOT_IMAGES[idx]}
-      style={{ width: size, height: size }}
-      resizeMode="contain"
-    />
-  );
-}
+const ROBOT_IMAGES = [
+  require('./assets/monstirs/robot monstir/robot_1.png'),
+  require('./assets/monstirs/robot monstir/robot_2.png'),
+  require('./assets/monstirs/robot monstir/robot_3.png'),
+  require('./assets/monstirs/robot monstir/robot_4.png'),
+  require('./assets/monstirs/robot monstir/robot_5.png'),
+  require('./assets/monstirs/robot monstir/robot_6.png'),
+  require('./assets/monstirs/robot monstir/robot_7.png'),
+  require('./assets/monstirs/robot monstir/robot_8.png'),
+];
+
+const FLAMER_IMAGES = [
+  require('./assets/monstirs/flamer/flamer_1.png'),
+  require('./assets/monstirs/flamer/flamer_2.png'),
+  require('./assets/monstirs/flamer/flamer_3.png'),
+  require('./assets/monstirs/flamer/flamer_4.png'),
+  require('./assets/monstirs/flamer/flamer_5.png'),
+  require('./assets/monstirs/flamer/flamer_6.png'),
+  require('./assets/monstirs/flamer/flamer_7.png'),
+  require('./assets/monstirs/flamer/flamer_8.png'),
+];
+
+/** All 8 evolution images keyed by selected monster */
+const MONSTER_IMAGES_BY_KIND: Record<MonsterId, typeof SLIME_IMAGES> = {
+  slime:  SLIME_IMAGES,
+  robot:  ROBOT_IMAGES,
+  flamer: FLAMER_IMAGES,
+};
+
+/** Platform image for each monster */
+const PLATFORM_BY_KIND: Record<MonsterId, number> = {
+  slime:  require('./assets/platforms/platformSlime.png'),
+  robot:  require('./assets/platforms/platformRobot.png'),
+  flamer: require('./assets/platforms/platformLava.png'),
+};
+
+/** width / height aspect ratio for each platform image */
+const PLATFORM_ASPECT_BY_KIND: Record<MonsterId, number> = {
+  slime:  672 / 448,   // platformSlime.png natural dims
+  robot:  340 / 230,   // platformRobot.png natural dims
+  flamer: 672 / 448,   // platformLava.png — update if different
+};
 
 // Boss SVGs — spikier and more intimidating
 
@@ -213,16 +258,10 @@ function BossVorthak({ size = 90 }: { size?: number }) {
   );
 }
 
-const MONSTER_SVGS: Array<(props: { size?: number }) => React.JSX.Element> = [
-  ({ size }) => <RobotMonster idx={0} size={size} />,
-  ({ size }) => <RobotMonster idx={1} size={size} />,
-  ({ size }) => <RobotMonster idx={2} size={size} />,
-  ({ size }) => <RobotMonster idx={3} size={size} />,
-  ({ size }) => <RobotMonster idx={4} size={size} />,
-  ({ size }) => <RobotMonster idx={5} size={size} />,
-  ({ size }) => <RobotMonster idx={6} size={size} />,
-  ({ size }) => <RobotMonster idx={7} size={size} />,
-];
+/** Returns the right image for a given monster kind + evolution level */
+function monsterImgSrc(kind: MonsterId, idx: MonsterIdx) {
+  return MONSTER_IMAGES_BY_KIND[kind][idx];
+}
 const BOSS_SVGS = [BossGrumbloth, BossMireflax, BossVorthak];
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -275,7 +314,7 @@ function ViewSwitcher({ selected, options, onSelect, dark = false }: {
                   onPress={() => closeSheet(() => onSelect(opt))}
                 >
                   <View style={[sw.optionAvatar, { backgroundColor: opt.bg }]}>
-                    <Text style={{ fontSize: 18 }}>{opt.emoji}</Text>
+                    <Text style={{ fontSize: scale(18) }}>{opt.emoji}</Text>
                   </View>
                   <Text style={[sw.optionLabel, active && sw.optionLabelActive]}>{opt.label}</Text>
                   {active && <Text style={sw.check}>✓</Text>}
@@ -291,18 +330,18 @@ function ViewSwitcher({ selected, options, onSelect, dark = false }: {
 }
 
 const sw = StyleSheet.create({
-  trigger:         { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
+  trigger:         { fontSize: scale(18), fontWeight: '700', color: '#1A1A1A' },
   triggerDark:     { color: '#1A1A1A' },
   scrim:           { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet:           { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   sheetHandle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  sheetTitle:      { fontSize: 12, fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10 },
+  sheetTitle:      { fontSize: scale(12), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10 },
   option:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   optionBorder:    { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
   optionAvatar:    { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  optionLabel:     { flex: 1, fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  optionLabel:     { flex: 1, fontSize: scale(16), fontWeight: '600', color: '#1A1A1A' },
   optionLabelActive: { color: '#6B35F0' },
-  check:           { fontSize: 16, color: '#6B35F0', fontWeight: '700' },
+  check:           { fontSize: scale(16), color: '#6B35F0', fontWeight: '700' },
 });
 
 
@@ -426,12 +465,12 @@ const av = StyleSheet.create({
   trigger:    { width: 50, height: 50, borderRadius: 25, overflow: 'hidden', borderWidth: 2.5, borderColor: '#1A1A1A', backgroundColor: '#fff' },
   triggerImg: { width: '100%', height: '100%' },
   // Age range trigger
-  ageLabel:   { fontSize: 13, fontWeight: '600', color: '#1A1A1A', opacity: 0.55 },
+  ageLabel:   { fontSize: scale(13), fontWeight: '600', color: '#1A1A1A', opacity: 0.55 },
   // Shared sheet chrome
   scrim:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet:      { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  title:      { fontSize: 12, fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
+  title:      { fontSize: scale(12), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
   // Avatar grid
   grid:       { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
   cell:       { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: 14, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
@@ -440,9 +479,9 @@ const av = StyleSheet.create({
   // Age range rows
   ageRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16 },
   ageRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
-  ageRowLabel:  { flex: 1, fontSize: 17, fontWeight: '600', color: '#1A1A1A' },
+  ageRowLabel:  { flex: 1, fontSize: scale(17), fontWeight: '600', color: '#1A1A1A' },
   ageRowLabelActive: { color: PURPLE },
-  ageCheck:     { fontSize: 17, color: PURPLE, fontWeight: '700' },
+  ageCheck:     { fontSize: scale(17), color: PURPLE, fontWeight: '700' },
 });
 
 function ChoreIcon({ icon, size }: { icon: string | number; size: number }) {
@@ -569,7 +608,7 @@ function AnimatedQuestRow({ chore, done, onPress, baseRate }: { chore: Chore; do
       <View style={s.homeQuestInfo}>
         <Text style={[s.homeQuestTitle, done && s.homeQuestTitleDone]}>{chore.name}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Text style={{ fontSize: 14 }}>🪙</Text>
+          <Text style={{ fontSize: scale(14) }}>🪙</Text>
           <Text style={s.homeQuestReward}>{fmtCoins(choreCoins(chore, baseRate))}</Text>
         </View>
       </View>
@@ -582,26 +621,25 @@ function AnimatedQuestRow({ chore, done, onPress, baseRate }: { chore: Chore; do
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent, onDebugSetXp, onDebugSetMonster, onResetApp, baseRate }: {
-  monsterIdx: MonsterIdx; xp: number; coins: number;
+function HomeScreen({ monsterIdx, monsterName, xp, coins, done, onComplete, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate }: {
+  monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   done: Partial<Record<ChoreId, boolean>>; onComplete: (c: Chore) => void;
   onSwitchToParent: () => void;
-  onDebugSetXp: (xp: number) => void;
-  onDebugSetMonster: (idx: MonsterIdx) => void;
-  onResetApp: (mode: AppMode) => void;
+  onOpenDebug: () => void;
+  dbgMonsterSize: number;
+  dbgMonsterY: number;
+  dbgPlatformSize: number;
+  dbgPlatformY: number;
+  monsterImg: number;
+  platformImg: number;
+  platformAspect: number;
   baseRate: string;
 }) {
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
   const pct        = Math.min(100, Math.round((xp / need) * 100));
-  const MonsterSvg = MONSTER_SVGS[monsterIdx];
   const remaining  = CHORES.filter(c => !done[c.id]).length;
   const dollars    = (coins / 100).toFixed(2);
-  const [debugOpen, setDebugOpen]             = useState(false);
-  const [debugTab,  setDebugTab]              = useState<'xp' | 'layout' | 'reset'>('xp');
-  const [dbgMonsterSize,  setDbgMonsterSize]  = useState(300);
-  const [dbgPlatformSize, setDbgPlatformSize] = useState(340);
-  const [dbgPlatformY,    setDbgPlatformY]    = useState(0);
   const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
 
@@ -688,7 +726,7 @@ function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent,
         </View>
         <View style={s.homeBalancePill}>
           <Text style={s.homeBalanceText}>${dollars}</Text>
-          <Text style={{ fontSize: 18 }}>🪙</Text>
+          <Text style={{ fontSize: scale(18) }}>🪙</Text>
         </View>
       </View>
 
@@ -697,22 +735,33 @@ function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent,
         <View style={s.homeCharCard}>
           <TouchableOpacity
             activeOpacity={1}
-            onLongPress={() => setDebugOpen(true)}
+            onLongPress={onOpenDebug}
             delayLongPress={600}
             style={{ overflow: 'visible' }}
           >
             <View style={s.homeCharImage}>
-              <View style={{ alignItems: 'center', transform: [{ translateY: dbgPlatformY }] }}>
-                <Animated.View style={{ alignItems: 'center', transform: [{ translateY: bobTranslate }, { scale: monsterScale }] }}>
-                  <View style={{ zIndex: 10, transform: [{ translateY: 20 }] }}><MonsterSvg size={dbgMonsterSize} /></View>
-                  <Image source={require('./assets/platforms/platformRobot.png')} style={{ width: dbgPlatformSize, height: dbgPlatformSize * (230 / 340), marginTop: -80, zIndex: 1 }} resizeMode="contain" />
-                </Animated.View>
-              </View>
+              {/* Outer bob wraps both monster + platform so they float together */}
+              <Animated.View style={{ alignItems: 'center', transform: [{ translateY: bobTranslate }, { scale: monsterScale }] }}>
+                {/* Monster — independent Y offset */}
+                <View style={{ transform: [{ translateY: dbgMonsterY }], zIndex: 2 }}>
+                  <Image
+                    source={monsterImg}
+                    style={{ width: dbgMonsterSize, height: dbgMonsterSize }}
+                    resizeMode="contain"
+                  />
+                </View>
+                {/* Platform — independent Y offset */}
+                <Image
+                  source={platformImg}
+                  style={{ width: dbgPlatformSize, height: dbgPlatformSize / platformAspect, marginTop: -60, zIndex: 1, transform: [{ translateY: dbgPlatformY }] }}
+                  resizeMode="contain"
+                />
+              </Animated.View>
             </View>
           </TouchableOpacity>
           <View style={s.homeCharInfo}>
             <View style={s.homeCharNameRow}>
-              <Text style={s.homeCharName}>{monster.name}</Text>
+              <Text style={s.homeCharName}>{monsterName || monster.name}</Text>
               <Text style={s.homeCharLevel}>LEVEL {monster.level}</Text>
             </View>
             <View style={s.homeXpTrack}>
@@ -760,109 +809,6 @@ function HomeScreen({ monsterIdx, xp, coins, done, onComplete, onSwitchToParent,
           </Animated.View>
         ))}
       </View>
-
-      {/* Debug overlay */}
-      {debugOpen && (
-        <TouchableOpacity style={s.debugScrim} activeOpacity={1} onPress={() => setDebugOpen(false)}>
-          <View onStartShouldSetResponder={() => true}>
-            <View style={s.debugPanel}>
-              <Text style={s.debugTitle}>🐛 Debug</Text>
-
-              {/* Tabs */}
-              <View style={s.debugTabs}>
-                {(['xp', 'layout', 'reset'] as const).map(t => (
-                  <TouchableOpacity key={t} style={[s.debugTab, debugTab === t && s.debugTabActive]} onPress={() => setDebugTab(t)}>
-                    <Text style={[s.debugTabText, debugTab === t && s.debugTabTextActive]}>
-                      {t === 'xp' ? 'XP' : t === 'layout' ? 'Layout' : 'Reset'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                {debugTab === 'xp' ? (
-                  <View style={{ gap: 12 }}>
-                    <Text style={s.debugSub}>Monster {monsterIdx + 1}/8 · {monster.name} · {xp}/{need} XP</Text>
-                    <Text style={s.debugSectionLabel}>JUMP TO EVOLUTION</Text>
-                    <View style={s.debugGrid}>
-                      {(MONSTERS as Monster[]).map((m, i) => (
-                        <TouchableOpacity
-                          key={i}
-                          style={[s.debugChip, monsterIdx === i && s.debugChipActive]}
-                          onPress={() => { onDebugSetMonster(i as MonsterIdx); onDebugSetXp(0); setDebugOpen(false); }}
-                        >
-                          <Text style={[s.debugChipText, monsterIdx === i && s.debugChipTextActive]}>
-                            {i + 1} · {m.name}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <Text style={s.debugSectionLabel}>TWEAK XP</Text>
-                    <View style={s.debugRow}>
-                      {[1, 5, 10, 50].map(n => (
-                        <TouchableOpacity key={`m${n}`} style={s.debugXpBtn} onPress={() => onDebugSetXp(Math.max(0, xp - n))}>
-                          <Text style={s.debugXpBtnTxt}>−{n}</Text>
-                        </TouchableOpacity>
-                      ))}
-                      {[1, 5, 10, 50].map(n => (
-                        <TouchableOpacity key={`p${n}`} style={[s.debugXpBtn, s.debugXpBtnGreen]} onPress={() => onDebugSetXp(xp + n)}>
-                          <Text style={s.debugXpBtnTxt}>+{n}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <TouchableOpacity style={s.debugMaxBtn} onPress={() => { onDebugSetXp(need); setDebugOpen(false); }}>
-                      <Text style={s.debugMaxTxt}>⚡ Trigger next evolution ({need - xp} XP needed)</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : debugTab === 'reset' ? (
-                  <View style={{ gap: 10 }}>
-                    <Text style={s.debugSectionLabel}>GO TO SCREEN</Text>
-                    {([
-                      { label: '👋  Onboarding',       mode: 'onboarding'  },
-                      { label: '🔑  Login',             mode: 'login'       },
-                      { label: '📝  Sign Up',           mode: 'signup'      },
-                      { label: '👨‍👩‍👧  Parent Setup',      mode: 'parentOnboarding' },
-                      { label: '🧒  Kid Profile Setup', mode: 'kidProfile'  },
-                    ] as { label: string; mode: AppMode }[]).map(({ label, mode }) => (
-                      <TouchableOpacity
-                        key={mode}
-                        style={s.debugResetBtn}
-                        onPress={() => { onResetApp(mode); setDebugOpen(false); }}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={s.debugResetTxt}>{label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ) : (
-                  <View style={{ gap: 12 }}>
-                    {([
-                      { label: 'MONSTER SIZE', value: dbgMonsterSize, set: setDbgMonsterSize, steps: [-20, -5, 5, 20], min: 50 },
-                      { label: 'PLATFORM SIZE', value: dbgPlatformSize, set: setDbgPlatformSize, steps: [-20, -5, 5, 20], min: 20 },
-                      { label: 'PLATFORM Y', value: dbgPlatformY, set: setDbgPlatformY, steps: [-10, -2, 2, 10], min: -500 },
-                    ] as { label: string; value: number; set: React.Dispatch<React.SetStateAction<number>>; steps: number[]; min: number }[]).map(({ label, value, set, steps, min }) => (
-                      <View key={label}>
-                        <Text style={s.debugSectionLabel}>{label}  <Text style={{ color: '#C5F215' }}>{value}px</Text></Text>
-                        <View style={s.debugRow}>
-                          {steps.map(n => (
-                            <TouchableOpacity key={n} style={[s.debugXpBtn, n > 0 && s.debugXpBtnGreen]} onPress={() => set((v: number) => Math.max(min, v + n))}>
-                              <Text style={s.debugXpBtnTxt}>{n > 0 ? `+${n}` : n}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </ScrollView>
-
-              <TouchableOpacity style={s.debugCloseBtn} onPress={() => setDebugOpen(false)}>
-                <Text style={s.debugCloseTxt}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </TouchableOpacity>
-      )}
 
     </View>
   );
@@ -927,12 +873,11 @@ function BattleScreen({ monsterIdx, coins, done, onStartBattle }: {
   );
 }
 
-function ArenaScreen({ monsterIdx, logText, logBold }: {
-  monsterIdx: MonsterIdx; logText: string; logBold: boolean;
+function ArenaScreen({ monsterIdx, logText, logBold, monsterImg }: {
+  monsterIdx: MonsterIdx; logText: string; logBold: boolean; monsterImg: number;
 }) {
   const monster    = MONSTERS[monsterIdx];
   const boss       = BOSSES[monsterIdx % BOSSES.length];
-  const MonsterSvg = MONSTER_SVGS[monsterIdx];
   const BossSvg    = BOSS_SVGS[monsterIdx % BOSS_SVGS.length];
 
   return (
@@ -941,7 +886,9 @@ function ArenaScreen({ monsterIdx, logText, logBold }: {
       <View style={s.arenaStage}>
         <View style={s.arenaVs}>
           <View style={s.arenaFighter}>
-            <View style={[s.monsterBubble, { width: 80, height: 80, backgroundColor: C.bg }]}><MonsterSvg size={64} /></View>
+            <View style={[s.monsterBubble, { width: 80, height: 80, backgroundColor: C.bg }]}>
+              <Image source={monsterImg} style={{ width: 64, height: 64 }} resizeMode="contain" />
+            </View>
             <Text style={s.arenaName}>{monster.name.toUpperCase()}</Text>
           </View>
           <Text style={s.arenaVsLabel}>VS</Text>
@@ -958,12 +905,11 @@ function ArenaScreen({ monsterIdx, logText, logBold }: {
   );
 }
 
-function ResultScreen({ monsterIdx, won, bonusCoins, onDone }: {
-  monsterIdx: MonsterIdx; won: boolean; bonusCoins: number; onDone: () => void;
+function ResultScreen({ monsterIdx, won, bonusCoins, onDone, monsterImg }: {
+  monsterIdx: MonsterIdx; won: boolean; bonusCoins: number; onDone: () => void; monsterImg: number;
 }) {
   const monster    = MONSTERS[monsterIdx];
   const boss       = BOSSES[monsterIdx % BOSSES.length];
-  const MonsterSvg = MONSTER_SVGS[monsterIdx];
 
   return (
     <>
@@ -973,7 +919,7 @@ function ResultScreen({ monsterIdx, won, bonusCoins, onDone }: {
         <Text style={s.resultH}>{won ? 'You won!' : 'You lost.'}</Text>
         <Text style={s.resultSub}>{won ? `${monster.name} defeated ${boss.name}` : `${boss.name} was too powerful`}</Text>
         <View style={[s.monsterBubble, { width: 110, height: 110, backgroundColor: won ? C.win : C.loss }]}>
-          <MonsterSvg size={88} />
+          <Image source={monsterImg} style={{ width: 88, height: 88 }} resizeMode="contain" />
         </View>
         <Text style={s.resultCoins}>+{bonusCoins}¢</Text>
         <Text style={s.resultCoinsLbl}>{won ? 'added to your wallet' : 'consolation prize added'}</Text>
@@ -1005,7 +951,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate }: {
           </View>
           <Text style={[s.sectionLabel, { paddingHorizontal: 2, paddingTop: 4, backgroundColor: 'transparent' }]}>EARNED FROM CHORES</Text>
           {completedChores.length === 0
-            ? <Text style={{ fontSize: 12, color: C.hint, textAlign: 'center', paddingVertical: 16 }}>No chores completed yet</Text>
+            ? <Text style={{ fontSize: scale(12), color: C.hint, textAlign: 'center', paddingVertical: 16 }}>No chores completed yet</Text>
             : completedChores.map(c => (
               <View key={c.id} style={s.walletRow}>
                 <View style={[s.choreIcon, { backgroundColor: c.bg, width: 30, height: 30, borderRadius: 8 }]}>
@@ -1019,7 +965,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate }: {
           {battleResult && bonusCoins !== null && (
             <View style={s.walletRow}>
               <View style={[s.choreIcon, { backgroundColor: battleResult === 'win' ? C.win : C.loss, width: 30, height: 30, borderRadius: 8 }]}>
-                <Text style={{ fontSize: 14 }}>{battleResult === 'win' ? '⚔' : '🛡'}</Text>
+                <Text style={{ fontSize: scale(14) }}>{battleResult === 'win' ? '⚔' : '🛡'}</Text>
               </View>
               <Text style={s.walletRowName}>Battle {battleResult} vs {boss.name}</Text>
               <Text style={s.walletRowCoins}>+{fmtCoins(bonusCoins)}</Text>
@@ -1032,11 +978,11 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate }: {
   );
 }
 
-function EvolveScreen({ fromIdx, onDone }: { fromIdx: MonsterIdx; onDone: () => void }) {
-  const toIdx   = Math.min(fromIdx + 1, 7) as MonsterIdx;
-  const toM     = MONSTERS[toIdx];
-  const FromSvg = MONSTER_SVGS[fromIdx];
-  const ToSvg   = MONSTER_SVGS[toIdx];
+function EvolveScreen({ fromIdx, onDone, monsterId }: { fromIdx: MonsterIdx; onDone: () => void; monsterId: MonsterId }) {
+  const toIdx     = Math.min(fromIdx + 1, 7) as MonsterIdx;
+  const toM       = MONSTERS[toIdx];
+  const fromImg   = monsterImgSrc(monsterId, fromIdx);
+  const toImg     = monsterImgSrc(monsterId, toIdx);
 
   const { width: W, height: H } = Dimensions.get('window');
   const cx        = W / 2;
@@ -1277,7 +1223,7 @@ function EvolveScreen({ fromIdx, onDone }: { fromIdx: MonsterIdx; onDone: () => 
           transform: [{ scale: v.monsterScale }, { translateX: v.shakeX }, { translateY: v.shakeY }],
         }}>
           <View style={{ flex: 1, borderRadius: 100, backgroundColor: 'rgba(168,85,247,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <FromSvg size={180} />
+            <Image source={fromImg} style={{ width: 180, height: 180 }} resizeMode="contain" />
           </View>
         </View>
       )}
@@ -1291,7 +1237,7 @@ function EvolveScreen({ fromIdx, onDone }: { fromIdx: MonsterIdx; onDone: () => 
           transform: [{ scale: v.newMonsterScale }],
         }}>
           <View style={{ flex: 1, borderRadius: 160, backgroundColor: 'rgba(197,242,21,0.12)', borderWidth: 3, borderColor: '#C5F215', alignItems: 'center', justifyContent: 'center' }}>
-            <ToSvg size={300} />
+            <Image source={toImg} style={{ width: 300, height: 300 }} resizeMode="contain" />
           </View>
         </View>
       )}
@@ -1299,8 +1245,8 @@ function EvolveScreen({ fromIdx, onDone }: { fromIdx: MonsterIdx; onDone: () => 
       {/* EVOLVED! banner */}
       {v.bannerOpacity > 0.01 && (
         <View style={{ position: 'absolute', bottom: 200, left: 0, right: 0, alignItems: 'center', opacity: v.bannerOpacity }}>
-          <Text style={{ fontSize: 52, fontWeight: '900', color: '#C5F215', letterSpacing: -1 }}>EVOLVED!</Text>
-          <Text style={{ fontSize: 15, color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>{toM.name} · Level {toM.level}</Text>
+          <Text style={{ fontSize: scale(52), fontWeight: '900', color: '#C5F215', letterSpacing: -1 }}>EVOLVED!</Text>
+          <Text style={{ fontSize: scale(15), color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>{toM.name} · Level {toM.level}</Text>
         </View>
       )}
 
@@ -1354,7 +1300,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid }: {
       <View style={p.homeHeader}>
         <View style={p.homeHeaderLeft}>
           <View style={p.homeAvatar}>
-            <Text style={{ fontSize: 24 }}>👩</Text>
+            <Text style={{ fontSize: scale(24) }}>👩</Text>
           </View>
           <ViewSwitcher
             selected="Parent view"
@@ -1367,7 +1313,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid }: {
           />
         </View>
         <TouchableOpacity style={p.homeBell} activeOpacity={0.7}>
-          <Text style={{ fontSize: 22 }}>🔔</Text>
+          <Text style={{ fontSize: scale(22) }}>🔔</Text>
         </TouchableOpacity>
       </View>
 
@@ -1378,38 +1324,38 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid }: {
           {kids.map(kid => (
             <TouchableOpacity key={kid.name} style={{ alignItems: 'center', gap: 6 }} activeOpacity={0.7}>
               <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: kid.bg, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW }}>
-                <Text style={{ fontSize: 34 }}>{kid.emoji}</Text>
+                <Text style={{ fontSize: scale(34) }}>{kid.emoji}</Text>
               </View>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#1A1A1A' }}>{kid.name}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: '#6B35F0' }}>Level {kid.level}</Text>
+              <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' }}>{kid.name}</Text>
+              <Text style={{ fontSize: scale(12), fontWeight: '600', color: '#6B35F0' }}>Level {kid.level}</Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} activeOpacity={0.7} onPress={onAddKid}>
             <View style={{ width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: '#D0CEC8', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontSize: 28, color: '#ABABAB' }}>+</Text>
+              <Text style={{ fontSize: scale(28), color: '#ABABAB' }}>+</Text>
             </View>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#ABABAB' }}>Add kid</Text>
+            <Text style={{ fontSize: scale(14), fontWeight: '600', color: '#ABABAB' }}>Add kid</Text>
           </TouchableOpacity>
         </ScrollView>
 
         {/* This week's overview */}
         <View style={[p.sectionCard, { marginHorizontal: 16, marginBottom: 12 }]}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A1A' }}>This week's overview</Text>
-            <TouchableOpacity activeOpacity={0.7}><Text style={{ fontSize: 14, fontWeight: '600', color: '#6B35F0' }}>View report ›</Text></TouchableOpacity>
+            <Text style={{ fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}>This week's overview</Text>
+            <TouchableOpacity activeOpacity={0.7}><Text style={{ fontSize: scale(14), fontWeight: '600', color: '#6B35F0' }}>View report ›</Text></TouchableOpacity>
           </View>
           <View style={{ flexDirection: 'row', gap: 16 }}>
             <View style={{ flex: 1, gap: 8 }}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: '#ABABAB' }}>Tasks completed</Text>
-              <Text style={{ fontSize: 28, fontWeight: '900', color: '#1A1A1A' }}>{tasksCompleted} <Text style={{ fontSize: 18, color: '#ABABAB' }}>/ {tasksTotal}</Text></Text>
+              <Text style={{ fontSize: scale(12), fontWeight: '600', color: '#ABABAB' }}>Tasks completed</Text>
+              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A' }}>{tasksCompleted} <Text style={{ fontSize: scale(18), color: '#ABABAB' }}>/ {tasksTotal}</Text></Text>
               <View style={{ height: 8, backgroundColor: '#ECEAE4', borderRadius: 4 }}>
                 <View style={{ width: `${progress * 100}%` as any, height: 8, backgroundColor: '#3B8A3A', borderRadius: 4 }} />
               </View>
             </View>
             <View style={{ flex: 1, gap: 8 }}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: '#ABABAB' }}>XP earned</Text>
-              <Text style={{ fontSize: 28, fontWeight: '900', color: '#1A1A1A' }}>{xpEarned.toLocaleString()} <Text style={{ fontSize: 14, color: '#ABABAB' }}>XP</Text></Text>
-              <Text style={{ fontSize: 22 }}>⭐</Text>
+              <Text style={{ fontSize: scale(12), fontWeight: '600', color: '#ABABAB' }}>XP earned</Text>
+              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A' }}>{xpEarned.toLocaleString()} <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>XP</Text></Text>
+              <Text style={{ fontSize: scale(22) }}>⭐</Text>
             </View>
           </View>
         </View>
@@ -1422,17 +1368,17 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid }: {
         {/* Top habits */}
         <View style={{ paddingHorizontal: 16 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ fontSize: 17, fontWeight: '800', color: '#1A1A1A' }}>Top habits</Text>
-            <TouchableOpacity activeOpacity={0.7}><Text style={{ fontSize: 14, fontWeight: '600', color: '#6B35F0' }}>View all</Text></TouchableOpacity>
+            <Text style={{ fontSize: scale(17), fontWeight: '800', color: '#1A1A1A' }}>Top habits</Text>
+            <TouchableOpacity activeOpacity={0.7}><Text style={{ fontSize: scale(14), fontWeight: '600', color: '#6B35F0' }}>View all</Text></TouchableOpacity>
           </View>
           <View style={{ gap: 0, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', overflow: 'hidden', ...SOLID_SHADOW }}>
             {topHabits.map((h, i) => (
               <View key={h.name} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: i < topHabits.length - 1 ? 1 : 0, borderBottomColor: '#F0EEE8', gap: 12 }}>
-                <Text style={{ fontSize: 20, width: 28, textAlign: 'center' }}>{h.icon}</Text>
-                <Text style={{ flex: 1, fontSize: 15, fontWeight: '500', color: '#1A1A1A' }}>{h.name}</Text>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#ABABAB', marginRight: 10 }}>{h.count}x</Text>
+                <Text style={{ fontSize: scale(20), width: 28, textAlign: 'center' }}>{h.icon}</Text>
+                <Text style={{ flex: 1, fontSize: scale(15), fontWeight: '500', color: '#1A1A1A' }}>{h.name}</Text>
+                <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#ABABAB', marginRight: 10 }}>{h.count}x</Text>
                 <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#3B8A3A', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>✓</Text>
+                  <Text style={{ color: '#FFF', fontSize: scale(13), fontWeight: '700' }}>✓</Text>
                 </View>
               </View>
             ))}
@@ -1499,7 +1445,7 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit }: {
           </TouchableOpacity>
         ))}
         {filtered.length === 0 && (
-          <Text style={{ color: C.muted, textAlign: 'center', marginTop: 40, fontSize: 14 }}>
+          <Text style={{ color: C.muted, textAlign: 'center', marginTop: 40, fontSize: scale(14) }}>
             No {activeTab} chores
           </Text>
         )}
@@ -1552,11 +1498,11 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete }: {
         <Text style={p.screenTitle}>{isEdit ? 'Edit chore' : 'Add chore'}</Text>
         {isEdit ? (
           <TouchableOpacity onPress={onDelete} style={p.backBtn} activeOpacity={0.7}>
-            <Text style={{ fontSize: 20 }}>🗑️</Text>
+            <Text style={{ fontSize: scale(20) }}>🗑️</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={p.backBtn} activeOpacity={0.7}>
-            <Text style={{ fontSize: 20 }}>🔖</Text>
+            <Text style={{ fontSize: scale(20) }}>🔖</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -1567,7 +1513,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete }: {
           <View style={[p.iconDisplay, { backgroundColor: selectedIcon.bg }]}>
             <ChoreIcon icon={selectedIcon.icon} size={60} />
             <View style={p.iconEditBadge}>
-              <Text style={{ fontSize: 12 }}>✏️</Text>
+              <Text style={{ fontSize: scale(12) }}>✏️</Text>
             </View>
           </View>
         </View>
@@ -1600,7 +1546,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete }: {
           <Text style={p.formLabel}>Frequency</Text>
           <TouchableOpacity style={p.formDropdownRow} onPress={cycleFrequency} activeOpacity={0.7}>
             <Text style={p.formDropdownValue}>{frequency}</Text>
-            <Text style={{ fontSize: 14, color: C.muted }}>▾</Text>
+            <Text style={{ fontSize: scale(14), color: C.muted }}>▾</Text>
           </TouchableOpacity>
         </View>
 
@@ -1667,7 +1613,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
         <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
           <Text style={p.backBtnText}>←</Text>
         </TouchableOpacity>
-        <Text style={[p.screenTitle, { fontSize: 16 }]}>Pay rates & economy</Text>
+        <Text style={[p.screenTitle, { fontSize: scale(16) }]}>Pay rates & economy</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -1678,7 +1624,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
           <Text style={p.sectionCardSub}>This is what kids earn for completed chores.</Text>
           <View style={p.dropdownRow}>
             <Text style={p.dropdownValue}>🪙 Monstir Coins (MC)</Text>
-            <Text style={{ fontSize: 14, color: C.muted }}>▾</Text>
+            <Text style={{ fontSize: scale(14), color: C.muted }}>▾</Text>
           </View>
         </View>
 
@@ -1692,7 +1638,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
               <Text style={p.settingsRowSub}>We'll suggest rates based on this amount.</Text>
             </View>
             <View style={p.rateInputPill}>
-              <Text style={{ fontSize: 14, color: C.text }}>$</Text>
+              <Text style={{ fontSize: scale(14), color: C.text }}>$</Text>
               <TextInput
                 style={p.rateInput}
                 value={baseRate}
@@ -1733,7 +1679,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
         <TouchableOpacity style={p.sectionCard} activeOpacity={0.7}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={p.sectionCardTitle}>View economy history</Text>
-            <Text style={{ fontSize: 18, color: C.muted }}>›</Text>
+            <Text style={{ fontSize: scale(18), color: C.muted }}>›</Text>
           </View>
         </TouchableOpacity>
 
@@ -1775,7 +1721,7 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
               <Text style={p.learnMoreText}>Learn more</Text>
             </TouchableOpacity>
           </View>
-          <Text style={{ fontSize: 40 }}>🪙</Text>
+          <Text style={{ fontSize: scale(40) }}>🪙</Text>
         </View>
 
         {/* Table */}
@@ -1800,7 +1746,7 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
 
         {/* Note card */}
         <View style={p.noteCard}>
-          <Text style={{ fontSize: 20, marginRight: 8 }}>💡</Text>
+          <Text style={{ fontSize: scale(20), marginRight: 8 }}>💡</Text>
           <Text style={p.noteText}>These are just suggestions. You know your child and what's fair!</Text>
         </View>
       </ScrollView>
@@ -1819,7 +1765,7 @@ function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   return (
     <TouchableOpacity style={ps.row} onPress={onPress} activeOpacity={onPress ? 0.7 : 1}>
       <View style={[ps.rowIcon, { backgroundColor: iconBg }]}>
-        <Text style={{ fontSize: 17 }}>{iconEmoji}</Text>
+        <Text style={{ fontSize: scale(17) }}>{iconEmoji}</Text>
       </View>
       <View style={{ flex: 1 }}>
         <Text style={ps.rowTitle}>{title}</Text>
@@ -1907,7 +1853,7 @@ function SettingsKidsScreen({ onBack, onAddKid }: { onBack: () => void; onAddKid
               {i > 0 && <View style={ps.divider} />}
               <TouchableOpacity style={ps.row} activeOpacity={0.7}>
                 <View style={[ps.kidAvatar, { backgroundColor: k.bg }]}>
-                  <Text style={{ fontSize: 20 }}>{k.emoji}</Text>
+                  <Text style={{ fontSize: scale(20) }}>{k.emoji}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={ps.rowTitle}>{k.name}</Text>
@@ -1989,7 +1935,7 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
       <ScrollView scrollEnabled={scrollEnabled} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120 }}>
         {/* Hero card */}
         <View style={ps.battleHero}>
-          <Text style={{ fontSize: 48 }}>👾</Text>
+          <Text style={{ fontSize: scale(48) }}>👾</Text>
           <View style={{ flex: 1 }}>
             <Text style={ps.battleHeroTitle}>Boss battles</Text>
             <Text style={ps.battleHeroSub}>Kids earn XP fighting bosses. Configure whether winning also earns real money.</Text>
@@ -2051,7 +1997,7 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
         </View>
 
         <View style={p.noteCard}>
-          <Text style={{ fontSize: 18, marginRight: 8 }}>💡</Text>
+          <Text style={{ fontSize: scale(18), marginRight: 8 }}>💡</Text>
           <Text style={p.noteText}>Cosmetic rewards are always given when a boss is defeated, regardless of the cash bonus setting.</Text>
         </View>
       </ScrollView>
@@ -2075,7 +2021,7 @@ function SettingsAccountScreen({ onBack }: { onBack: () => void }) {
           <View style={ps.accountAvatar}>
             <Text style={ps.accountAvatarText}>A</Text>
           </View>
-          <Text style={[ps.rowTitle, { fontSize: 18, marginTop: 10 }]}>Alex</Text>
+          <Text style={[ps.rowTitle, { fontSize: scale(18), marginTop: 10 }]}>Alex</Text>
           <Text style={ps.rowSub}>alex@example.com</Text>
         </View>
 
@@ -2190,7 +2136,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
         </View>
         <ScrollView contentContainerStyle={s.gfScrollCenter} showsVerticalScrollIndicator={false}>
           <View style={s.gfRobotCircle}>
-            <Image source={require('./assets/robot monstir/robot_1.png')} style={{ width: 120, height: 120 }} resizeMode="contain" />
+            <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 120, height: 120 }} resizeMode="contain" />
           </View>
           <Text style={s.gfBigTitle}>{"Let's create\na new goal!"}</Text>
           <Text style={s.gfSubtitle}>What are you saving up for?</Text>
@@ -2226,7 +2172,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
                 onPress={() => { handleCategorySelect(cat.label); }}
                 activeOpacity={0.7}
               >
-                <Text style={{ fontSize: 48 }}>{cat.icon}</Text>
+                <Text style={{ fontSize: scale(48) }}>{cat.icon}</Text>
                 <Text style={s.gfCategoryLabel}>{cat.label}</Text>
               </TouchableOpacity>
             ))}
@@ -2259,7 +2205,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
                   activeOpacity={0.7}
                 >
                   <View style={s.gfGoalIconCircle}>
-                    <Text style={{ fontSize: 40 }}>{opt.icon}</Text>
+                    <Text style={{ fontSize: scale(40) }}>{opt.icon}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.gfGoalName}>{opt.name}</Text>
@@ -2325,7 +2271,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
               onPress={() => { setNumpadValue(goalData.amount.replace('$', '')); go(5); }}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 16, color: goalData.amount ? '#1A1A1A' : '#C0BEB8' }}>
+              <Text style={{ fontSize: scale(16), color: goalData.amount ? '#1A1A1A' : '#C0BEB8' }}>
                 {goalData.amount ? '$' + goalData.amount : '$0.00'}
               </Text>
             </TouchableOpacity>
@@ -2335,7 +2281,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
           <View style={{ marginTop: 16 }}>
             <Text style={s.gfFieldLabel}>Add a photo (optional)</Text>
             <TouchableOpacity style={s.gfPhotoDash} onPress={() => go(6)} activeOpacity={0.7}>
-              <Text style={{ fontSize: 28 }}>📷</Text>
+              <Text style={{ fontSize: scale(28) }}>📷</Text>
               <Text style={s.gfPhotoText}>Tap to add a photo</Text>
             </TouchableOpacity>
           </View>
@@ -2400,8 +2346,8 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
           {photoAdded ? (
             <View style={s.gfPhotoPreview}>
               <View style={s.gfPhotoPlaceholder}>
-                <Text style={{ fontSize: 60 }}>{goalData.icon}</Text>
-                <Text style={{ color: '#ABABAB', marginTop: 8, fontSize: 13 }}>Photo preview</Text>
+                <Text style={{ fontSize: scale(60) }}>{goalData.icon}</Text>
+                <Text style={{ color: '#ABABAB', marginTop: 8, fontSize: scale(13) }}>Photo preview</Text>
               </View>
               <TouchableOpacity
                 style={s.gfPhotoRemove}
@@ -2413,7 +2359,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
             </View>
           ) : (
             <View style={[s.gfPhotoDash, { height: 180, marginTop: 20 }]}>
-              <Text style={{ fontSize: 40, color: '#ABABAB' }}>📷</Text>
+              <Text style={{ fontSize: scale(40), color: '#ABABAB' }}>📷</Text>
               <Text style={s.gfPhotoText}>No photo yet</Text>
             </View>
           )}
@@ -2485,7 +2431,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
 
           {/* Goal card */}
           <View style={[s.gfPreviewCard, { borderLeftColor: goalData.color, borderLeftWidth: 5 }]}>
-            <Text style={{ fontSize: 60, textAlign: 'center', marginBottom: 8 }}>{goalData.icon}</Text>
+            <Text style={{ fontSize: scale(60), textAlign: 'center', marginBottom: 8 }}>{goalData.icon}</Text>
             <Text style={s.gfPreviewName}>{goalData.name || 'My goal'}</Text>
             <Text style={s.gfPreviewAmount}>{goalData.amount ? '$' + goalData.amount : '$0.00'}</Text>
             <View style={s.gfProgressTrack}>
@@ -2496,7 +2442,7 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
 
           {/* Robot message */}
           <View style={s.gfRobotRow}>
-            <Image source={require('./assets/robot monstir/robot_1.png')} style={{ width: 50, height: 50 }} resizeMode="contain" />
+            <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 50, height: 50 }} resizeMode="contain" />
             <View style={s.gfSpeechBubble}>
               <Text style={s.gfSpeechText}>{"Nice goal! You're going to crush it! 💪"}</Text>
             </View>
@@ -2524,12 +2470,12 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
           <Text style={s.gfSubtitle}>{"You're all set and ready to start saving!"}</Text>
 
           <View style={s.gfRobotCircle}>
-            <Image source={require('./assets/robot monstir/robot_1.png')} style={{ width: 120, height: 120 }} resizeMode="contain" />
+            <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 120, height: 120 }} resizeMode="contain" />
           </View>
 
           {/* Goal card preview */}
           <View style={[s.gfPreviewCard, { borderLeftColor: goalData.color, borderLeftWidth: 5 }]}>
-            <Text style={{ fontSize: 48, textAlign: 'center', marginBottom: 8 }}>{goalData.icon}</Text>
+            <Text style={{ fontSize: scale(48), textAlign: 'center', marginBottom: 8 }}>{goalData.icon}</Text>
             <Text style={s.gfPreviewName}>{goalData.name || 'My goal'}</Text>
             <Text style={s.gfPreviewAmount}>{goalData.amount ? '$' + goalData.amount : '$0.00'}</Text>
             <View style={s.gfProgressTrack}>
@@ -2561,14 +2507,14 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
       <ScrollView contentContainerStyle={s.gfScrollCenter} showsVerticalScrollIndicator={false}>
         <Text style={s.gfScreenTitle}>Next allowance</Text>
         <Text style={s.gfScreenSub}>{"Here's when you'll get your next allowance!"}</Text>
-        <Text style={{ fontSize: 72, textAlign: 'center', marginVertical: 16 }}>📅</Text>
+        <Text style={{ fontSize: scale(72), textAlign: 'center', marginVertical: 16 }}>📅</Text>
         <Text style={s.gfAllowanceLabel}>Next payday</Text>
         <Text style={s.gfAllowanceDate}>Friday, May 31</Text>
         <Text style={s.gfAllowanceDays}>3 days away</Text>
 
         {/* Robot message */}
         <View style={[s.gfRobotRow, { marginTop: 24, marginBottom: 8 }]}>
-          <Image source={require('./assets/robot monstir/robot_1.png')} style={{ width: 50, height: 50 }} resizeMode="contain" />
+          <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 50, height: 50 }} resizeMode="contain" />
           <View style={s.gfSpeechBubble}>
             <Text style={s.gfSpeechText}>{"Can't wait to see your progress! 🚀"}</Text>
           </View>
@@ -2625,13 +2571,13 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
         <View style={ob.topHalf}>
           <View style={ob.robotCircle}>
             <Image
-              source={require('./assets/robot monstir/robot_1.png')}
+              source={require('./assets/monstirs/robot monstir/robot_1.png')}
               style={{ width: 200, height: 200 }}
               resizeMode="contain"
             />
             {/* XP badge */}
             <View style={ob.xpBadge}>
-              <Text style={{ fontSize: 14 }}>⭐</Text>
+              <Text style={{ fontSize: scale(14) }}>⭐</Text>
               <Text style={ob.xpBadgeText}>+50 XP</Text>
             </View>
           </View>
@@ -2668,13 +2614,13 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
         <View style={ob.topHalf}>
           <View style={[ob.robotCircle, { backgroundColor: '#D4CAFF' }]}>
             <Image
-              source={require('./assets/robot monstir/robot_7.png')}
+              source={require('./assets/monstirs/robot monstir/robot_7.png')}
               style={{ width: 220, height: 220 }}
               resizeMode="contain"
             />
             {/* Level up badge */}
             <View style={[ob.xpBadge, { borderColor: '#6B35F0' }]}>
-              <Text style={{ fontSize: 14 }}>👑</Text>
+              <Text style={{ fontSize: scale(14) }}>👑</Text>
               <Text style={[ob.xpBadgeText, { color: '#6B35F0', fontWeight: '800' }]}>LEVEL UP!</Text>
             </View>
           </View>
@@ -2714,13 +2660,13 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
             <View style={{ flexDirection: 'row', gap: 12 }}>
               {(['⭐', '📖', '👟', '🧢'] as string[]).map((emoji, i) => (
                 <View key={i} style={ob.rewardIcon}>
-                  <Text style={{ fontSize: 32 }}>{emoji}</Text>
+                  <Text style={{ fontSize: scale(32) }}>{emoji}</Text>
                 </View>
               ))}
             </View>
             {/* Treasure chest */}
             <View style={ob.chestBox}>
-              <Text style={{ fontSize: 80 }}>🎁</Text>
+              <Text style={{ fontSize: scale(80) }}>🎁</Text>
             </View>
           </View>
         </View>
@@ -2750,19 +2696,19 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: 60, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         {/* Parent + kid + robot illustration */}
         <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', marginBottom: 24, gap: 8 }}>
-          <Text style={{ fontSize: 56 }}>👩</Text>
-          <Text style={{ fontSize: 56 }}>👦</Text>
+          <Text style={{ fontSize: scale(56) }}>👩</Text>
+          <Text style={{ fontSize: scale(56) }}>👦</Text>
           <Image
-            source={require('./assets/robot monstir/robot_1.png')}
+            source={require('./assets/monstirs/robot monstir/robot_1.png')}
             style={{ width: 80, height: 80 }}
             resizeMode="contain"
           />
         </View>
 
-        <Text style={{ fontSize: 30, fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 8 }}>
+        <Text style={{ fontSize: scale(30), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 8 }}>
           Let's get started!
         </Text>
-        <Text style={{ fontSize: 15, color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>
+        <Text style={{ fontSize: scale(15), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>
           Create an account to save your progress and Monstirs.
         </Text>
 
@@ -2776,7 +2722,7 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
             <View key={i}>
               {i > 0 && <View style={ob.featureDivider} />}
               <View style={ob.featureRow}>
-                <Text style={{ fontSize: 22 }}>{item.icon}</Text>
+                <Text style={{ fontSize: scale(22) }}>{item.icon}</Text>
                 <Text style={ob.featureLabel}>{item.label}</Text>
               </View>
             </View>
@@ -2805,7 +2751,7 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
             activeOpacity={0.7}
             style={{ paddingVertical: 14, alignItems: 'center' }}
           >
-            <Text style={{ fontSize: 15, fontWeight: '600', color: '#6B35F0' }}>
+            <Text style={{ fontSize: scale(15), fontWeight: '600', color: '#6B35F0' }}>
               Continue as kid
             </Text>
           </TouchableOpacity>
@@ -2873,13 +2819,13 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
               secureTextEntry={!showPassword}
             />
             <TouchableOpacity onPress={() => setShowPassword(v => !v)} activeOpacity={0.7} style={{ paddingHorizontal: 8 }}>
-              <Text style={{ fontSize: 18 }}>{showPassword ? '🙈' : '👁'}</Text>
+              <Text style={{ fontSize: scale(18) }}>{showPassword ? '🙈' : '👁'}</Text>
             </TouchableOpacity>
           </View>
 
           {/* Forgot password */}
           <TouchableOpacity style={{ alignSelf: 'flex-end' }} activeOpacity={0.7}>
-            <Text style={{ fontSize: 14, color: '#6B35F0', fontWeight: '600' }}>Forgot password?</Text>
+            <Text style={{ fontSize: scale(14), color: '#6B35F0', fontWeight: '600' }}>Forgot password?</Text>
           </TouchableOpacity>
 
           {/* Log in button */}
@@ -2896,15 +2842,15 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
 
           {/* Google button */}
           <TouchableOpacity style={auth.googleBtn} activeOpacity={0.85}>
-            <Text style={{ color: '#4285F4', fontWeight: '900', fontSize: 18 }}>G</Text>
+            <Text style={{ color: '#4285F4', fontWeight: '900', fontSize: scale(18) }}>G</Text>
             <Text style={auth.googleBtnText}>Continue with Google</Text>
           </TouchableOpacity>
 
           {/* Sign up link */}
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 4 }}>
-            <Text style={{ fontSize: 14, color: '#ABABAB' }}>Don't have an account?</Text>
+            <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>Don't have an account?</Text>
             <TouchableOpacity onPress={onSignUp} activeOpacity={0.7}>
-              <Text style={{ fontSize: 14, color: '#6B35F0', fontWeight: '700' }}>Sign up</Text>
+              <Text style={{ fontSize: scale(14), color: '#6B35F0', fontWeight: '700' }}>Sign up</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2986,7 +2932,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
               secureTextEntry={!showPassword}
             />
             <TouchableOpacity onPress={() => setShowPassword(v => !v)} activeOpacity={0.7} style={{ paddingHorizontal: 8 }}>
-              <Text style={{ fontSize: 18 }}>{showPassword ? '🙈' : '👁'}</Text>
+              <Text style={{ fontSize: scale(18) }}>{showPassword ? '🙈' : '👁'}</Text>
             </TouchableOpacity>
           </View>
 
@@ -3002,7 +2948,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
               secureTextEntry={!showConfirm}
             />
             <TouchableOpacity onPress={() => setShowConfirm(v => !v)} activeOpacity={0.7} style={{ paddingHorizontal: 8 }}>
-              <Text style={{ fontSize: 18 }}>{showConfirm ? '🙈' : '👁'}</Text>
+              <Text style={{ fontSize: scale(18) }}>{showConfirm ? '🙈' : '👁'}</Text>
             </TouchableOpacity>
           </View>
 
@@ -3020,15 +2966,15 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
 
           {/* Google button */}
           <TouchableOpacity style={auth.googleBtn} activeOpacity={0.85}>
-            <Text style={{ color: '#4285F4', fontWeight: '900', fontSize: 18 }}>G</Text>
+            <Text style={{ color: '#4285F4', fontWeight: '900', fontSize: scale(18) }}>G</Text>
             <Text style={auth.googleBtnText}>Continue with Google</Text>
           </TouchableOpacity>
 
           {/* Log in link */}
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 4 }}>
-            <Text style={{ fontSize: 14, color: '#ABABAB' }}>Already have an account?</Text>
+            <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>Already have an account?</Text>
             <TouchableOpacity onPress={onLogin} activeOpacity={0.7}>
-              <Text style={{ fontSize: 14, color: '#6B35F0', fontWeight: '700' }}>Log in</Text>
+              <Text style={{ fontSize: scale(14), color: '#6B35F0', fontWeight: '700' }}>Log in</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -3039,10 +2985,71 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
-type AppMode = 'onboarding' | 'login' | 'signup' | 'parentOnboarding' | 'kidProfile' | 'app';
+type AppMode = 'splash' | 'onboarding' | 'login' | 'signup' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
+
+// ─── Splash Screen ────────────────────────────────────────────────────────────
+
+function SplashScreen({ onDone }: { onDone: () => void }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 500,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }).start(() => onDone());
+    }, 2200);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <Animated.View style={[splashStyles.root, { opacity }]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#dbf73b" />
+      {/* Background blob image */}
+      <Image
+        source={require('./assets/appBG.png')}
+        style={splashStyles.bg}
+        resizeMode="cover"
+      />
+      {/* Logo */}
+      <Image
+        source={require('./assets/monstirLogo.png')}
+        style={splashStyles.logo}
+        resizeMode="contain"
+      />
+    </Animated.View>
+  );
+}
+
+const splashStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#dbf73b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bg: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  logo: {
+    width: 280,
+    height: 103,
+  },
+});
 
 export default function App() {
-  const [appMode, setAppMode] = useState<AppMode>('onboarding');
+  const [appMode, setAppMode] = useState<AppMode>('splash');
+  const [kidWelcomeName, setKidWelcomeName] = useState('there');
+  const [selectedMonsterId,   setSelectedMonsterId]   = useState<MonsterId>('slime');
+  const [selectedMonsterName, setSelectedMonsterName] = useState<string>('');
   const [screen, setScreen]             = useState<Screen>('home');
   const [tab, setTab]                   = useState<Tab>('home');
   const [monsterIdx, setMonsterIdx]     = useState<MonsterIdx>(0);
@@ -3066,6 +3073,22 @@ export default function App() {
   const [weeklyCapEnabled, setWeeklyCap]      = useState(false);
   const [requireApproval, setRequireApproval] = useState(true);
   const [showKidProfile, setShowKidProfile]   = useState(false);
+
+  // ── Global debug state (dev only) ─────────────────────────────────────────
+  const [debugOpen, setDebugOpen]             = useState(false);
+  const [debugMinimized, setDebugMinimized]   = useState(false);
+  const [debugTab,  setDebugTab]              = useState<'xp' | 'layout' | 'kw' | 'nav'>('xp');
+  const [dbgMonsterSize,  setDbgMonsterSize]  = useState(() => scale(287));
+  const [dbgMonsterY,     setDbgMonsterY]     = useState(() => scale(68));
+  const [dbgPlatformSize, setDbgPlatformSize] = useState(() => scale(484));
+  const [dbgPlatformY,    setDbgPlatformY]    = useState(() => scale(-18));
+  // Merge with defaults so hot-reload state preserved from older builds
+  // never leaves new fields undefined (which renders as NaN in the debug panel).
+  const [kwDbg, setKwDbg] = useState<KwDebugValues>(() => ({ ...KW_DEBUG_DEFAULTS }));
+  useEffect(() => {
+    setKwDbg(prev => ({ ...KW_DEBUG_DEFAULTS, ...prev }));
+  }, []);
+  const openDebug = () => { if (__DEV__) setDebugOpen(true); };
 
   const completeChore = useCallback((c: Chore) => {
     const newXp = xp + c.xp;
@@ -3134,6 +3157,14 @@ export default function App() {
   };
   const deleteChore = (id: string) => { setManagedChores(prev => prev.filter(c => c.id !== id)); setParentScreen('chores'); };
 
+  if (appMode === 'splash') {
+    return (
+      <SafeAreaProvider>
+        <SplashScreen onDone={() => setAppMode('onboarding')} />
+      </SafeAreaProvider>
+    );
+  }
+
   if (appMode === 'onboarding') {
     return (
       <SafeAreaProvider>
@@ -3184,7 +3215,34 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <StatusBar barStyle="dark-content" />
-        <ParentOnboarding onComplete={() => setAppMode('app')} />
+        <ParentOnboarding
+          onComplete={(setup) => {
+            const firstName = setup.children[0]?.name?.trim() || 'there';
+            setKidWelcomeName(firstName);
+            setAppMode('kidWelcome');
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'kidWelcome') {
+    return (
+      <SafeAreaProvider>
+        <Pressable style={{ flex: 1 }} onLongPress={openDebug} delayLongPress={600}>
+          <KidWelcome
+            dbg={kwDbg}
+            childName={kidWelcomeName}
+            onComplete={(monsterId, monsterName) => {
+              if (monsterId === 'slime' || monsterId === 'robot' || monsterId === 'flamer') {
+                setSelectedMonsterId(monsterId);
+              }
+              setSelectedMonsterName(monsterName);
+              setAppMode('app');
+            }}
+          />
+        </Pressable>
+        {debugOpen && renderDebugPanel()}
       </SafeAreaProvider>
     );
   }
@@ -3201,6 +3259,13 @@ export default function App() {
     );
   }
 
+  // ── Derive per-monster assets from the user's KidWelcome selection ──────────
+  const monsterImages  = MONSTER_IMAGES_BY_KIND[selectedMonsterId];
+  const platformImg    = PLATFORM_BY_KIND[selectedMonsterId];
+  const platformAspect = PLATFORM_ASPECT_BY_KIND[selectedMonsterId];
+  const currentMonsterImg = monsterImages[monsterIdx];
+  const nextMonsterImg    = monsterImages[Math.min(monsterIdx + 1, 7) as MonsterIdx];
+
   return (
     <SafeAreaProvider>
     <SafeAreaView edges={['top']} style={[s.root, (screen === 'home' || viewMode === 'parent') && { backgroundColor: viewMode === 'parent' ? '#FFFFFF' : '#C5F215' }]}>
@@ -3208,10 +3273,10 @@ export default function App() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} xp={xp} coins={coins} done={done} onComplete={completeChore} onSwitchToParent={() => setViewMode('parent')} onDebugSetXp={setXp} onDebugSetMonster={(idx) => { setMonsterIdx(idx); setXp(0); setDone({}); }} onResetApp={setAppMode} baseRate={baseRate} />}
+            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} done={done} onComplete={completeChore} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} />}
             {screen === 'battle'   && <BattleScreen monsterIdx={monsterIdx} coins={coins} done={done} onStartBattle={startBattle} />}
-            {screen === 'arena'    && <ArenaScreen  monsterIdx={monsterIdx} logText={logText} logBold={logBold} />}
-            {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} won={battleWon} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} />}
+            {screen === 'arena'    && <ArenaScreen  monsterIdx={monsterIdx} logText={logText} logBold={logBold} monsterImg={currentMonsterImg} />}
+            {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} won={battleWon} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
             {screen === 'wallet'   && <WalletScreen coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} />}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} />}
             {showTabBar && <TabBar active={tab} onNav={navTab} onGoals={() => setScreen('goalFlow')} />}
@@ -3236,8 +3301,8 @@ export default function App() {
           </>
         )}
         <EvolutionAnimation
-          monsterBefore={ROBOT_IMAGES[monsterIdx]}
-          monsterAfter={ROBOT_IMAGES[Math.min(monsterIdx + 1, 7) as MonsterIdx]}
+          monsterBefore={currentMonsterImg}
+          monsterAfter={nextMonsterImg}
           onComplete={handleEvolveDone}
           visible={screen === 'evolve'}
         />
@@ -3255,8 +3320,202 @@ export default function App() {
       </SafeAreaProvider>
     </Modal>
 
+    {/* Global debug overlay */}
+    {debugOpen && renderDebugPanel()}
+
     </SafeAreaProvider>
   );
+
+  // ── renderDebugPanel ──────────────────────────────────────────────────────
+  function renderDebugPanel() {
+    if (!__DEV__) return null;
+    const monster = MONSTERS[monsterIdx];
+    const need    = monster.needed;
+
+    async function copyValues() {
+      const lines = [
+        '// KidWelcome layout',
+        ...Object.entries(kwDbg).map(([k, v]) => `  ${k}: ${v},`),
+        '',
+        '// HomeScreen layout',
+        `  dbgMonsterSize:  ${dbgMonsterSize},`,
+        `  dbgPlatformSize: ${dbgPlatformSize},`,
+        `  dbgMonsterY:     ${dbgMonsterY},`,
+        `  dbgPlatformY:    ${dbgPlatformY},`,
+      ];
+      await Clipboard.setStringAsync(lines.join('\n'));
+    }
+
+    const kwControls: { key: keyof KwDebugValues; label: string; steps: number[]; min: number; max: number }[] = [
+      { key: 'headingTop',    label: 'HEADING TOP',    steps: [-5,-1,1,5],   min: 0,   max: 200 },
+      { key: 'subtitleTop',   label: 'SUBTITLE TOP',   steps: [-5,-1,1,5],   min: 0,   max: 200 },
+      { key: 'shadowX',       label: 'SHADOW X',       steps: [-2,-1,1,2],   min: -20, max: 20  },
+      { key: 'shadowY',       label: 'SHADOW Y',       steps: [-2,-1,1,2],   min: -20, max: 20  },
+      { key: 'monsterSize',   label: 'MONSTER SIZE',   steps: [-20,-5,5,20], min: 80,   max: 500  },
+      { key: 'monsterX',     label: 'MONSTER X',      steps: [-20,-5,5,20], min: -300, max: 300  },
+      { key: 'monsterY',     label: 'MONSTER Y',      steps: [-20,-5,5,20], min: -300, max: 300  },
+      { key: 'platformSize', label: 'PLATFORM SIZE',  steps: [-20,-5,5,20], min: 80,   max: 500  },
+      { key: 'platformX',    label: 'PLATFORM X',     steps: [-20,-5,5,20], min: -300, max: 300  },
+      { key: 'platformY',    label: 'PLATFORM Y',     steps: [-20,-5,5,20], min: -300, max: 300  },
+      { key: 'overlapPct',    label: 'OVERLAP %',      steps: [-5,-1,1,5],   min: 0,   max: 80  },
+      { key: 'cardImgH',      label: 'CARD IMG H',     steps: [-10,-2,2,10], min: 40,  max: 300 },
+      { key: 'splashImgRatio',label: 'SPLASH IMG %',   steps: [-5,-1,1,5],   min: 20,  max: 120 },
+      { key: 'splashImgW',    label: 'SPLASH IMG W',   steps: [-20,-5,5,20], min: 100, max: 600 },
+      { key: 'splashImgX',    label: 'SPLASH IMG X',   steps: [-20,-5,5,20], min: -300, max: 300 },
+      { key: 'splashImgY',    label: 'SPLASH IMG Y',   steps: [-20,-5,5,20], min: -300, max: 300 },
+    ];
+
+    return (
+      <TouchableOpacity style={s.debugScrim} activeOpacity={1} onPress={() => setDebugOpen(false)}>
+        <View onStartShouldSetResponder={() => true}>
+          <View style={s.debugPanel}>
+            {/* Header row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[s.debugTitle, { flex: 1 }]}>🐛 Debug</Text>
+              <TouchableOpacity
+                onPress={() => setDebugMinimized(m => !m)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={{ fontSize: scale(18), color: '#888' }}>
+                  {debugMinimized ? '▴' : '▾'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {!debugMinimized && <>
+            {/* Tabs */}
+            <View style={s.debugTabs}>
+              {(['xp', 'layout', 'kw', 'nav'] as const).map(t => (
+                <TouchableOpacity key={t} style={[s.debugTab, debugTab === t && s.debugTabActive]} onPress={() => setDebugTab(t)}>
+                  <Text style={[s.debugTabText, debugTab === t && s.debugTabTextActive]}>
+                    {t === 'xp' ? 'XP' : t === 'layout' ? 'Layout' : t === 'kw' ? 'KW' : 'Nav'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+              {debugTab === 'xp' ? (
+                <View style={{ gap: 12 }}>
+                  <Text style={s.debugSub}>Monster {monsterIdx + 1}/8 · {monster.name} · {xp}/{need} XP</Text>
+                  <Text style={s.debugSectionLabel}>JUMP TO EVOLUTION</Text>
+                  <View style={s.debugGrid}>
+                    {(MONSTERS as Monster[]).map((m, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        style={[s.debugChip, monsterIdx === i && s.debugChipActive]}
+                        onPress={() => { setMonsterIdx(i as MonsterIdx); setXp(0); setDone({}); setDebugOpen(false); }}
+                      >
+                        <Text style={[s.debugChipText, monsterIdx === i && s.debugChipTextActive]}>
+                          {i + 1} · {m.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={s.debugSectionLabel}>TWEAK XP</Text>
+                  <View style={s.debugRow}>
+                    {[1, 5, 10, 50].map(n => (
+                      <TouchableOpacity key={`m${n}`} style={s.debugXpBtn} onPress={() => setXp(v => Math.max(0, v - n))}>
+                        <Text style={s.debugXpBtnTxt}>−{n}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {[1, 5, 10, 50].map(n => (
+                      <TouchableOpacity key={`p${n}`} style={[s.debugXpBtn, s.debugXpBtnGreen]} onPress={() => setXp(v => v + n)}>
+                        <Text style={s.debugXpBtnTxt}>+{n}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TouchableOpacity style={s.debugMaxBtn} onPress={() => { setXp(need); setDebugOpen(false); }}>
+                    <Text style={s.debugMaxTxt}>⚡ Trigger next evolution ({need - xp} XP needed)</Text>
+                  </TouchableOpacity>
+                </View>
+
+              ) : debugTab === 'layout' ? (
+                <View style={{ gap: 12 }}>
+                  {([
+                    { label: 'MONSTER SIZE', value: dbgMonsterSize, set: setDbgMonsterSize, steps: [-20,-5,5,20], min: 50 },
+                    { label: 'MONSTER Y',    value: dbgMonsterY,    set: setDbgMonsterY,    steps: [-10,-2,2,10], min: -500 },
+                    { label: 'PLATFORM SIZE', value: dbgPlatformSize, set: setDbgPlatformSize, steps: [-20,-5,5,20], min: 20 },
+                    { label: 'PLATFORM Y', value: dbgPlatformY, set: setDbgPlatformY, steps: [-10,-2,2,10], min: -500 },
+                  ] as { label: string; value: number; set: React.Dispatch<React.SetStateAction<number>>; steps: number[]; min: number }[]).map(({ label, value, set, steps, min }) => (
+                    <View key={label}>
+                      <Text style={s.debugSectionLabel}>{label}  <Text style={{ color: '#C5F215' }}>{value}px</Text></Text>
+                      <View style={s.debugRow}>
+                        {steps.map(n => (
+                          <TouchableOpacity key={n} style={[s.debugXpBtn, n > 0 && s.debugXpBtnGreen]} onPress={() => set((v: number) => Math.max(min, v + n))}>
+                            <Text style={s.debugXpBtnTxt}>{n > 0 ? `+${n}` : n}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+              ) : debugTab === 'kw' ? (
+                <View style={{ gap: 12 }}>
+                  <Text style={s.debugSub}>Kid Welcome layout</Text>
+                  {kwControls.map(({ key, label, steps, min, max }) => (
+                    <View key={key}>
+                      <Text style={s.debugSectionLabel}>{label}  <Text style={{ color: '#C5F215' }}>{kwDbg[key]}</Text></Text>
+                      <View style={s.debugRow}>
+                        {steps.map(n => (
+                          <TouchableOpacity
+                            key={n}
+                            style={[s.debugXpBtn, n > 0 && s.debugXpBtnGreen]}
+                            onPress={() => setKwDbg(prev => ({ ...prev, [key]: Math.max(min, Math.min(max, prev[key] + n)) }))}
+                          >
+                            <Text style={s.debugXpBtnTxt}>{n > 0 ? `+${n}` : n}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={s.debugCloseBtn} onPress={() => setKwDbg(KW_DEBUG_DEFAULTS)}>
+                    <Text style={s.debugCloseTxt}>↩ Reset KW defaults</Text>
+                  </TouchableOpacity>
+                </View>
+
+              ) : (
+                <View style={{ gap: 10 }}>
+                  <Text style={s.debugSectionLabel}>GO TO SCREEN</Text>
+                  {([
+                    { label: '👋  Onboarding',       mode: 'onboarding'       },
+                    { label: '🔑  Login',             mode: 'login'            },
+                    { label: '📝  Sign Up',           mode: 'signup'           },
+                    { label: '👨‍👩‍👧  Parent Setup',      mode: 'parentOnboarding' },
+                    { label: '🧒  Kid Profile Setup', mode: 'kidProfile'       },
+                    { label: '👾  Kid Welcome',       mode: 'kidWelcome'       },
+                  ] as { label: string; mode: AppMode }[]).map(({ label, mode }) => (
+                    <TouchableOpacity
+                      key={mode}
+                      style={s.debugResetBtn}
+                      onPress={() => {
+                        if (mode === 'kidWelcome') setKidWelcomeName('Henry');
+                        setAppMode(mode);
+                        setDebugOpen(false);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={s.debugResetTxt}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={s.debugCopyBtn} onPress={copyValues} activeOpacity={0.8}>
+              <Text style={s.debugCopyTxt}>📋  Copy values</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={s.debugCloseBtn} onPress={() => setDebugOpen(false)}>
+              <Text style={s.debugCloseTxt}>Close</Text>
+            </TouchableOpacity>
+            </>}
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -3266,26 +3525,26 @@ const SOLID_SHADOW = shadows.solid;
 const s = StyleSheet.create({
   root:            { flex: 1, backgroundColor: C.surface },
   header:          { backgroundColor: C.surface, paddingHorizontal: 20, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 0.5, borderBottomColor: C.border },
-  wordmark:        { fontSize: 17, fontWeight: '900', color: C.text, letterSpacing: -0.4 },
+  wordmark:        { fontSize: scale(17), fontWeight: '900', color: C.text, letterSpacing: -0.4 },
   coinPill:        { backgroundColor: C.goldLight, borderWidth: 1, borderColor: C.goldBorder, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  coinText:        { fontSize: 12, fontWeight: '700', color: C.gold },
+  coinText:        { fontSize: scale(12), fontWeight: '700', color: C.gold },
   hero:            { backgroundColor: C.surface, padding: 20, paddingBottom: 16, alignItems: 'center', borderBottomWidth: 0.5, borderBottomColor: C.border },
-  lvChip:          { fontSize: 10, fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
-  monsterName:     { fontSize: 22, fontWeight: '900', color: C.text, letterSpacing: -0.5, marginBottom: 14 },
+  lvChip:          { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
+  monsterName:     { fontSize: scale(22), fontWeight: '900', color: C.text, letterSpacing: -0.5, marginBottom: 14 },
   monsterBubble:   { width: 100, height: 100, backgroundColor: C.bg, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   xpRow:           { width: '100%', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  xpLabel:         { fontSize: 11, fontWeight: '700', color: C.hint },
+  xpLabel:         { fontSize: scale(11), fontWeight: '700', color: C.hint },
   xpTrack:         { width: '100%', height: 5, backgroundColor: C.border, borderRadius: 5, overflow: 'hidden' },
   xpFill:          { height: '100%', backgroundColor: C.accent, borderRadius: 5 },
-  sectionLabel:    { fontSize: 10, fontWeight: '700', letterSpacing: 1.8, color: C.hint, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8, backgroundColor: C.bg },
+  sectionLabel:    { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.hint, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8, backgroundColor: C.bg },
   choreList:       { gap: 6, paddingHorizontal: 12 },
   choreRow:        { backgroundColor: C.surface, borderWidth: 0.5, borderColor: C.border, borderRadius: 14, padding: 11, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 11 },
   choreRowDone:    { backgroundColor: C.bg },
   choreIcon:       { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   choreInfo:       { flex: 1 },
-  choreName:       { fontSize: 13, fontWeight: '700', color: C.text },
+  choreName:       { fontSize: scale(13), fontWeight: '700', color: C.text },
   choreNameDone:   { color: C.hint, textDecorationLine: 'line-through' },
-  choreSub:        { fontSize: 11, color: C.hint, marginTop: 1 },
+  choreSub:        { fontSize: scale(11), color: C.hint, marginTop: 1 },
   choreGold:       { color: C.gold, fontWeight: '700' },
   choreCheck:      { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: '#DDDBD5', alignItems: 'center', justifyContent: 'center' },
   choreCheckDone:  { backgroundColor: C.accent, borderColor: C.accent },
@@ -3296,184 +3555,186 @@ const s = StyleSheet.create({
   tabIconWrap:     { width: 98, borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 2 },
   tabIconWrapActive: { backgroundColor: '#EAE4FF' },
   tabIcon:         { width: 44, height: 44 },
-  tabLabel:        { fontSize: 10, fontWeight: '600', color: '#ABABAB', letterSpacing: 0.1 },
+  tabLabel:        { fontSize: scale(10), fontWeight: '600', color: '#ABABAB', letterSpacing: 0.1 },
   tabLabelActive:  { color: '#6B35F0' },
   // home screen
   homeRoot:           { flex: 1, backgroundColor: 'transparent' },
   homeHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
   homeHeaderLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  homeKidView:        { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
+  homeKidView:        { fontSize: scale(18), fontWeight: '700', color: '#1A1A1A' },
   homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
-  homeBalanceText:    { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
+  homeBalanceText:    { fontSize: scale(18), fontWeight: '700', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 },
   homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW },
   homeCharImage:      { height: 340, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: 'visible' },
   homeCharInfo:       { padding: 14 },
   homeCharNameRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  homeCharName:       { fontSize: 30, fontWeight: '900', color: '#1A1A1A' },
-  homeCharLevel:      { fontSize: 15, fontWeight: '800', color: '#6B35F0' },
+  homeCharName:       { fontSize: scale(30), fontWeight: '900', color: '#1A1A1A' },
+  homeCharLevel:      { fontSize: scale(15), fontWeight: '800', color: '#6B35F0' },
   homeXpTrack:        { height: 16, backgroundColor: '#E0DCDC', borderRadius: 100, marginBottom: 5, overflow: 'hidden' },
   homeXpFill:         { height: '100%', backgroundColor: '#6B35F0', borderRadius: 100 },
-  homeXpText:         { fontSize: 13, fontWeight: '500', color: '#1A1A1A' },
+  homeXpText:         { fontSize: scale(13), fontWeight: '500', color: '#1A1A1A' },
   homeXpPopLayer:     { position: 'absolute', bottom: 200, left: 0, right: 0, alignItems: 'center', pointerEvents: 'none' } as any,
   homeXpPopPill:      { backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: '#2D006E', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 5 },
-  homeXpPop:          { fontSize: 18, fontWeight: '900', color: '#2D006E', letterSpacing: 0.2 },
+  homeXpPop:          { fontSize: scale(18), fontWeight: '900', color: '#2D006E', letterSpacing: 0.2 },
   homeCoinPopPill:    { backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: '#1A6600', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 5 },
-  homeCoinPop:        { fontSize: 18, fontWeight: '900', color: '#1A6600', letterSpacing: 0.2 },
+  homeCoinPop:        { fontSize: scale(18), fontWeight: '900', color: '#1A6600', letterSpacing: 0.2 },
   homeQuestsHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  homeQuestsTitle:    { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
+  homeQuestsTitle:    { fontSize: scale(22), fontWeight: '800', color: '#1A1A1A' },
   homeLeftPill:       { backgroundColor: '#ADE9DF', borderRadius: 100, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 2, borderColor: '#1A1A1A' },
-  homeLeftText:       { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+  homeLeftText:       { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A' },
   homeQuestCard:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FAF9F4', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, marginBottom: 10, gap: 12, ...SOLID_SHADOW },
   homeQuestSweep:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#E8FFA0', borderRadius: 14 },
   homeQuestCardDone:  { opacity: 0.5 },
   homeQuestIcon:      { width: 58, height: 58, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   homeQuestInfo:      { flex: 1 },
-  homeQuestTitle:     { fontSize: 17, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
+  homeQuestTitle:     { fontSize: scale(17), fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
   homeQuestTitleDone: { textDecorationLine: 'line-through', color: '#ABABAB' },
-  homeQuestReward:    { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+  homeQuestReward:    { fontSize: scale(15), fontWeight: '600', color: '#1A1A1A' },
   homeQuestCheck:     { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#1A1A1A' },
   homeQuestCheckDone: { backgroundColor: '#6B35F0', borderColor: '#6B35F0', alignItems: 'center', justifyContent: 'center' },
   homeQuestCheckDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: 'white' },
   battleCard:      { backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 14, paddingHorizontal: 16, ...SOLID_SHADOW },
-  battleCardLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
-  battlePower:     { fontSize: 32, fontWeight: '900', color: C.text, letterSpacing: -1, lineHeight: 36 },
-  battleCardSub:   { fontSize: 11, color: C.muted, marginTop: 3 },
+  battleCardLabel: { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
+  battlePower:     { fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -1, lineHeight: 36 },
+  battleCardSub:   { fontSize: scale(11), color: C.muted, marginTop: 3 },
   pctRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   pctTrack:        { flex: 1, height: 6, backgroundColor: C.border, borderRadius: 6, overflow: 'hidden' },
   pctFill:         { height: '100%', borderRadius: 6, backgroundColor: C.accent },
-  pctLbl:          { fontSize: 11, fontWeight: '700', color: C.accent, minWidth: 30, textAlign: 'right' },
+  pctLbl:          { fontSize: scale(11), fontWeight: '700', color: C.accent, minWidth: 30, textAlign: 'right' },
   bossCard:        { backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 12, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
-  bossName:        { fontSize: 14, fontWeight: '900', color: C.text },
-  bossSub:         { fontSize: 11, color: C.muted, marginTop: 1 },
-  bossPow:         { fontSize: 13, fontWeight: '700', color: C.text },
+  bossName:        { fontSize: scale(14), fontWeight: '900', color: C.text },
+  bossSub:         { fontSize: scale(11), color: C.muted, marginTop: 1 },
+  bossPow:         { fontSize: scale(13), fontWeight: '700', color: C.text },
   oddsRow:         { flexDirection: 'row', gap: 8 },
   oddsCard:        { flex: 1, backgroundColor: C.bg, borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', ...SOLID_SHADOW },
-  oddsVal:         { fontSize: 20, fontWeight: '900', color: C.text },
-  oddsLbl:         { fontSize: 10, color: C.muted, fontWeight: '700', letterSpacing: 0.5, marginTop: 2 },
+  oddsVal:         { fontSize: scale(20), fontWeight: '900', color: C.text },
+  oddsLbl:         { fontSize: scale(10), color: C.muted, fontWeight: '700', letterSpacing: 0.5, marginTop: 2 },
   battleBtn:       { backgroundColor: C.text, borderRadius: 14, padding: 15, alignItems: 'center' },
-  battleBtnText:   { fontSize: 15, fontWeight: '900', color: 'white', letterSpacing: -0.3 },
+  battleBtnText:   { fontSize: scale(15), fontWeight: '900', color: 'white', letterSpacing: -0.3 },
   debugBtn:        { backgroundColor: C.bg, borderWidth: 0.5, borderColor: C.border, borderRadius: 10, padding: 10, alignItems: 'center' },
-  debugBtnText:    { fontSize: 11, fontWeight: '700', color: C.muted, letterSpacing: 0.3 },
+  debugBtnText:    { fontSize: scale(11), fontWeight: '700', color: C.muted, letterSpacing: 0.3 },
   arenaStage:      { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.surface },
   arenaVs:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, width: '100%' },
   arenaFighter:    { alignItems: 'center', gap: 8 },
-  arenaName:       { fontSize: 11, fontWeight: '700', color: C.muted, letterSpacing: 0.5 },
-  arenaVsLabel:    { fontSize: 22, fontWeight: '900', color: C.border },
+  arenaName:       { fontSize: scale(11), fontWeight: '700', color: C.muted, letterSpacing: 0.5 },
+  arenaVsLabel:    { fontSize: scale(22), fontWeight: '900', color: C.border },
   arenaLog:        { width: '100%', backgroundColor: C.bg, borderRadius: 12, padding: 14, minHeight: 72, marginTop: 20 },
-  arenaLogText:    { fontSize: 13, color: C.text, lineHeight: 20 },
+  arenaLogText:    { fontSize: scale(13), color: C.text, lineHeight: 20 },
   arenaLogBold:    { fontWeight: '700' },
   resultScreen:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.surface, gap: 6 },
-  resultChip:      { fontSize: 10, fontWeight: '700', letterSpacing: 1.8, color: C.muted },
-  resultH:         { fontSize: 28, fontWeight: '900', color: C.text, letterSpacing: -0.5 },
-  resultSub:       { fontSize: 13, color: C.muted, marginBottom: 6 },
-  resultCoins:     { fontSize: 22, fontWeight: '900', color: C.gold },
-  resultCoinsLbl:  { fontSize: 12, color: C.muted, marginBottom: 20 },
+  resultChip:      { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted },
+  resultH:         { fontSize: scale(28), fontWeight: '900', color: C.text, letterSpacing: -0.5 },
+  resultSub:       { fontSize: scale(13), color: C.muted, marginBottom: 6 },
+  resultCoins:     { fontSize: scale(22), fontWeight: '900', color: C.gold },
+  resultCoinsLbl:  { fontSize: scale(12), color: C.muted, marginBottom: 20 },
   evCta:              { backgroundColor: '#C5F215', borderRadius: 14, paddingHorizontal: 36, paddingVertical: 15, borderWidth: 2, borderColor: '#1A1A1A', width: '100%', alignItems: 'center' },
-  evCtaText:          { fontSize: 16, fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.3 },
+  evCtaText:          { fontSize: scale(16), fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.3 },
   evolveScreen:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
   evolveOverlayBg:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#1A0A2E' },
   evolveRingContainer:{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   evolveRing:         { position: 'absolute', width: 200, height: 200, borderRadius: 100, borderWidth: 2, borderColor: '#6B35F0', opacity: 0 },
-  evolveBanner:       { fontSize: 42, fontWeight: '900', color: '#C5F215', letterSpacing: -1, textAlign: 'center' },
+  evolveBanner:       { fontSize: scale(42), fontWeight: '900', color: '#C5F215', letterSpacing: -1, textAlign: 'center' },
   evolveSide:         { alignItems: 'center', gap: 6 },
-  evolveName:         { fontSize: 14, fontWeight: '900', color: C.text },
-  evolveLvl:          { fontSize: 11, fontWeight: '700', color: C.muted },
-  evolveSub:          { fontSize: 14, color: 'rgba(255,255,255,0.6)', textAlign: 'center', marginTop: 8 },
+  evolveName:         { fontSize: scale(14), fontWeight: '900', color: C.text },
+  evolveLvl:          { fontSize: scale(11), fontWeight: '700', color: C.muted },
+  evolveSub:          { fontSize: scale(14), color: 'rgba(255,255,255,0.6)', textAlign: 'center', marginTop: 8 },
   walletTotal:     { backgroundColor: C.surface, borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, paddingBottom: 12, ...SOLID_SHADOW },
-  walletLabel:     { fontSize: 10, fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
-  walletAmount:    { fontSize: 34, fontWeight: '900', color: C.text, letterSpacing: -1 },
-  walletSub:       { fontSize: 11, color: C.muted, marginTop: 2 },
+  walletLabel:     { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
+  walletAmount:    { fontSize: scale(34), fontWeight: '900', color: C.text, letterSpacing: -1 },
+  walletSub:       { fontSize: scale(11), color: C.muted, marginTop: 2 },
   walletRow:       { backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 12, padding: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10, ...SOLID_SHADOW },
-  walletRowName:   { flex: 1, fontSize: 12, fontWeight: '700', color: C.text },
-  walletRowCoins:  { fontSize: 13, fontWeight: '900', color: C.gold },
+  walletRowName:   { flex: 1, fontSize: scale(12), fontWeight: '700', color: C.text },
+  walletRowCoins:  { fontSize: scale(13), fontWeight: '900', color: C.gold },
   // ── Goal flow ──
   gfRoot:              { flex: 1, backgroundColor: 'transparent' },
   gfBackRow:           { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 4 },
   gfBackBtn:           { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  gfBackText:          { fontSize: 24, color: '#1A1A1A', fontWeight: '600' },
+  gfBackText:          { fontSize: scale(24), color: '#1A1A1A', fontWeight: '600' },
   gfScrollCenter:      { flexGrow: 1, alignItems: 'center', paddingHorizontal: 24, paddingBottom: 40, justifyContent: 'center' },
   gfScrollTop:         { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 40, paddingTop: 8 },
   gfRobotCircle:       { width: 160, height: 160, borderRadius: 80, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
-  gfBigTitle:          { fontSize: 34, fontWeight: '900', color: '#1A1A1A', textAlign: 'center', lineHeight: 40, marginBottom: 8 },
-  gfCreatedTitle:      { fontSize: 34, fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginBottom: 8 },
-  gfSubtitle:          { fontSize: 16, color: '#ABABAB', textAlign: 'center', marginBottom: 8 },
-  gfScreenTitle:       { fontSize: 28, fontWeight: '900', color: '#1A1A1A', marginBottom: 6 },
-  gfScreenSub:         { fontSize: 15, color: '#ABABAB', marginBottom: 16 },
+  gfBigTitle:          { fontSize: scale(34), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', lineHeight: 40, marginBottom: 8 },
+  gfCreatedTitle:      { fontSize: scale(34), fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginBottom: 8 },
+  gfSubtitle:          { fontSize: scale(16), color: '#ABABAB', textAlign: 'center', marginBottom: 8 },
+  gfScreenTitle:       { fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', marginBottom: 6 },
+  gfScreenSub:         { fontSize: scale(15), color: '#ABABAB', marginBottom: 16 },
   gfBtnPrimary:        { backgroundColor: '#6B35F0', borderRadius: 14, padding: 16, alignItems: 'center', width: '100%' },
-  gfBtnPrimaryText:    { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
+  gfBtnPrimaryText:    { fontSize: scale(16), fontWeight: '800', color: '#FFFFFF' },
   gfBtnOutline:        { borderRadius: 14, padding: 16, alignItems: 'center', width: '100%', borderWidth: 1.5, borderColor: '#ECEAE4', backgroundColor: '#FFFFFF' },
-  gfBtnOutlineText:    { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-  gfSkipLink:          { fontSize: 15, fontWeight: '600', color: '#ABABAB' },
+  gfBtnOutlineText:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
+  gfSkipLink:          { fontSize: scale(15), fontWeight: '600', color: '#ABABAB' },
   gfCategoryGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', marginTop: 8 },
   gfCategoryCard:      { width: '31%', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 8, ...SOLID_SHADOW },
-  gfCategoryLabel:     { fontSize: 13, fontWeight: '600', color: '#1A1A1A', marginTop: 6, textAlign: 'center' },
+  gfCategoryLabel:     { fontSize: scale(13), fontWeight: '600', color: '#1A1A1A', marginTop: 6, textAlign: 'center' },
   gfGoalRow:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, gap: 12, ...SOLID_SHADOW },
   gfGoalRowSelected:   { borderColor: '#6B35F0', borderWidth: 2 },
   gfGoalIconCircle:    { width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
-  gfGoalName:          { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-  gfGoalPrice:         { fontSize: 13, color: '#ABABAB', marginTop: 2 },
+  gfGoalName:          { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
+  gfGoalPrice:         { fontSize: scale(13), color: '#ABABAB', marginTop: 2 },
   gfGoalCheck:         { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
   gfGoalCheckSelected: { backgroundColor: '#6B35F0', borderColor: '#6B35F0' },
   gfGoalCheckDot:      { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
   gfLabelRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  gfFieldLabel:        { fontSize: 14, fontWeight: '700', color: '#1A1A1A' },
-  gfCharCount:         { fontSize: 12, color: '#ABABAB' },
-  gfInput:             { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 12, padding: 14, fontSize: 16, color: '#1A1A1A', backgroundColor: '#FFFFFF', justifyContent: 'center' },
+  gfFieldLabel:        { fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' },
+  gfCharCount:         { fontSize: scale(12), color: '#ABABAB' },
+  gfInput:             { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 12, padding: 14, fontSize: scale(16), color: '#1A1A1A', backgroundColor: '#FFFFFF', justifyContent: 'center' },
   gfPhotoDash:         { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 12, padding: 20, alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed', marginTop: 6, gap: 6 },
-  gfPhotoText:         { fontSize: 14, color: '#ABABAB' },
+  gfPhotoText:         { fontSize: scale(14), color: '#ABABAB' },
   gfPhotoPreview:      { marginTop: 20, borderRadius: 14, overflow: 'hidden', position: 'relative' },
   gfPhotoPlaceholder:  { height: 180, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
   gfPhotoRemove:       { position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
-  gfPhotoRemoveText:   { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  gfAmountDisplay:     { fontSize: 52, fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginVertical: 16 },
-  gfAmountHint:        { fontSize: 13, color: '#ABABAB', textAlign: 'center', marginBottom: 24 },
+  gfPhotoRemoveText:   { color: '#FFFFFF', fontSize: scale(14), fontWeight: '700' },
+  gfAmountDisplay:     { fontSize: scale(52), fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginVertical: 16 },
+  gfAmountHint:        { fontSize: scale(13), color: '#ABABAB', textAlign: 'center', marginBottom: 24 },
   gfNumpad:            { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
   gfNumKey:            { width: '30%', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 18, alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
-  gfNumKeyText:        { fontSize: 22, fontWeight: '700', color: '#1A1A1A' },
+  gfNumKeyText:        { fontSize: scale(22), fontWeight: '700', color: '#1A1A1A' },
   gfColorGrid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 14, justifyContent: 'center', marginTop: 16 },
   gfColorSwatch:       { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
   gfColorSwatchSelected: { borderWidth: 3, borderColor: '#1A1A1A' },
-  gfColorCheck:        { fontSize: 22, color: '#FFFFFF', fontWeight: '900' },
+  gfColorCheck:        { fontSize: scale(22), color: '#FFFFFF', fontWeight: '900' },
   gfPreviewCard:       { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, width: '100%', marginTop: 16, ...SOLID_SHADOW },
-  gfPreviewName:       { fontSize: 22, fontWeight: '800', color: '#1A1A1A', textAlign: 'center', marginBottom: 4 },
-  gfPreviewAmount:     { fontSize: 16, color: '#ABABAB', textAlign: 'center', marginBottom: 12 },
+  gfPreviewName:       { fontSize: scale(22), fontWeight: '800', color: '#1A1A1A', textAlign: 'center', marginBottom: 4 },
+  gfPreviewAmount:     { fontSize: scale(16), color: '#ABABAB', textAlign: 'center', marginBottom: 12 },
   gfProgressTrack:     { height: 8, backgroundColor: '#ECEAE4', borderRadius: 4, overflow: 'hidden', marginBottom: 4 },
   gfProgressFill:      { height: '100%', borderRadius: 4 },
-  gfProgressPct:       { fontSize: 12, color: '#ABABAB', textAlign: 'right' },
+  gfProgressPct:       { fontSize: scale(12), color: '#ABABAB', textAlign: 'right' },
   gfRobotRow:          { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16, width: '100%' },
   gfSpeechBubble:      { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, ...SOLID_SHADOW },
-  gfSpeechText:        { fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
+  gfSpeechText:        { fontSize: scale(14), color: '#1A1A1A', lineHeight: 20 },
   gfConfettiDot:       { position: 'absolute', width: 10, height: 10, borderRadius: 5 },
-  gfAllowanceLabel:    { fontSize: 14, color: '#ABABAB', textAlign: 'center', marginBottom: 4 },
-  gfAllowanceDate:     { fontSize: 28, fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginBottom: 4 },
-  gfAllowanceDays:     { fontSize: 15, color: '#ABABAB', textAlign: 'center' },
+  gfAllowanceLabel:    { fontSize: scale(14), color: '#ABABAB', textAlign: 'center', marginBottom: 4 },
+  gfAllowanceDate:     { fontSize: scale(28), fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginBottom: 4 },
+  gfAllowanceDays:     { fontSize: scale(15), color: '#ABABAB', textAlign: 'center' },
   // debug overlay
   debugScrim:        { position: 'absolute', top: 0, left: 0, right: 0, bottom: 120, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' } as any,
   debugPanel:        { backgroundColor: '#1A1A1A', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12 },
   debugTabs:         { flexDirection: 'row', backgroundColor: '#2A2A2A', borderRadius: 10, padding: 3, gap: 3 },
   debugTab:          { flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center' },
   debugTabActive:    { backgroundColor: '#3A3A3A' },
-  debugTabText:      { fontSize: 12, fontWeight: '600', color: '#666' },
+  debugTabText:      { fontSize: scale(12), fontWeight: '600', color: '#666' },
   debugTabTextActive:{ color: '#FFFFFF' },
   debugResetBtn:     { backgroundColor: '#2A2A2A', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 16 },
-  debugResetTxt:     { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
-  debugTitle:        { fontSize: 16, fontWeight: '800', color: '#fff' },
-  debugSub:          { fontSize: 12, color: '#888', marginTop: -6 },
-  debugSectionLabel: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', letterSpacing: 1.5, marginTop: 4 },
+  debugResetTxt:     { fontSize: scale(14), fontWeight: '600', color: '#FFFFFF' },
+  debugTitle:        { fontSize: scale(16), fontWeight: '800', color: '#fff' },
+  debugSub:          { fontSize: scale(12), color: '#888', marginTop: -6 },
+  debugSectionLabel: { fontSize: scale(10), fontWeight: '700', color: '#FFFFFF', letterSpacing: 1.5, marginTop: 4 },
   debugGrid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   debugChip:         { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#2E2E2E' },
   debugChipActive:   { backgroundColor: '#C5F215' },
-  debugChipText:     { fontSize: 12, fontWeight: '600', color: '#aaa' },
+  debugChipText:     { fontSize: scale(12), fontWeight: '600', color: '#aaa' },
   debugChipTextActive: { color: '#1A1A1A' },
   debugRow:          { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   debugXpBtn:        { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#2E2E2E' },
   debugXpBtnGreen:   { backgroundColor: '#2A4A1A' },
-  debugXpBtnTxt:     { fontSize: 13, fontWeight: '700', color: '#fff' },
+  debugXpBtnTxt:     { fontSize: scale(13), fontWeight: '700', color: '#fff' },
   debugMaxBtn:       { backgroundColor: '#6B35F0', borderRadius: 12, padding: 14, alignItems: 'center' },
-  debugMaxTxt:       { fontSize: 14, fontWeight: '700', color: '#fff' },
+  debugMaxTxt:       { fontSize: scale(14), fontWeight: '700', color: '#fff' },
+  debugCopyBtn:      { backgroundColor: '#6B35F0', borderRadius: 12, padding: 12, alignItems: 'center' },
+  debugCopyTxt:      { fontSize: scale(14), fontWeight: '700', color: '#fff' },
   debugCloseBtn:     { backgroundColor: '#2E2E2E', borderRadius: 12, padding: 12, alignItems: 'center' },
-  debugCloseTxt:     { fontSize: 14, fontWeight: '600', color: '#888' },
+  debugCloseTxt:     { fontSize: scale(14), fontWeight: '600', color: '#888' },
 });
 
 // ─── Parent Styles ────────────────────────────────────────────────────────────
@@ -3485,114 +3746,114 @@ const p = StyleSheet.create({
   tabItem:          { flex: 1, alignItems: 'center' },
   tabPill:          { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   tabPillActive:    { backgroundColor: '#EAE4FF' },
-  tabLabel:         { fontSize: 12, fontWeight: '600', color: C.muted },
+  tabLabel:         { fontSize: scale(12), fontWeight: '600', color: C.muted },
   tabLabelActive:   { color: '#6B35F0', fontWeight: '700' },
 
   // Screen header
   screenHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#ECEAE4', backgroundColor: '#FFFFFF' },
-  screenTitle:      { fontSize: 18, fontWeight: '800', color: '#1A1A1A', flex: 1, textAlign: 'center' },
+  screenTitle:      { fontSize: scale(18), fontWeight: '800', color: '#1A1A1A', flex: 1, textAlign: 'center' },
   backBtn:          { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backBtnText:      { fontSize: 22, color: '#1A1A1A', fontWeight: '600' },
+  backBtnText:      { fontSize: scale(22), color: '#1A1A1A', fontWeight: '600' },
   addBtn:           { width: 40, height: 40, borderRadius: 10, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
-  addBtnText:       { fontSize: 22, color: '#1A1A1A', fontWeight: '700', lineHeight: 26 },
+  addBtnText:       { fontSize: scale(22), color: '#1A1A1A', fontWeight: '700', lineHeight: 26 },
 
   // Parent home
   homeHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16, backgroundColor: '#F7F6F2' },
   homeHeaderLeft:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
   homeAvatar:       { width: 48, height: 48, borderRadius: 24, backgroundColor: '#fff', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
-  homeParentView:   { fontSize: 17, fontWeight: '700', color: '#1A1A1A' },
+  homeParentView:   { fontSize: scale(17), fontWeight: '700', color: '#1A1A1A' },
   homeBell:         { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 
   // Hero card
   heroCard:         { marginHorizontal: 16, marginTop: 8, borderRadius: 20, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   heroContent:     { flexDirection: 'row', alignItems: 'center', padding: 20, paddingBottom: 0 },
-  heroTitle:        { fontSize: 32, fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.5, marginBottom: 6 },
-  heroSub:          { fontSize: 14, color: '#1A1A1A', lineHeight: 20, opacity: 0.8 },
+  heroTitle:        { fontSize: scale(32), fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.5, marginBottom: 6 },
+  heroSub:          { fontSize: scale(14), color: '#1A1A1A', lineHeight: 20, opacity: 0.8 },
   heroCurve:        { height: 24, backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, marginTop: 12 },
 
   // Menu cards
   menuCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, ...SOLID_SHADOW },
   menuCardIcon:     { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  menuCardTitle:    { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
-  menuCardSub:      { fontSize: 13, color: '#ABABAB' },
-  menuCardArrow:    { fontSize: 22, color: '#1A1A1A', fontWeight: '300' },
+  menuCardTitle:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
+  menuCardSub:      { fontSize: scale(13), color: '#ABABAB' },
+  menuCardArrow:    { fontSize: scale(22), color: '#1A1A1A', fontWeight: '300' },
 
   // Chore manage rows
   choreManageRow:   { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
   choreManageIcon:  { width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  choreManageName:  { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 2 },
-  choreManageFreq:  { fontSize: 13, color: '#ABABAB' },
-  choreManageRate:  { fontSize: 16, fontWeight: '700', color: '#3B8A3A' },
-  choreManageDrag:  { fontSize: 20, color: '#C0BEB8', marginLeft: 8 },
+  choreManageName:  { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A', marginBottom: 2 },
+  choreManageFreq:  { fontSize: scale(13), color: '#ABABAB' },
+  choreManageRate:  { fontSize: scale(16), fontWeight: '700', color: '#3B8A3A' },
+  choreManageDrag:  { fontSize: scale(20), color: '#C0BEB8', marginLeft: 8 },
 
   // Toggle pills
   toggleRow:        { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   togglePill:       { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F0EEE8' },
   togglePillActive: { backgroundColor: '#6B35F0' },
-  toggleText:       { fontSize: 14, fontWeight: '600', color: '#ABABAB' },
+  toggleText:       { fontSize: scale(14), fontWeight: '600', color: '#ABABAB' },
   toggleTextActive: { color: '#FFFFFF' },
 
   // Add/Edit chore form
   iconDisplay:      { width: 96, height: 96, borderRadius: 20, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   iconEditBadge:    { position: 'absolute', bottom: 2, right: 2, width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
   formCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
-  formLabel:        { fontSize: 13, fontWeight: '700', color: '#ABABAB', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-  formInput:        { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 14, fontSize: 16, color: '#1A1A1A' },
+  formLabel:        { fontSize: scale(13), fontWeight: '700', color: '#ABABAB', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  formInput:        { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 14, fontSize: scale(16), color: '#1A1A1A' },
   formDropdownRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 14 },
-  formDropdownValue:{ fontSize: 16, color: '#1A1A1A' },
-  rateDollarSign:   { fontSize: 18, fontWeight: '600', color: '#1A1A1A' },
+  formDropdownValue:{ fontSize: scale(16), color: '#1A1A1A' },
+  rateDollarSign:   { fontSize: scale(18), fontWeight: '600', color: '#1A1A1A' },
   iconPickerItem:   { width: 56, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   iconPickerSelected: { borderColor: '#6B35F0', backgroundColor: '#EAE4FF' },
   saveBtn:          { backgroundColor: '#C5F215', borderRadius: 14, borderWidth: 1.5, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  saveBtnText:      { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
+  saveBtnText:      { fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' },
   cancelBtn:        { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1.5, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  cancelBtnText:    { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  cancelBtnText:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
 
   // Pay rates
   sectionCard:      { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
-  sectionCardTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
-  sectionCardSub:   { fontSize: 13, color: '#ABABAB', marginBottom: 12 },
+  sectionCardTitle: { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
+  sectionCardSub:   { fontSize: scale(13), color: '#ABABAB', marginBottom: 12 },
   dropdownRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 12, marginTop: 4 },
-  dropdownValue:    { fontSize: 15, color: '#1A1A1A' },
+  dropdownValue:    { fontSize: scale(15), color: '#1A1A1A' },
   settingsRow:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  settingsRowLabel: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 2 },
-  settingsRowSub:   { fontSize: 12, color: '#ABABAB', lineHeight: 17 },
+  settingsRowLabel: { fontSize: scale(15), fontWeight: '600', color: '#1A1A1A', marginBottom: 2 },
+  settingsRowSub:   { fontSize: scale(12), color: '#ABABAB', lineHeight: 17 },
   rateInputPill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7F6F2', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, gap: 4, minWidth: 80 },
-  rateInput:        { fontSize: 15, fontWeight: '700', color: '#1A1A1A', minWidth: 48 },
-  rateGuideLink:    { fontSize: 15, fontWeight: '700', color: '#6B35F0' },
+  rateInput:        { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A', minWidth: 48 },
+  rateGuideLink:    { fontSize: scale(15), fontWeight: '700', color: '#6B35F0' },
 
   // Rate guide
   rateInfoCard:     { backgroundColor: '#FEF9EC', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
-  rateInfoText:     { fontSize: 14, color: '#1A1A1A', lineHeight: 20, marginBottom: 10 },
+  rateInfoText:     { fontSize: scale(14), color: '#1A1A1A', lineHeight: 20, marginBottom: 10 },
   learnMoreBtn:     { backgroundColor: '#6B35F0', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, alignSelf: 'flex-start' },
-  learnMoreText:    { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
+  learnMoreText:    { fontSize: scale(13), fontWeight: '700', color: '#FFFFFF' },
   rateTableRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  rateTableHeader:  { fontSize: 13, fontWeight: '800', color: '#1A1A1A' },
-  rateTableCell:    { fontSize: 13, color: '#1A1A1A' },
+  rateTableHeader:  { fontSize: scale(13), fontWeight: '800', color: '#1A1A1A' },
+  rateTableCell:    { fontSize: scale(13), color: '#1A1A1A' },
   rateDot:          { width: 8, height: 8, borderRadius: 4 },
   noteCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 4, ...SOLID_SHADOW },
-  noteText:         { flex: 1, fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
+  noteText:         { flex: 1, fontSize: scale(14), color: '#1A1A1A', lineHeight: 20 },
 });
 
 // ─── Settings Styles (ps prefix) ─────────────────────────────────────────────
 
 const ps = StyleSheet.create({
-  sectionLabel:   { fontSize: 11, fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
+  sectionLabel:   { fontSize: scale(11), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
   group:          { marginHorizontal: 16, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   divider:        { height: 1, backgroundColor: '#F0EEE8', marginLeft: 68 },
   row:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16, gap: 12 },
   rowIcon:        { width: 36, height: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  rowTitle:       { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-  rowSub:         { fontSize: 12, color: '#ABABAB', marginTop: 1 },
+  rowTitle:       { fontSize: scale(15), fontWeight: '600', color: '#1A1A1A' },
+  rowSub:         { fontSize: scale(12), color: '#ABABAB', marginTop: 1 },
   badge:          { backgroundColor: '#6B35F0', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
-  badgeText:      { fontSize: 12, fontWeight: '700', color: '#FFFFFF' },
-  chevron:        { fontSize: 20, color: '#C0BEB8', fontWeight: '300' },
+  badgeText:      { fontSize: scale(12), fontWeight: '700', color: '#FFFFFF' },
+  chevron:        { fontSize: scale(20), color: '#C0BEB8', fontWeight: '300' },
   kidAvatar:      { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   addKidBtn:      { margin: 16, backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW },
-  addKidText:     { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  addKidText:     { fontSize: scale(16), fontWeight: '700', color: '#FFFFFF' },
   battleHero:     { backgroundColor: '#3D1FA3', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, flexDirection: 'row', alignItems: 'center', gap: 14, ...SOLID_SHADOW },
-  battleHeroTitle:{ fontSize: 18, fontWeight: '800', color: '#FFFFFF', marginBottom: 4 },
-  battleHeroSub:  { fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 18 },
+  battleHeroTitle:{ fontSize: scale(18), fontWeight: '800', color: '#FFFFFF', marginBottom: 4 },
+  battleHeroSub:  { fontSize: scale(13), color: 'rgba(255,255,255,0.7)', lineHeight: 18 },
   toggle:         { width: 44, height: 26, borderRadius: 13, backgroundColor: '#E0DCDC', justifyContent: 'center', paddingHorizontal: 3 },
   toggleOn:       { backgroundColor: '#6B35F0' },
   toggleThumb:    { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFFFFF' },
@@ -3600,68 +3861,68 @@ const ps = StyleSheet.create({
   sliderTrack:    { height: 6, backgroundColor: '#E0DCDC', borderRadius: 3, position: 'relative', marginBottom: 4 },
   sliderFill:     { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#6B35F0', borderRadius: 3 },
   sliderThumb:    { position: 'absolute', top: -7, marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
-  sliderTickLabel:{ fontSize: 11, color: '#ABABAB' },
+  sliderTickLabel:{ fontSize: scale(11), color: '#ABABAB' },
   impactRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   impactCell:     { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 10, padding: 10, alignItems: 'center' },
   impactCellHighlight: { backgroundColor: '#EAE4FF' },
-  impactLabel:    { fontSize: 10, fontWeight: '700', color: '#ABABAB', letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase' },
-  impactValue:    { fontSize: 18, fontWeight: '900', color: '#1A1A1A' },
-  impactUnit:     { fontSize: 12, fontWeight: '500', color: '#ABABAB' },
-  impactArrow:    { fontSize: 18, color: '#ABABAB', fontWeight: '300' },
+  impactLabel:    { fontSize: scale(10), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase' },
+  impactValue:    { fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' },
+  impactUnit:     { fontSize: scale(12), fontWeight: '500', color: '#ABABAB' },
+  impactArrow:    { fontSize: scale(18), color: '#ABABAB', fontWeight: '300' },
   cosmeticPill:   { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1.5, borderColor: '#C4B5FD', paddingHorizontal: 12, paddingVertical: 5 },
-  cosmeticText:   { fontSize: 12, fontWeight: '600', color: '#6B35F0' },
+  cosmeticText:   { fontSize: scale(12), fontWeight: '600', color: '#6B35F0' },
   accountAvatar:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' },
-  accountAvatarText: { fontSize: 28, fontWeight: '800', color: '#6B35F0' },
+  accountAvatarText: { fontSize: scale(28), fontWeight: '800', color: '#6B35F0' },
   logoutBtn:      { margin: 16, marginTop: 20, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW },
-  logoutText:     { fontSize: 16, fontWeight: '700', color: '#E53935' },
+  logoutText:     { fontSize: scale(16), fontWeight: '700', color: '#E53935' },
 });
 
 // ─── Onboarding Styles (ob prefix) ───────────────────────────────────────────
 
 const ob = StyleSheet.create({
   skipBtn:           { position: 'absolute', top: 16, right: 20, zIndex: 10, padding: 8 },
-  skipText:          { fontSize: 15, fontWeight: '600', color: '#6B35F0' },
+  skipText:          { fontSize: scale(15), fontWeight: '600', color: '#6B35F0' },
   topHalf:           { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
   robotCircle:       { width: 260, height: 260, borderRadius: 130, backgroundColor: '#EDE8D8', alignItems: 'center', justifyContent: 'center', position: 'relative' },
   xpBadge:           { position: 'absolute', top: 16, left: 0, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#6B35F0', borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5 },
-  xpBadgeText:       { fontSize: 13, fontWeight: '700', color: '#6B35F0' },
+  xpBadgeText:       { fontSize: scale(13), fontWeight: '700', color: '#6B35F0' },
   bottomCard:        { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 28, paddingTop: 28, paddingBottom: 32 },
-  slideTitle:        { fontSize: 28, fontWeight: '900', color: '#1A1A1A', marginBottom: 2 },
+  slideTitle:        { fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', marginBottom: 2 },
   slideTitleWord:    { color: '#1A1A1A' },
   yellowUnderline:   { height: 3, width: 80, backgroundColor: '#F5C842', borderRadius: 2, marginBottom: 12 },
-  slideSubtitle:     { fontSize: 15, color: '#777', lineHeight: 22, marginBottom: 24 },
+  slideSubtitle:     { fontSize: scale(15), color: '#777', lineHeight: 22, marginBottom: 24 },
   nextBtn:           { backgroundColor: '#6B35F0', borderRadius: 14, padding: 16, alignItems: 'center' },
-  nextBtnText:       { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
+  nextBtnText:       { fontSize: scale(16), fontWeight: '800', color: '#FFFFFF' },
   rewardIcon:        { width: 80, height: 80, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
   chestBox:          { alignItems: 'center', justifyContent: 'center' },
   featuresCard:      { backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, ...SOLID_SHADOW },
   featureRow:        { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 },
   featureDivider:    { height: 1, backgroundColor: '#ECEAE4' },
-  featureLabel:      { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+  featureLabel:      { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A' },
   createAccountBtn:  { backgroundColor: '#C5F215', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  createAccountBtnText: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
+  createAccountBtnText: { fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' },
   haveAccountBtn:    { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  haveAccountBtnText: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  haveAccountBtnText: { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
 });
 
 // ─── Auth Styles (auth prefix) ────────────────────────────────────────────────
 
 const auth = StyleSheet.create({
   backBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  backBtnText:   { fontSize: 24, color: '#1A1A1A', fontWeight: '600' },
-  title:         { fontSize: 30, fontWeight: '900', color: '#1A1A1A', marginBottom: 6 },
-  subtitle:      { fontSize: 15, color: '#ABABAB' },
+  backBtnText:   { fontSize: scale(24), color: '#1A1A1A', fontWeight: '600' },
+  title:         { fontSize: scale(30), fontWeight: '900', color: '#1A1A1A', marginBottom: 6 },
+  subtitle:      { fontSize: scale(15), color: '#ABABAB' },
   inputRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1.5, borderColor: '#ECEAE4', backgroundColor: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
-  inputIcon:     { fontSize: 20 },
-  textInput:     { flex: 1, fontSize: 16, color: '#1A1A1A', padding: 0 },
+  inputIcon:     { fontSize: scale(20) },
+  textInput:     { flex: 1, fontSize: scale(16), color: '#1A1A1A', padding: 0 },
   primaryBtn:    { backgroundColor: '#6B35F0', borderRadius: 14, padding: 16, alignItems: 'center' },
-  primaryBtnText:{ fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
+  primaryBtnText:{ fontSize: scale(16), fontWeight: '800', color: '#FFFFFF' },
   dividerRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dividerLine:   { flex: 1, height: 1, backgroundColor: '#ECEAE4' },
-  dividerText:   { fontSize: 14, color: '#ABABAB', fontWeight: '500' },
+  dividerText:   { fontSize: scale(14), color: '#ABABAB', fontWeight: '500' },
   googleBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1.5, borderColor: '#ECEAE4', padding: 16 },
-  googleBtnText: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-  leafDecor:     { position: 'absolute', bottom: 60, left: -10, fontSize: 72, opacity: 0.5 },
+  googleBtnText: { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
+  leafDecor:     { position: 'absolute', bottom: 60, left: -10, fontSize: scale(72), opacity: 0.5 },
   purpleBlob:    { position: 'absolute', bottom: 80, right: -20, borderRadius: 60, backgroundColor: '#6B35F0', opacity: 0.15, width: 120, height: 120 },
-  sparkle:       { position: 'absolute', fontSize: 20, opacity: 0.6 },
+  sparkle:       { position: 'absolute', fontSize: scale(20), opacity: 0.6 },
 });
