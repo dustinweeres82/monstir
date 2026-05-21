@@ -83,7 +83,7 @@ export function ScreenHeading({ children, style, textStyle, dropShadow }: Props)
         style={[
           base,
           {
-            color: colors.white,
+            color: textStyle?.color ?? colors.white,
             textShadowColor: colors.black,
             textShadowOffset: { width: shadow.x, height: shadow.y },
             textShadowRadius: 0,

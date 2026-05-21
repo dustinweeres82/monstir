@@ -12,7 +12,11 @@ import { CreamBg } from './src/components/CreamBg';
 import { KidProfileCreation, getAvatarImage } from './src/screens/KidProfileCreation';
 import { ParentOnboarding } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
+import { ScreenHeading } from './src/design-system/components/ScreenHeading';
+import { useFonts, FredokaOne_400Regular } from '@expo-google-fonts/fredoka-one';
 import { shadows, scale } from './src/design-system/tokens';
+import { Video, ResizeMode, Audio } from 'expo-av';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
@@ -26,8 +30,8 @@ TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ChoreId = 'dishes' | 'trash' | 'bed' | 'vacuum' | 'laundry' | 'sweep' | 'wipe' | 'mop' | 'plants' | 'recycling' | 'windows' | 'bathroom';
-type Tab     = 'home' | 'battle' | 'wallet';
-type Screen  = Tab | 'arena' | 'result' | 'evolve' | 'goalFlow';
+type Tab     = 'home' | 'world' | 'wallet';
+type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow';
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type ParentTab    = 'kidView' | 'chores' | 'rewards' | 'settings';
@@ -36,7 +40,16 @@ type ViewMode     = 'kid' | 'parent';
 
 interface Chore   { id: ChoreId; name: string; icon: string | number; bg: string; xp: number; multiplier: number; }
 interface Monster { name: string; level: number; needed: number; }
-interface Boss    { name: string; power: number; bonus: number; }
+interface Boss {
+  name: string;
+  tagline: string;
+  taglineHighlight?: string;
+  power: number;
+  bonus: number;
+  weakness: string;           // what chore type counters this boss
+  video: ReturnType<typeof require>;
+  tiers: number[];            // monsterIdx values that can face this boss
+}
 
 interface ManagedChore {
   id: string; name: string; description: string;
@@ -78,10 +91,69 @@ const MONSTERS: Monster[] = [
 ];
 
 const BOSSES: Boss[] = [
-  { name: 'Grumbloth', power: 50,  bonus: 20 },
-  { name: 'Mireflax',  power: 80,  bonus: 35 },
-  { name: 'Vorthak',   power: 120, bonus: 60 },
+  {
+    name: 'Dust Grumble',
+    tagline: "It was just sitting there. Waiting.",
+    taglineHighlight: 'waiting',
+    power: 50, bonus: 20,
+    weakness: 'Sweeping',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [0, 1],
+  },
+  {
+    name: 'Junk Giant',
+    tagline: "He Collects It All. You Clean It Up.",
+    taglineHighlight: 'all',
+    power: 65, bonus: 28,
+    weakness: 'Organizing',
+    video: require('./assets/boss-junk-giant.mp4'),
+    tiers: [0, 1],
+  },
+  {
+    name: 'Mire Lurker',
+    tagline: "Born from the swamp's worst nightmare.",
+    taglineHighlight: 'nightmare',
+    power: 80, bonus: 35,
+    weakness: 'Mopping',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [2, 3],
+  },
+  {
+    name: 'Vorth Akar',
+    tagline: "Chaos incarnate. Pure destruction.",
+    taglineHighlight: 'chaos',
+    power: 120, bonus: 60,
+    weakness: 'Discipline',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [4, 5, 6, 7],
+  },
 ];
+
+/** Returns this week's boss for the child's current evolution tier.
+ *  Rotates through the eligible pool by ISO week number so siblings
+ *  on the same tier face different bosses in different weeks. */
+function getWeeklyBoss(monsterIdx: MonsterIdx): Boss {
+  const pool = BOSSES.filter(b => b.tiers.includes(monsterIdx));
+  if (!pool.length) return BOSSES[0];
+  const week = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000)); // ms → weeks
+  return pool[week % pool.length];
+}
+
+/** Days (0–6) until the next Sunday. 0 = today IS Sunday. */
+function daysUntilSunday(): number {
+  const day = new Date().getDay(); // 0=Sun
+  return day === 0 ? 0 : 7 - day;
+}
+
+/** Ms remaining until next Sunday midnight. */
+function msUntilSunday(): number {
+  const now = new Date();
+  const target = new Date(now);
+  const d = now.getDay();
+  if (d !== 0) target.setDate(now.getDate() + (7 - d));
+  target.setHours(0, 0, 0, 0);
+  return Math.max(0, target.getTime() - now.getTime());
+}
 
 const FREQUENCY_OPTIONS = ['Every day', '2 times per week', '3 times per week', 'Once a week', 'As needed'];
 
@@ -115,6 +187,7 @@ const C = {
   accent: '#4C9FE8',
   gold: '#996B00', goldLight: '#FFF9E6', goldBorder: '#F0C840',
   win: '#F0F7F0', loss: '#FFF0F0',
+  warmBg: '#EFEDE6',
 };
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
@@ -504,7 +577,7 @@ function Header({ title, coins, showCoins = true }: { title: string; coins?: num
 
 const NAV_TABS: { id: Tab; label: string; icon: ReturnType<typeof require> }[] = [
   { id: 'home',   label: 'Monsters', icon: require('./assets/icons/Property 1=navHome.png')   },
-  { id: 'battle', label: 'Quests',   icon: require('./assets/icons/Property 1=navQuests.png') },
+  { id: 'world',  label: 'World',    icon: require('./assets/icons/Property 1=navQuests.png') },
   { id: 'wallet', label: 'Wallet',   icon: require('./assets/icons/Property 1=navWallet.png') },
 ];
 
@@ -814,129 +887,640 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, done, onComplete, onSw
   );
 }
 
-function BattleScreen({ monsterIdx, coins, done, onStartBattle }: {
-  monsterIdx: MonsterIdx; coins: number;
+// ─── World Screen (formerly BattleScreen) ────────────────────────────────────
+// Mid-week: war room / countdown. Sunday: battle is live.
+
+function useCountdown() {
+  const [ms, setMs] = useState(msUntilSunday());
+  useEffect(() => {
+    const id = setInterval(() => setMs(msUntilSunday()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return ms;
+}
+
+function formatCountdown(ms: number) {
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  if (d > 0) return `${d}D  ${h}H  ${m}M`;
+  if (h > 0) return `${h}H  ${m}M`;
+  return `${m}M`;
+}
+
+function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToParent }: {
+  monsterIdx: MonsterIdx; coins: number; xp: number;
   done: Partial<Record<ChoreId, boolean>>; onStartBattle: () => void;
+  onSwitchToParent: () => void;
 }) {
-  const boss       = BOSSES[monsterIdx % BOSSES.length];
-  const BossSvg    = BOSS_SVGS[monsterIdx % BOSS_SVGS.length];
-  const doneCount  = Object.keys(done).length;
-  const chorePct   = Math.round((doneCount / CHORES.length) * 100);
-  const odds       = calcWinOdds(doneCount);
-  const power      = doneCount * 20 + coins;
+  const boss        = getWeeklyBoss(monsterIdx);
+  const monster     = MONSTERS[monsterIdx];
+  const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
+  const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
+  const dollars = (coins / 100).toFixed(2);
+  const doneCount   = Object.keys(done).length;
+  const totalChores = CHORES.length;
+  const chorePct    = Math.round((doneCount / totalChores) * 100);
+  const power       = doneCount * 20 + coins;
+  const countdownMs = useCountdown();
+  const days        = daysUntilSunday();
+  const isBattleDay = days === 0;
+
+  // Reveal level: 0=silhouette, 1=partial, 2=full
+  const revealLevel = days >= 5 ? 0 : days >= 2 ? 1 : 2;
+  const silhouetteOpacity = revealLevel === 0 ? 0.88 : revealLevel === 1 ? 0.55 : 0;
+
+  // Teaser copy
+  const teaserLine1 = isBattleDay
+    ? '⚔️  BATTLE DAY!'
+    : revealLevel === 0
+      ? 'Something stirs...'
+      : revealLevel === 1
+        ? 'It lurks...'
+        : boss.name;
+  const teaserLine2 = isBattleDay
+    ? 'Your boss awaits. Fight!'
+    : revealLevel === 0
+      ? `Arriving in ${days} days`
+      : revealLevel === 1
+        ? `Arriving in ${days} day${days === 1 ? '' : 's'}`
+        : boss.tagline;
+
+  // Power forecast: chores remaining to reach next level
+  const choresToNextLevel = Math.max(0, (monster.needed - xp));
+  const powerForecastMsg = choresToNextLevel === 0
+    ? 'You\'re at max power this week!'
+    : `${choresToNextLevel} more chore${choresToNextLevel === 1 ? '' : 's'} to reach Lv ${monster.level + 1}`;
 
   return (
     <>
-      <Header title="monstir" coins={coins} />
-      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} showsVerticalScrollIndicator={false}>
-        <View style={{ padding: 16, gap: 10 }}>
-
-          <View style={s.battleCard}>
-            <Text style={s.battleCardLabel}>YOUR BATTLE POWER</Text>
-            <Text style={s.battlePower}>{power}</Text>
-            <Text style={s.battleCardSub}>
-              {doneCount > 0 ? `${doneCount} of ${CHORES.length} chores done` : 'Complete chores to build power'}
-            </Text>
-            <View style={s.pctRow}>
-              <View style={s.pctTrack}><View style={[s.pctFill, { width: `${chorePct}%` as any }]} /></View>
-              <Text style={s.pctLbl}>{chorePct}%</Text>
-            </View>
+      {/* Home-style header */}
+      <View style={s.homeHeader}>
+        <View style={s.homeHeaderLeft}>
+          <AvatarPickerSheet selected={kidAvatarIdx} onSelect={setKidAvatarIdx} />
+          <View style={{ gap: 2 }}>
+            <ViewSwitcher
+              selected="Kid view"
+              options={[
+                { label: 'Kid view',    emoji: '🧒', bg: '#EAE4FF' },
+                { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
+              ]}
+              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); }}
+            />
+            <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
           </View>
-
-          <View style={s.bossCard}>
-            <View style={[s.monsterBubble, { width: 52, height: 52 }]}><BossSvg size={40} /></View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.bossName}>{boss.name}</Text>
-              <Text style={s.bossSub}>This week's boss</Text>
-            </View>
-            <Text style={s.bossPow}>Power: {boss.power}</Text>
-          </View>
-
-          <View style={s.oddsRow}>
-            <View style={s.oddsCard}><Text style={s.oddsVal}>{odds}%</Text><Text style={s.oddsLbl}>Win chance</Text></View>
-            <View style={s.oddsCard}><Text style={s.oddsVal}>+{boss.bonus}¢</Text><Text style={s.oddsLbl}>Win bonus</Text></View>
-          </View>
-
-          <TouchableOpacity style={s.battleBtn} onPress={onStartBattle} activeOpacity={0.85}>
-            <Text style={s.battleBtnText}>⚔  Battle now</Text>
-          </TouchableOpacity>
-
-          {/* DEBUG — remove before shipping */}
-          <TouchableOpacity style={s.debugBtn} onPress={onStartBattle} activeOpacity={0.7}>
-            <Text style={s.debugBtnText}>🐛  Debug — trigger battle instantly</Text>
-          </TouchableOpacity>
-
         </View>
-        <View style={{ height: 96 }} />
+        <View style={s.homeBalancePill}>
+          <Text style={s.homeBalanceText}>${dollars}</Text>
+          <Text style={{ fontSize: scale(18) }}>🪙</Text>
+        </View>
+      </View>
+
+      <ScrollView
+        style={{ flex: 1, backgroundColor: C.bg }}
+        contentContainerStyle={{ padding: scale(16), gap: scale(12), paddingBottom: scale(100) }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Boss Teaser Card ── */}
+        <View style={w.bossCard}>
+          {/* Video background */}
+          <Video
+            source={boss.video}
+            style={StyleSheet.absoluteFill}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay
+            isLooping
+            isMuted
+          />
+          {/* Permanent dark gradient so text is always legible */}
+          <LinearGradient
+            colors={['rgba(0,0,0,0.18)', 'rgba(0,0,0,0.62)']}
+            style={StyleSheet.absoluteFill}
+          />
+          {/* Silhouette overlay — fades out as Sunday approaches */}
+          {silhouetteOpacity > 0 && (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0d0820', opacity: silhouetteOpacity }]} />
+          )}
+
+          {/* Teaser text */}
+          <View style={w.bossCardContent}>
+            <View style={w.bossTagPill}>
+              <Text style={w.bossTagText}>💀  BOSS BATTLE!</Text>
+            </View>
+            <Text style={w.teaserLine1}>{teaserLine1}</Text>
+            <Text style={w.teaserLine2}>{teaserLine2}</Text>
+
+            {/* Countdown */}
+            {!isBattleDay && (
+              <View style={w.countdownBox}>
+                <Text style={w.countdownText}>{formatCountdown(countdownMs)}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* ── Boss Intel ── */}
+        <View style={w.intelRow}>
+          <View style={w.intelChip}>
+            <Text style={w.intelLabel}>WEAK TO</Text>
+            <View style={w.weaknessPill}>
+              <Text style={w.weaknessIcon}>⭐</Text>
+              <Text style={w.weaknessText}>{revealLevel < 2 ? '???' : boss.weakness.toUpperCase()}</Text>
+            </View>
+          </View>
+          <View style={[w.intelChip, { flex: 1 }]}>
+            <Text style={w.intelLabel}>BOSS POWER</Text>
+            <Text style={w.intelValue}>{revealLevel < 2 ? '???  ' : `${boss.power}  `}<Text style={{ fontSize: scale(11), color: C.muted }}>pts</Text></Text>
+          </View>
+        </View>
+
+        {/* ── Your Readiness ── */}
+        <View style={w.sectionCard}>
+          <Text style={w.sectionTitle}>⚡  Your readiness</Text>
+
+          {/* Chore progress */}
+          <View style={w.readinessRow}>
+            <Text style={w.readinessLabel}>Chores</Text>
+            <Text style={w.readinessValue}>{doneCount} / {totalChores}</Text>
+          </View>
+          <View style={w.trackWrap}>
+            <View style={[w.trackFill, { width: `${chorePct}%` as any }]} />
+          </View>
+
+          {/* Power level */}
+          <View style={[w.readinessRow, { marginTop: scale(12) }]}>
+            <Text style={w.readinessLabel}>Battle power</Text>
+            <Text style={[w.readinessValue, { color: '#6B35F0' }]}>{power}</Text>
+          </View>
+
+          {/* Power forecast */}
+          <View style={w.forecastPill}>
+            <Text style={w.forecastText}>📈  {powerForecastMsg}</Text>
+          </View>
+        </View>
+
+        {/* ── What's at Stake ── */}
+        <View style={w.sectionCard}>
+          <Text style={w.sectionTitle}>🏆  What's at stake</Text>
+          <View style={w.stakeRow}>
+            <View style={w.stakeItem}>
+              <Image source={require('./assets/iconCoin.png')} style={w.stakeIcon} resizeMode="contain" />
+              <Text style={w.stakeVal}>{boss.bonus}¢</Text>
+              <Text style={w.stakeLbl}>Coins</Text>
+            </View>
+            <View style={w.stakeItem}>
+              <Image source={require('./assets/iconHPstar.png')} style={w.stakeIcon} resizeMode="contain" />
+              <Text style={w.stakeVal}>75</Text>
+              <Text style={w.stakeLbl}>XP</Text>
+            </View>
+            <View style={w.stakeItem}>
+              <Image source={require('./assets/iconShard.png')} style={w.stakeIcon} resizeMode="contain" />
+              <Text style={w.stakeVal}>1</Text>
+              <Text style={w.stakeLbl}>Shard</Text>
+            </View>
+          </View>
+          {monsterIdx < 7 && (
+            <View style={w.evolutionHint}>
+              <Text style={w.evolutionHintText}>
+                ✨  Win this battle and {monster.name} could evolve!
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* ── Battle Button (always accessible, labelled differently mid-week) ── */}
+        <TouchableOpacity
+          style={[s.battleBtn, isBattleDay && { backgroundColor: '#C5F215' }]}
+          onPress={onStartBattle}
+          activeOpacity={0.85}
+        >
+          <Text style={[s.battleBtnText, isBattleDay && { color: '#111' }]}>
+            {isBattleDay ? '⚔️  Fight Now!' : '⚔️  Preview Battle'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* DEBUG */}
+        <TouchableOpacity style={s.debugBtn} onPress={onStartBattle} activeOpacity={0.7}>
+          <Text style={s.debugBtnText}>🐛  Debug — trigger battle instantly</Text>
+        </TouchableOpacity>
+
       </ScrollView>
     </>
   );
 }
 
-function ArenaScreen({ monsterIdx, logText, logBold, monsterImg }: {
-  monsterIdx: MonsterIdx; logText: string; logBold: boolean; monsterImg: number;
+// ─── Battle Flow Screens ──────────────────────────────────────────────────────
+
+function useBob(delay = 0, amplitude = 8, period = 3000) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(anim, { toValue: -amplitude, duration: period / 2, delay, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+      Animated.timing(anim, { toValue: 0,          duration: period / 2,          useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  return anim;
+}
+
+function useAura() {
+  const anim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(anim, { toValue: 1.2, duration: 1250, useNativeDriver: true }),
+      Animated.timing(anim, { toValue: 1,   duration: 1250, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  return anim;
+}
+
+
+// ── 3. Boss Intro Screen ──────────────────────────────────────────────────────
+
+function BossIntroScreen({ monsterIdx, onReady }: {
+  monsterIdx: MonsterIdx;
+  onReady: () => void;
 }) {
-  const monster    = MONSTERS[monsterIdx];
-  const boss       = BOSSES[monsterIdx % BOSSES.length];
-  const BossSvg    = BOSS_SVGS[monsterIdx % BOSS_SVGS.length];
+  const [fontsLoaded] = useFonts({ FredokaOne_400Regular });
+  const boss = getWeeklyBoss(monsterIdx);
+
+  // Responsive font size: fit the longest word within available width.
+  // Fredoka One glyphs are ~0.75× the font size wide on average (wide display font).
+  const [word1, ...rest] = boss.name.split(' ');
+  const word2 = rest.join(' ');
+  const screenW      = Dimensions.get('window').width;
+  const availableW   = screenW - 40; // 20px padding each side
+  const longestWord  = word1.length >= word2.length ? word1 : word2;
+  const sizeFromWidth = Math.floor(availableW / (longestWord.length * 0.75));
+  const bossNameSize  = Math.min(scale(68), sizeFromWidth);
+
+  const screenOpacity = useRef(new Animated.Value(0)).current;
+  const nameY         = useRef(new Animated.Value(-28)).current;
+  const nameOpacity   = useRef(new Animated.Value(0)).current;
+  const shakeX        = useRef(new Animated.Value(0)).current;
+  const cardY         = useRef(new Animated.Value(36)).current;
+  const cardOpacity   = useRef(new Animated.Value(0)).current;
+  const btnScale      = useRef(new Animated.Value(0.85)).current;
+  const btnOpacity    = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(screenOpacity, { toValue: 1, duration: 320, useNativeDriver: true }),
+      Animated.parallel([
+        Animated.timing(nameOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(nameY, { toValue: 0, friction: 6, tension: 65, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(shakeX, { toValue: 14,  duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: -14, duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: 9,   duration: 45, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: -9,  duration: 45, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: 0,   duration: 35, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(cardOpacity, { toValue: 1, duration: 280, useNativeDriver: true }),
+        Animated.spring(cardY, { toValue: 0, friction: 7, tension: 80, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(btnOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(btnScale,   { toValue: 1, friction: 5, tension: 90, useNativeDriver: true }),
+      ]),
+    ]).start();
+  }, []);
+
+  // Tagline with one word highlighted in slime lime
+  const renderTagline = () => {
+    const h = boss.taglineHighlight;
+    const upper = boss.tagline.toUpperCase();
+    if (!h) return <Text style={bi.tagline}>{upper}</Text>;
+    const hUpper = h.toUpperCase();
+    const idx = upper.indexOf(hUpper);
+    if (idx === -1) return <Text style={bi.tagline}>{upper}</Text>;
+    return (
+      <Text style={bi.tagline}>
+        {upper.slice(0, idx)}
+        <Text style={[bi.tagline, { color: '#C5F215' }]}>{hUpper}</Text>
+        {upper.slice(idx + hUpper.length)}
+      </Text>
+    );
+  };
+
+  const rewards = [
+    { icon: require('./assets/iconCoin.png'),   label: `${boss.bonus}¢` },
+    { icon: require('./assets/iconHPstar.png'), label: '50 xp'          },
+    { icon: require('./assets/iconShard.png'),  label: '1 shard'        },
+  ];
 
   return (
-    <>
-      <Header title="BATTLE" showCoins={false} />
-      <View style={s.arenaStage}>
-        <View style={s.arenaVs}>
-          <View style={s.arenaFighter}>
-            <View style={[s.monsterBubble, { width: 80, height: 80, backgroundColor: C.bg }]}>
-              <Image source={monsterImg} style={{ width: 64, height: 64 }} resizeMode="contain" />
+    <Animated.View style={{ flex: 1, opacity: screenOpacity }}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+      {/* Full-bleed video */}
+      <Video
+        source={boss.video}
+        style={StyleSheet.absoluteFill}
+        resizeMode={ResizeMode.COVER}
+        shouldPlay
+        isLooping
+      />
+
+      {/* Gradient: strong at top and bottom, clear in the middle */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.72)', 'transparent', 'rgba(0,0,0,0.88)']}
+        locations={[0, 0.42, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+
+      <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 60, paddingBottom: 32 }}>
+
+        {/* 💀 BOSS BATTLE! ⚡ pill */}
+        <View style={bi.badgePill}>
+          <Text style={bi.badgeText}>💀 <Text style={{ color: '#FFC928' }}>BOSS</Text> BATTLE! ⚡</Text>
+        </View>
+
+        {/* Boss name + tagline */}
+        <Animated.View style={{ transform: [{ translateY: nameY }, { translateX: shakeX }], opacity: nameOpacity, marginTop: 10 }}>
+          {fontsLoaded ? (
+            <View>
+              {/* Line 1 — white */}
+              <ScreenHeading
+                textStyle={{ fontSize: bossNameSize, lineHeight: bossNameSize + 2, textAlign: 'center', color: '#FFFFFF' }}
+                dropShadow={{ x: 4, y: 4 }}
+              >
+                {word1}
+              </ScreenHeading>
+              {/* Line 2 — slime lime, overlaps line 1 slightly */}
+              <ScreenHeading
+                style={{ marginTop: -Math.round(bossNameSize * 0.22) }}
+                textStyle={{ fontSize: bossNameSize, lineHeight: bossNameSize + 2, textAlign: 'center', color: '#C5F215' }}
+                dropShadow={{ x: 4, y: 4 }}
+              >
+                {word2}
+              </ScreenHeading>
             </View>
-            <Text style={s.arenaName}>{monster.name.toUpperCase()}</Text>
+          ) : (
+            <Text style={bi.bossNameFallback}>{boss.name}</Text>
+          )}
+          <View style={{ marginTop: 12 }}>
+            {renderTagline()}
           </View>
-          <Text style={s.arenaVsLabel}>VS</Text>
-          <View style={s.arenaFighter}>
-            <View style={[s.monsterBubble, { width: 80, height: 80, backgroundColor: '#FFF0EE' }]}><BossSvg size={64} /></View>
-            <Text style={s.arenaName}>{boss.name.toUpperCase()}</Text>
+        </Animated.View>
+
+        <View style={{ flex: 1 }} />
+
+        {/* Possible Rewards */}
+        <Animated.View style={{ opacity: cardOpacity, transform: [{ translateY: cardY }], marginBottom: 14 }}>
+          <View style={bi.rewardsPill}>
+            <Text style={bi.rewardsPillText}>POSSIBLE REWARDS</Text>
           </View>
-        </View>
-        <View style={s.arenaLog}>
-          <Text style={[s.arenaLogText, logBold && s.arenaLogBold]}>{logText}</Text>
-        </View>
+          <View style={bi.rewardsCard}>
+            {rewards.map((r, i) => (
+              <View key={i} style={{ alignItems: 'center', gap: 6 }}>
+                <Image source={r.icon} style={{ width: scale(60), height: scale(60) }} resizeMode="contain" />
+                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular' }}>{r.label}</Text>
+              </View>
+            ))}
+          </View>
+        </Animated.View>
+
+        {/* BATTLE! button — slime lime */}
+        <Animated.View style={{ opacity: btnOpacity, transform: [{ scale: btnScale }] }}>
+          <TouchableOpacity
+            onPress={onReady}
+            activeOpacity={0.85}
+            style={bi.battleBtn}
+          >
+            <Text style={bi.battleBtnText}>BATTLE!</Text>
+          </TouchableOpacity>
+        </Animated.View>
+
       </View>
-    </>
+    </Animated.View>
   );
 }
+
+// ── 4. Result Screen ──────────────────────────────────────────────────────────
 
 function ResultScreen({ monsterIdx, won, bonusCoins, onDone, monsterImg }: {
   monsterIdx: MonsterIdx; won: boolean; bonusCoins: number; onDone: () => void; monsterImg: number;
 }) {
-  const monster    = MONSTERS[monsterIdx];
-  const boss       = BOSSES[monsterIdx % BOSSES.length];
-
+  const boss = getWeeklyBoss(monsterIdx);
   return (
-    <>
-      <Header title="monstir" showCoins={false} />
-      <View style={s.resultScreen}>
-        <Text style={s.resultChip}>{won ? 'VICTORY' : 'DEFEAT'}</Text>
-        <Text style={s.resultH}>{won ? 'You won!' : 'You lost.'}</Text>
-        <Text style={s.resultSub}>{won ? `${monster.name} defeated ${boss.name}` : `${boss.name} was too powerful`}</Text>
-        <View style={[s.monsterBubble, { width: 110, height: 110, backgroundColor: won ? C.win : C.loss }]}>
-          <Image source={monsterImg} style={{ width: 88, height: 88 }} resizeMode="contain" />
-        </View>
-        <Text style={s.resultCoins}>+{bonusCoins}¢</Text>
-        <Text style={s.resultCoinsLbl}>{won ? 'added to your wallet' : 'consolation prize added'}</Text>
-        <TouchableOpacity style={s.evCta} onPress={onDone} activeOpacity={0.85}>
-          <Text style={s.evCtaText}>Back to home</Text>
-        </TouchableOpacity>
-      </View>
-    </>
+    <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20 }}>
+      <Text style={{ fontSize: scale(48) }}>{won ? '🏆' : '💀'}</Text>
+      <Text style={{ fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -0.5 }}>
+        {won ? 'Victory!' : 'Defeated'}
+      </Text>
+      <Text style={{ fontSize: scale(15), color: C.muted, textAlign: 'center' }}>
+        {won ? `You beat ${boss.name} and earned` : 'You earned'} {bonusCoins} coins
+      </Text>
+      <TouchableOpacity
+        style={{ backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, ...SOLID_SHADOW }}
+        onPress={onDone}
+        activeOpacity={0.8}
+      >
+        <Text style={{ fontSize: scale(16), fontWeight: '900', color: '#1A1A1A' }}>Back to Home</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
+
+// ── 5. Interactive Battle Arena ───────────────────────────────────────────────
+
+function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose }: {
+  monsterIdx: MonsterIdx; monsterImg: number; initialCores: number; onWin: () => void; onLose: () => void;
+}) {
+  const boss    = getWeeklyBoss(monsterIdx);
+  const monster = MONSTERS[monsterIdx];
+  const BossSvg = BOSS_SVGS[monsterIdx % BOSS_SVGS.length];
+
+  const PLAYER_MAX = 100;
+  const ENEMY_MAX  = 120;
+  const ENEMY_ATTACKS = ['Dark Swirl', 'Shadow Claw', 'Chaos Bolt', 'Vortex Slam'];
+
+  const [playerHp, setPlayerHp] = useState(PLAYER_MAX);
+  const [enemyHp,  setEnemyHp]  = useState(ENEMY_MAX);
+  const [cores,    setCores]    = useState(initialCores);
+  const [myTurn,   setMyTurn]   = useState(true);
+  const [live,     setLive]     = useState(true);
+  const [log,      setLog]      = useState(`${boss.name} has appeared! Choose an action.`);
+
+  const playerHpAnim = useRef(new Animated.Value(1)).current;
+  const enemyHpAnim  = useRef(new Animated.Value(1)).current;
+  const bobPlayer    = useBob(0,   7, 3000);
+  const bobEnemy     = useBob(800, 7, 3000);
+
+  function rnd(a: number, bv: number) { return Math.floor(Math.random() * (bv - a + 1)) + a; }
+
+  const animHp = (anim: Animated.Value, ratio: number) =>
+    Animated.timing(anim, { toValue: ratio, duration: 500, useNativeDriver: false }).start();
+
+  const playerHpRef = useRef(playerHp);
+  const enemyHpRef  = useRef(enemyHp);
+  useEffect(() => { playerHpRef.current = playerHp; }, [playerHp]);
+  useEffect(() => { enemyHpRef.current  = enemyHp;  }, [enemyHp]);
+
+  const act = (type: 'attack' | 'zap' | 'charge' | 'mega') => {
+    if (!myTurn || !live) return;
+    const cost = type === 'zap' ? 1 : type === 'charge' ? 2 : type === 'mega' ? 3 : 0;
+    if (cores < cost) return;
+
+    setCores(c => c - cost);
+    setMyTurn(false);
+
+    let newEH = enemyHpRef.current;
+    let newPH = playerHpRef.current;
+    let msg   = '';
+
+    if (type === 'attack') {
+      const d = rnd(13, 22); newEH = Math.max(0, newEH - d);
+      msg = `${monster.name} attacks! Dealt ${d} damage!`;
+    } else if (type === 'zap') {
+      const d = rnd(18, 28); newEH = Math.max(0, newEH - d);
+      msg = `${monster.name} used 🧿 Zap Shot! Dealt ${d} damage!`;
+    } else if (type === 'charge') {
+      const h = rnd(16, 24); newPH = Math.min(PLAYER_MAX, newPH + h);
+      msg = `${monster.name} used 🧿🧿 Overcharge! Restored +${h} HP!`;
+    } else {
+      const d = rnd(28, 44); newEH = Math.max(0, newEH - d);
+      msg = `${monster.name} used 🧿🧿🧿 Mega Beam! Dealt ${d} damage! Super effective!`;
+    }
+
+    setEnemyHp(newEH); setPlayerHp(newPH); setLog(msg);
+    animHp(enemyHpAnim, newEH / ENEMY_MAX);
+    animHp(playerHpAnim, newPH / PLAYER_MAX);
+
+    if (newEH <= 0) { setLive(false); setTimeout(onWin, 900); return; }
+
+    setTimeout(() => {
+      const d   = rnd(10, 22);
+      const fPH = Math.max(0, playerHpRef.current - d);
+      setPlayerHp(fPH);
+      animHp(playerHpAnim, fPH / PLAYER_MAX);
+      const atk = ENEMY_ATTACKS[Math.floor(Math.random() * ENEMY_ATTACKS.length)];
+      setLog(`${boss.name} used ${atk}! Dealt ${d} damage!`);
+      if (fPH <= 0) { setLive(false); setTimeout(onLose, 900); return; }
+      setTimeout(() => { setMyTurn(true); setLog(`What will ${monster.name} do?`); }, 1200);
+    }, 1300);
+  };
+
+  const off = !myTurn || !live;
+
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+      <Header title="BATTLE" showCoins={false} />
+
+      {/* HP tracker row */}
+      <View style={b.hpRow}>
+        {/* Player */}
+        <View style={b.hpCard}>
+          <View style={b.hpAvatarWell}>
+            <Image source={monsterImg} style={{ width: 34, height: 34 }} resizeMode="contain" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={b.hpName}>{monster.name}</Text>
+              <Text style={b.hpVal}>{playerHp}/{PLAYER_MAX}</Text>
+            </View>
+            <View style={b.hpTrack}>
+              <Animated.View style={[b.hpFill, { backgroundColor: '#6B35F0', width: playerHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
+            </View>
+          </View>
+        </View>
+        <Text style={b.hpVs}>VS</Text>
+        {/* Enemy */}
+        <View style={b.hpCard}>
+          <View style={[b.hpAvatarWell, { backgroundColor: '#FFF0EE' }]}>
+            <BossSvg size={30} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={b.hpName}>{boss.name}</Text>
+              <Text style={[b.hpVal, enemyHp < ENEMY_MAX * 0.25 && { color: '#CC3322' }]}>{enemyHp}/{ENEMY_MAX}</Text>
+            </View>
+            <View style={b.hpTrack}>
+              <Animated.View style={[b.hpFill, { backgroundColor: '#FF3B55', width: enemyHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* Fighter art stage */}
+      <View style={b.stage}>
+        <View style={b.stageFighter}>
+          <Animated.View style={[b.stageArtP, { transform: [{ translateY: bobPlayer }] }]}>
+            <Image source={monsterImg} style={{ width: 90, height: 90 }} resizeMode="contain" />
+          </Animated.View>
+          <Text style={b.stageTag}>{monster.name}</Text>
+        </View>
+        <View style={b.stageFighter}>
+          <Animated.View style={[b.stageArtE, { transform: [{ translateY: bobEnemy }] }]}>
+            <BossSvg size={90} />
+          </Animated.View>
+          <Text style={[b.stageTag, enemyHp < ENEMY_MAX * 0.25 && { color: '#CC3322', fontWeight: '700' }]}>
+            {enemyHp < ENEMY_MAX * 0.25 ? '⚠ WEAKENED' : boss.name}
+          </Text>
+        </View>
+      </View>
+
+      {/* Battle log */}
+      <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+        <View style={s.arenaLog}>
+          <Text style={s.arenaLogText}>{log}</Text>
+        </View>
+      </View>
+
+      {/* Action panel */}
+      <View style={b.actionArea}>
+        {/* Attack */}
+        <TouchableOpacity style={[s.battleBtn, off && { opacity: 0.4 }]} onPress={() => act('attack')} activeOpacity={0.85} disabled={off}>
+          <Text style={s.battleBtnText}>⚔  Attack</Text>
+        </TouchableOpacity>
+        {/* Specials */}
+        <View style={b.spRow}>
+          <TouchableOpacity style={[b.spCard, b.spCardZap,    (off || cores < 1) && b.spOff]} onPress={() => act('zap')}    activeOpacity={0.85} disabled={off || cores < 1}>
+            <Text style={b.spEmoji}>⚡</Text>
+            <Text style={b.spLabel}>Zap Shot</Text>
+            <Text style={b.spCost}>🧿 1</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[b.spCard, b.spCardCharge, (off || cores < 2) && b.spOff]} onPress={() => act('charge')} activeOpacity={0.85} disabled={off || cores < 2}>
+            <Text style={b.spEmoji}>💚</Text>
+            <Text style={b.spLabel}>Overcharge</Text>
+            <Text style={b.spCost}>🧿 2</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[b.spCard, b.spCardMega,   (off || cores < 3) && b.spOff]} onPress={() => act('mega')}   activeOpacity={0.85} disabled={off || cores < 3}>
+            <Text style={b.spEmoji}>✨</Text>
+            <Text style={b.spLabel}>Mega Beam</Text>
+            <Text style={b.spCost}>🧿 3</Text>
+          </TouchableOpacity>
+        </View>
+        {/* Core pip bar */}
+        <View style={b.coreRow}>
+          <Text style={b.coreLabel}>CORES</Text>
+          <View style={b.corePips}>
+            {Array.from({ length: 10 }).map((_, i) => (
+              <View key={i} style={[b.corePip, i < cores ? b.corePipOn : b.corePipOff]} />
+            ))}
+          </View>
+          <Text style={b.coreCount}>{cores}</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 
 function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate }: {
   coins: number; done: Partial<Record<ChoreId, boolean>>;
   battleResult: 'win' | 'loss' | null; monsterIdx: MonsterIdx; baseRate: string;
 }) {
   const completedChores = CHORES.filter(c => done[c.id]);
-  const boss            = BOSSES[monsterIdx % BOSSES.length];
+  const boss            = getWeeklyBoss(monsterIdx);
   const bonusCoins      = battleResult === 'win' ? boss.bonus : battleResult === 'loss' ? Math.round(boss.bonus * 0.2) : null;
 
   return (
@@ -3056,12 +3640,8 @@ export default function App() {
   const [xp, setXp]                     = useState(0);
   const [coins, setCoins]               = useState(0);
   const [done, setDone]                 = useState<Partial<Record<ChoreId, boolean>>>({});
-  const [logText, setLogText]           = useState('Preparing for battle...');
-  const [logBold, setLogBold]           = useState(false);
-  const [battleWon, setBattleWon]       = useState(false);
   const [bonusCoins, setBonusCoins]     = useState(0);
   const [battleResult, setBattleResult] = useState<'win' | 'loss' | null>(null);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Parent state
   const [viewMode, setViewMode]               = useState<ViewMode>('kid');
@@ -3088,6 +3668,11 @@ export default function App() {
   useEffect(() => {
     setKwDbg(prev => ({ ...KW_DEBUG_DEFAULTS, ...prev }));
   }, []);
+
+  // Allow audio to play through iOS silent switch
+  useEffect(() => {
+    Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+  }, []);
   const openDebug = () => { if (__DEV__) setDebugOpen(true); };
 
   const completeChore = useCallback((c: Chore) => {
@@ -3100,35 +3685,28 @@ export default function App() {
     }
   }, [xp, monsterIdx]);
 
-  const startBattle = useCallback(() => {
-    const doneCount = Object.keys(done).length;
-    const won       = Math.random() * 100 < calcWinOdds(doneCount);
-    const boss      = BOSSES[monsterIdx % BOSSES.length];
-    const monster   = MONSTERS[monsterIdx];
-    const bonus     = won ? boss.bonus : Math.round(boss.bonus * 0.2);
-
-    setBattleWon(won);
+  const handleBattleWin = useCallback(() => {
+    const boss = getWeeklyBoss(monsterIdx);
+    const bonus = boss.bonus;
+    setCoins(prev => prev + bonus);
     setBonusCoins(bonus);
-    setLogText('Preparing for battle...');
-    setLogBold(false);
-    setScreen('arena');
+    setBattleResult('win');
+    setScreen('result');
+  }, [monsterIdx]);
 
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
+  const handleBattleLose = useCallback(() => {
+    const boss = getWeeklyBoss(monsterIdx);
+    const consolation = Math.round(boss.bonus * 0.2);
+    setCoins(prev => prev + consolation);
+    setBonusCoins(consolation);
+    setBattleResult('loss');
+    setScreen('result');
+  }, [monsterIdx]);
 
-    battleScript(monster.name, boss.name, won).forEach(({ delay, text, bold }) => {
-      timers.current.push(setTimeout(() => { setLogText(text); setLogBold(bold); }, delay));
-    });
-
-    timers.current.push(setTimeout(() => {
-      setCoins(prev => prev + bonus);
-      setBattleResult(won ? 'win' : 'loss');
-      setScreen('result');
-    }, 4800));
-  }, [done, monsterIdx]);
+  const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
 
   const navTab = useCallback((t: Tab) => { setTab(t); setScreen(t); }, []);
-  const showTabBar = ['home', 'battle', 'wallet'].includes(screen);
+  const showTabBar = ['home', 'world', 'wallet'].includes(screen);
 
   const handleEvolveDone = useCallback(() => {
     setMonsterIdx(prev => (prev + 1) as MonsterIdx);
@@ -3274,9 +3852,12 @@ export default function App() {
         {viewMode === 'kid' ? (
           <>
             {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} done={done} onComplete={completeChore} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} />}
-            {screen === 'battle'   && <BattleScreen monsterIdx={monsterIdx} coins={coins} done={done} onStartBattle={startBattle} />}
-            {screen === 'arena'    && <ArenaScreen  monsterIdx={monsterIdx} logText={logText} logBold={logBold} monsterImg={currentMonsterImg} />}
-            {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} won={battleWon} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
+            {screen === 'world'      && <WorldScreen monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} />}
+            <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
+              <BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} />
+            </Modal>
+            {screen === 'arena'      && <BattleArenaScreen monsterIdx={monsterIdx} monsterImg={currentMonsterImg} initialCores={Math.min(Math.max(3, Object.keys(done).length), 10)} onWin={handleBattleWin} onLose={handleBattleLose} />}
+            {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} won={battleResult === 'win'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
             {screen === 'wallet'   && <WalletScreen coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} />}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} />}
             {showTabBar && <TabBar active={tab} onNav={navTab} onGoals={() => setScreen('goalFlow')} />}
@@ -3906,6 +4487,208 @@ const ob = StyleSheet.create({
 });
 
 // ─── Auth Styles (auth prefix) ────────────────────────────────────────────────
+
+// ─── World Screen Styles ──────────────────────────────────────────────────────
+
+const w = StyleSheet.create({
+  bossCard: {
+    height: scale(220),
+    borderRadius: scale(18),
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#111',
+    justifyContent: 'flex-end',
+  },
+  bossCardContent: {
+    padding: scale(16),
+    gap: scale(4),
+  },
+  bossTagPill: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
+    marginBottom: scale(4),
+  },
+  bossTagText: {
+    color: '#fff', fontFamily: 'FredokaOne_400Regular', fontSize: scale(13), letterSpacing: 0.5,
+  },
+  teaserLine1: {
+    color: '#fff', fontFamily: 'FredokaOne_400Regular', fontSize: scale(22),
+    textAlign: 'center', textShadowColor: '#000', textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 0,
+  },
+  teaserLine2: {
+    color: 'rgba(255,255,255,0.8)', fontFamily: 'FredokaOne_400Regular', fontSize: scale(13),
+    textAlign: 'center',
+  },
+  countdownBox: {
+    marginTop: scale(8), alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: scale(12), paddingVertical: scale(10),
+    borderWidth: 2, borderColor: '#111',
+  },
+  countdownText: {
+    color: '#111', fontFamily: 'FredokaOne_400Regular', fontSize: scale(26),
+    textAlign: 'center', letterSpacing: 2,
+  },
+
+  // Intel row
+  intelRow: { flexDirection: 'row', gap: scale(10) },
+  intelChip: {
+    backgroundColor: C.surface, borderRadius: scale(14), padding: scale(12),
+    borderWidth: 2, borderColor: '#111',
+    shadowColor: '#111', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4,
+    gap: scale(4),
+  },
+  intelLabel: {
+    fontSize: scale(10), fontWeight: '800', color: C.muted, letterSpacing: 0.8,
+  },
+  intelValue: {
+    fontSize: scale(20), fontFamily: 'FredokaOne_400Regular', color: '#111',
+  },
+  weaknessPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#FFF9E0', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1.5, borderColor: '#F0C040', alignSelf: 'flex-start',
+  },
+  weaknessIcon: { fontSize: scale(14) },
+  weaknessText: {
+    fontSize: scale(12), fontWeight: '800', color: '#8B6800',
+  },
+
+  // Section card
+  sectionCard: {
+    backgroundColor: C.surface, borderRadius: scale(16), padding: scale(16), gap: scale(6),
+    borderWidth: 2, borderColor: '#111',
+    shadowColor: '#111', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 5,
+  },
+  sectionTitle: {
+    fontSize: scale(13), fontWeight: '800', color: '#111', marginBottom: scale(4),
+  },
+
+  // Readiness
+  readinessRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  readinessLabel: { fontSize: scale(13), color: C.muted, fontWeight: '600' },
+  readinessValue: { fontSize: scale(14), fontWeight: '800', color: '#111' },
+  trackWrap: {
+    height: scale(10), backgroundColor: '#E8E4F2', borderRadius: 99, overflow: 'hidden',
+  },
+  trackFill: {
+    height: '100%', backgroundColor: '#6B35F0', borderRadius: 99,
+  },
+  forecastPill: {
+    backgroundColor: '#F0EBFF', borderRadius: scale(10), padding: scale(9),
+    borderWidth: 1, borderColor: '#C5B8E8',
+  },
+  forecastText: {
+    fontSize: scale(12), color: '#5A2DB8', fontWeight: '600', textAlign: 'center',
+  },
+
+  // What's at stake
+  stakeRow: {
+    flexDirection: 'row', justifyContent: 'space-around', paddingVertical: scale(8),
+  },
+  stakeItem: { alignItems: 'center', gap: scale(4) },
+  stakeIcon: { width: scale(44), height: scale(44) },
+  stakeVal: { fontSize: scale(18), fontFamily: 'FredokaOne_400Regular', color: '#111' },
+  stakeLbl: { fontSize: scale(11), color: C.muted, fontWeight: '600' },
+  evolutionHint: {
+    backgroundColor: '#FFF4E0', borderRadius: scale(10), padding: scale(9),
+    borderWidth: 1, borderColor: '#F0C060',
+  },
+  evolutionHintText: {
+    fontSize: scale(12), color: '#7A4800', fontWeight: '700', textAlign: 'center',
+  },
+});
+
+// ─── Battle Flow Styles ───────────────────────────────────────────────────────
+
+const bi = StyleSheet.create({
+  badgePill: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(10,10,10,0.80)',
+    borderRadius: 28, paddingHorizontal: 18, paddingVertical: 9,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.22)',
+  },
+  badgeText: {
+    fontSize: scale(13), fontWeight: '800', color: '#FFFFFF', letterSpacing: 1,
+  },
+  bossNameFallback: {
+    fontSize: scale(72), fontWeight: '900', color: '#FFFFFF',
+    letterSpacing: -1, lineHeight: scale(76),
+    textShadowColor: '#000', textShadowOffset: { width: 4, height: 5 }, textShadowRadius: 0,
+  },
+  tagline: {
+    fontSize: scale(17), fontWeight: '800', color: '#FFFFFF',
+    letterSpacing: 0.3, lineHeight: scale(23),
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 2, height: 3 },
+    textShadowRadius: 2,
+  },
+  rewardsPill: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(10,10,10,0.82)',
+    borderRadius: 28, paddingHorizontal: 22, paddingVertical: 10,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.22)',
+    marginBottom: -18,
+    zIndex: 1,
+  },
+  rewardsPillText: {
+    fontSize: scale(13), fontWeight: '800', color: '#FFFFFF', letterSpacing: 2,
+  },
+  rewardsCard: {
+    backgroundColor: '#FAF9F4', borderRadius: 20,
+    borderWidth: 2.5, borderColor: '#1A1A1A',
+    paddingTop: 32, paddingBottom: 22, paddingHorizontal: 16,
+    flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center',
+    ...SOLID_SHADOW,
+  },
+  battleBtn: {
+    backgroundColor: '#C5F215',
+    borderRadius: 50, paddingVertical: 18, alignItems: 'center',
+    borderWidth: 2.5, borderColor: '#1A1A1A',
+    ...SOLID_SHADOW,
+  },
+  battleBtnText: {
+    fontSize: scale(20), fontWeight: '900', color: '#1A1A1A', letterSpacing: 0.5,
+  },
+});
+
+const b = StyleSheet.create({
+  // ── Battle Arena ──────────────────────────────────────────────────────────
+  hpRow:           { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10 },
+  hpCard:          { flex: 1, backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 10, flexDirection: 'row', gap: 8, alignItems: 'center', ...SOLID_SHADOW },
+  hpAvatarWell:    { width: 38, height: 38, borderRadius: 10, backgroundColor: C.warmBg, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: C.border, flexShrink: 0 },
+  hpName:          { fontSize: scale(12), fontWeight: '700', color: C.text },
+  hpVal:           { fontSize: scale(11), fontWeight: '700', color: C.muted },
+  hpTrack:         { height: 7, borderRadius: 100, backgroundColor: C.border, marginTop: 4, overflow: 'hidden' },
+  hpFill:          { height: '100%', borderRadius: 100 },
+  hpVs:            { fontSize: scale(11), fontWeight: '900', color: C.border, alignSelf: 'center' },
+
+  stage:           { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-around', paddingHorizontal: 20, paddingBottom: 8, height: 160 },
+  stageFighter:    { alignItems: 'center', gap: 6 },
+  stageArtP:       { width: 100, height: 100, borderRadius: 16, backgroundColor: '#EAE4FF', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
+  stageArtE:       { width: 100, height: 100, borderRadius: 16, backgroundColor: C.warmBg, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
+  stageTag:        { fontSize: scale(11), fontWeight: '700', color: C.muted, backgroundColor: C.surface, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 2, borderWidth: 1, borderColor: C.border },
+
+  actionArea:      { flex: 1, paddingHorizontal: 14, justifyContent: 'flex-end', paddingBottom: 24, gap: 8 },
+  spRow:           { flexDirection: 'row', gap: 8 },
+  spCard:          { flex: 1, backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'center', gap: 2, ...SOLID_SHADOW },
+  spCardZap:       { backgroundColor: '#EAF3FB' },
+  spCardCharge:    { backgroundColor: '#F0F7F0' },
+  spCardMega:      { backgroundColor: '#EAE4FF' },
+  spOff:           { opacity: 0.35 },
+  spEmoji:         { fontSize: scale(18) },
+  spLabel:         { fontSize: scale(11), fontWeight: '700', color: C.text },
+  spCost:          { fontSize: scale(10), fontWeight: '700', color: C.muted },
+  coreRow:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  coreLabel:       { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.5, color: '#6B35F0' },
+  corePips:        { flex: 1, flexDirection: 'row', gap: 3 },
+  corePip:         { flex: 1, height: 12, borderRadius: 3 },
+  corePipOn:       { backgroundColor: '#6B35F0' },
+  corePipOff:      { backgroundColor: C.border },
+  coreCount:       { fontSize: scale(12), fontWeight: '700', color: '#6B35F0', minWidth: 20, textAlign: 'right' },
+});
 
 const auth = StyleSheet.create({
   backBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
