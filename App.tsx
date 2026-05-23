@@ -692,11 +692,55 @@ function AnimatedQuestRow({ chore, done, onPress, baseRate }: { chore: Chore; do
   );
 }
 
+function AnimatedManagedQuestRow({ chore, onPress }: { chore: ManagedChore; onPress: () => void }) {
+  const checkScale   = useRef(new Animated.Value(chore.completed ? 1 : 0)).current;
+  const sweepOpacity = useRef(new Animated.Value(chore.completed ? 1 : 0)).current;
+  const prevDone     = useRef(chore.completed);
+
+  useEffect(() => {
+    if (chore.completed && !prevDone.current) {
+      Animated.parallel([
+        Animated.spring(checkScale, { toValue: 1, useNativeDriver: true, tension: 280, friction: 6 }),
+        Animated.timing(sweepOpacity, { toValue: 1, duration: 350, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      ]).start();
+    } else if (!chore.completed && prevDone.current) {
+      checkScale.setValue(0);
+      sweepOpacity.setValue(0);
+    }
+    prevDone.current = chore.completed;
+  }, [chore.completed]);
+
+  const coinsAmt = Math.round(parseFloat(chore.rate) * 100);
+
+  return (
+    <TouchableOpacity
+      style={s.homeQuestCard}
+      onPress={chore.completed ? undefined : onPress}
+      activeOpacity={0.7}
+    >
+      <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />
+      <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
+        <ChoreIcon icon={chore.icon} size={45} />
+      </View>
+      <View style={s.homeQuestInfo}>
+        <Text style={[s.homeQuestTitle, chore.completed && s.homeQuestTitleDone]}>{chore.name}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Text style={{ fontSize: scale(14) }}>🪙</Text>
+          <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+        </View>
+      </View>
+      <Animated.View style={[s.homeQuestCheck, chore.completed && s.homeQuestCheckDone, chore.completed && { transform: [{ scale: checkScale }] }]}>
+        {chore.completed && <View style={s.homeQuestCheckDot} />}
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, done, onComplete, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
-  done: Partial<Record<ChoreId, boolean>>; onComplete: (c: Chore) => void;
+  managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
   onSwitchToParent: () => void;
   onOpenDebug: () => void;
   dbgMonsterSize: number;
@@ -711,7 +755,9 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, done, onComplete, onSw
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
   const pct        = Math.min(100, Math.round((xp / need) * 100));
-  const remaining  = CHORES.filter(c => !done[c.id]).length;
+  const dailyChores  = managedChores.filter(c => c.frequency === 'Every day');
+  const remaining    = dailyChores.filter(c => !c.completed).length;
+  const allDailyDone = dailyChores.length > 0 && dailyChores.every(c => c.completed);
   const dollars    = (coins / 100).toFixed(2);
   const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
@@ -767,12 +813,12 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, done, onComplete, onSw
     }, delay + 700);
   }, []);
 
-  const handleComplete = useCallback((c: Chore) => {
+  const handleCompleteManaged = useCallback((c: ManagedChore) => {
     pulseMonster();
-    showPop(`+${c.xp} XP`, 'xp');
-    showPop(`+${fmtCoins(choreCoins(c, baseRate))}`, 'coin', 120);
-    onComplete(c);
-  }, [pulseMonster, showPop, onComplete]);
+    showPop('+1 XP', 'xp');
+    showPop(`+${fmtCoins(Math.round(parseFloat(c.rate) * 100))}`, 'coin', 120);
+    onCompleteManaged(c.id);
+  }, [pulseMonster, showPop, onCompleteManaged]);
 
   return (
     <View style={s.homeRoot}>
@@ -848,24 +894,30 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, done, onComplete, onSw
 
         {/* Quests Header */}
         <View style={s.homeQuestsHeader}>
-          <Text style={s.homeQuestsTitle}>This week's quests</Text>
-          {remaining > 0 && (
+          <Text style={s.homeQuestsTitle}>Today's quests</Text>
+          {!allDailyDone && remaining > 0 && (
             <View style={s.homeLeftPill}>
               <Text style={s.homeLeftText}>{remaining} left</Text>
             </View>
           )}
         </View>
 
-        {/* Quest Items */}
-        {CHORES.map(c => (
-          <AnimatedQuestRow
-            key={c.id}
-            chore={c}
-            done={!!done[c.id]}
-            onPress={() => handleComplete(c)}
-            baseRate={baseRate}
-          />
-        ))}
+        {/* Quest Items or Completion Banner */}
+        {allDailyDone ? (
+          <View style={s.allDoneCard}>
+            <Text style={s.allDoneEmoji}>🎉</Text>
+            <Text style={s.allDoneTitle}>You got all your chores done!</Text>
+            <Text style={s.allDoneSub}>Come back tomorrow for more</Text>
+          </View>
+        ) : (
+          dailyChores.map(c => (
+            <AnimatedManagedQuestRow
+              key={c.id}
+              chore={c}
+              onPress={() => handleCompleteManaged(c)}
+            />
+          ))
+        )}
       </ScrollView>
 
       {/* floating reward popups */}
@@ -3685,6 +3737,18 @@ export default function App() {
     }
   }, [xp, monsterIdx]);
 
+  const completeManagedChore = useCallback((id: string) => {
+    const chore = managedChores.find(c => c.id === id);
+    if (!chore || chore.completed) return;
+    setManagedChores(prev => prev.map(c => c.id === id ? { ...c, completed: true } : c));
+    const newXp = xp + 1;
+    setXp(newXp);
+    setCoins(prev => prev + Math.round(parseFloat(chore.rate) * 100));
+    if (monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[monsterIdx].needed) {
+      setScreen('evolve');
+    }
+  }, [managedChores, xp, monsterIdx]);
+
   const handleBattleWin = useCallback(() => {
     const boss = getWeeklyBoss(monsterIdx);
     const bonus = boss.bonus;
@@ -3851,7 +3915,7 @@ export default function App() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} done={done} onComplete={completeChore} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} />}
+            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={completeManagedChore} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} />}
             {screen === 'world'      && <WorldScreen monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} />}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} />
@@ -4175,6 +4239,10 @@ const s = StyleSheet.create({
   homeQuestCheck:     { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#1A1A1A' },
   homeQuestCheckDone: { backgroundColor: '#6B35F0', borderColor: '#6B35F0', alignItems: 'center', justifyContent: 'center' },
   homeQuestCheckDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: 'white' },
+  allDoneCard:        { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', padding: 32, alignItems: 'center' as const, gap: 8, ...SOLID_SHADOW },
+  allDoneEmoji:       { fontSize: 48, marginBottom: 4 },
+  allDoneTitle:       { fontSize: scale(20), fontWeight: '800' as const, color: '#1A1A1A', textAlign: 'center' as const },
+  allDoneSub:         { fontSize: scale(15), fontWeight: '500' as const, color: '#ABABAB', textAlign: 'center' as const },
   battleCard:      { backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 14, paddingHorizontal: 16, ...SOLID_SHADOW },
   battleCardLabel: { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
   battlePower:     { fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -1, lineHeight: 36 },
