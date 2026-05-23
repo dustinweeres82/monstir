@@ -53,7 +53,9 @@ interface Boss {
 
 interface ManagedChore {
   id: string; name: string; description: string;
-  frequency: string; icon: string | number; bg: string; completed: boolean;
+  frequency: string; icon: string | number; bg: string;
+  status: 'active' | 'pending' | 'approved' | 'rejected';
+  rejectionNote?: string;
   difficulty: 1 | 2 | 3;
   assignedTo: string[];
 }
@@ -176,12 +178,12 @@ const CHORE_ICONS: { icon: string | number; bg: string }[] = [
 ];
 
 const DEFAULT_MANAGED_CHORES: ManagedChore[] = [
-  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', completed: false },
-  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', completed: false },
-  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', completed: false },
-  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', completed: true  },
-  { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', completed: false },
-  { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', completed: false },
+  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active' },
+  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active' },
+  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active' },
+  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'approved' },
+  { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active' },
+  { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active' },
 ];
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -698,52 +700,118 @@ function AnimatedQuestRow({ chore, done, onPress, baseRate }: { chore: Chore; do
 }
 
 function AnimatedManagedQuestRow({ chore, onPress, baseRate }: { chore: ManagedChore; onPress: () => void; baseRate: string }) {
-  const checkScale   = useRef(new Animated.Value(chore.completed ? 1 : 0)).current;
-  const sweepOpacity = useRef(new Animated.Value(chore.completed ? 1 : 0)).current;
-  const prevDone     = useRef(chore.completed);
+  const checkScale   = useRef(new Animated.Value(chore.status === 'approved' ? 1 : 0)).current;
+  const sweepOpacity = useRef(new Animated.Value(chore.status === 'approved' ? 1 : 0)).current;
+  const pendingPulse = useRef(new Animated.Value(1)).current;
+  const shakeX       = useRef(new Animated.Value(0)).current;
+  const prevStatus   = useRef(chore.status);
 
   useEffect(() => {
-    if (chore.completed && !prevDone.current) {
+    const prev = prevStatus.current;
+    const next = chore.status;
+
+    if (next === 'approved' && prev !== 'approved') {
       Animated.parallel([
         Animated.spring(checkScale, { toValue: 1, useNativeDriver: true, tension: 280, friction: 6 }),
         Animated.timing(sweepOpacity, { toValue: 1, duration: 350, easing: Easing.out(Easing.quad), useNativeDriver: true }),
       ]).start();
-    } else if (!chore.completed && prevDone.current) {
+    } else if (next !== 'approved' && prev === 'approved') {
       checkScale.setValue(0);
       sweepOpacity.setValue(0);
     }
-    prevDone.current = chore.completed;
-  }, [chore.completed]);
+
+    if (next === 'rejected' && prev !== 'rejected') {
+      Animated.sequence([
+        Animated.timing(shakeX, { toValue: 10,  duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: -10, duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: 7,   duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: -7,  duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: 0,   duration: 55, useNativeDriver: true }),
+      ]).start();
+    }
+
+    prevStatus.current = next;
+  }, [chore.status]);
+
+  useEffect(() => {
+    if (chore.status === 'pending') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pendingPulse, { toValue: 0.4, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(pendingPulse, { toValue: 1,   duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      pendingPulse.setValue(1);
+    }
+  }, [chore.status]);
 
   const coinsAmt = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+  const isPending  = chore.status === 'pending';
+  const isApproved = chore.status === 'approved';
+  const isRejected = chore.status === 'rejected';
+  const isTappable = chore.status === 'active' || chore.status === 'rejected';
 
   return (
-    <TouchableOpacity
-      style={s.homeQuestCard}
-      onPress={chore.completed ? undefined : onPress}
-      activeOpacity={0.7}
-    >
-      <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />
-      <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-        <ChoreIcon icon={chore.icon} size={45} />
-      </View>
-      <View style={s.homeQuestInfo}>
-        <Text style={[s.homeQuestTitle, chore.completed && s.homeQuestTitleDone]}>{chore.name}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Text style={{ fontSize: scale(14) }}>🪙</Text>
-          <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+    <Animated.View style={{ transform: [{ translateX: shakeX }] }}>
+      <TouchableOpacity
+        style={[
+          s.homeQuestCard,
+          isPending  && s.homeQuestCardPending,
+          isRejected && s.homeQuestCardRejected,
+        ]}
+        onPress={isTappable ? onPress : undefined}
+        activeOpacity={isTappable ? 0.7 : 1}
+      >
+        {isApproved && <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />}
+        {isPending  && <View style={s.homeQuestSweepPending} />}
+
+        <View style={[s.homeQuestIcon, { backgroundColor: chore.bg, opacity: isPending ? 0.6 : 1 }]}>
+          <ChoreIcon icon={chore.icon} size={45} />
         </View>
-      </View>
-      <Animated.View style={[s.homeQuestCheck, chore.completed && s.homeQuestCheckDone, chore.completed && { transform: [{ scale: checkScale }] }]}>
-        {chore.completed && <View style={s.homeQuestCheckDot} />}
-      </Animated.View>
-    </TouchableOpacity>
+
+        <View style={s.homeQuestInfo}>
+          <Text style={[s.homeQuestTitle, isApproved && s.homeQuestTitleDone]}>{chore.name}</Text>
+          {isPending ? (
+            <Animated.Text style={[s.pendingLabel, { opacity: pendingPulse }]}>⏳ Waiting for approval...</Animated.Text>
+          ) : isRejected ? (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={{ fontSize: scale(14) }}>🪙</Text>
+                <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+              </View>
+              <View style={s.rejectionBubble}>
+                <Text style={s.rejectionNote}>{chore.rejectionNote || "Let's try that again!"}</Text>
+              </View>
+              <Text style={s.retryLabel}>Tap to resubmit</Text>
+            </>
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={{ fontSize: scale(14) }}>🪙</Text>
+              <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+            </View>
+          )}
+        </View>
+
+        {isPending ? (
+          <Animated.View style={[s.pendingBadge, { opacity: pendingPulse }]}>
+            <Text style={{ fontSize: scale(16) }}>⏳</Text>
+          </Animated.View>
+        ) : (
+          <Animated.View style={[s.homeQuestCheck, isApproved && s.homeQuestCheckDone, isApproved && { transform: [{ scale: checkScale }] }]}>
+            {isApproved && <View style={s.homeQuestCheckDot} />}
+          </Animated.View>
+        )}
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate, requireApproval }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
   currentKidName: string;
@@ -757,6 +825,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   platformImg: number;
   platformAspect: number;
   baseRate: string;
+  requireApproval: boolean;
 }) {
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
@@ -765,8 +834,9 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
     c.frequency === 'Every day' &&
     (c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName))
   );
-  const remaining    = dailyChores.filter(c => !c.completed).length;
-  const allDailyDone = dailyChores.length > 0 && dailyChores.every(c => c.completed);
+  const remaining    = dailyChores.filter(c => c.status === 'active' || c.status === 'rejected').length;
+  const allDailyDone = dailyChores.length > 0 && dailyChores.every(c => c.status === 'approved');
+  const allSubmitted = !allDailyDone && dailyChores.length > 0 && dailyChores.every(c => c.status === 'approved' || c.status === 'pending');
   const dollars    = (coins / 100).toFixed(2);
   const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
@@ -824,10 +894,14 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
 
   const handleCompleteManaged = useCallback((c: ManagedChore) => {
     pulseMonster();
-    showPop(`+${c.difficulty} XP`, 'xp');
-    showPop(`+${fmtCoins(Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[c.difficulty]))}`, 'coin', 120);
+    if (requireApproval) {
+      showPop('Submitted! ✋', 'xp');
+    } else {
+      showPop(`+${c.difficulty} XP`, 'xp');
+      showPop(`+${fmtCoins(Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[c.difficulty]))}`, 'coin', 120);
+    }
     onCompleteManaged(c.id);
-  }, [pulseMonster, showPop, onCompleteManaged, baseRate]);
+  }, [pulseMonster, showPop, onCompleteManaged, baseRate, requireApproval]);
 
   return (
     <View style={s.homeRoot}>
@@ -918,6 +992,22 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
             <Text style={s.allDoneTitle}>You got all your chores done!</Text>
             <Text style={s.allDoneSub}>Come back tomorrow for more</Text>
           </View>
+        ) : allSubmitted ? (
+          <>
+            {dailyChores.map(c => (
+              <AnimatedManagedQuestRow
+                key={c.id}
+                chore={c}
+                onPress={() => handleCompleteManaged(c)}
+                baseRate={baseRate}
+              />
+            ))}
+            <View style={s.allDoneCard}>
+              <Text style={s.allDoneEmoji}>⏳</Text>
+              <Text style={s.allDoneTitle}>Nice work! Waiting for parent approval</Text>
+              <Text style={s.allDoneSub}>Your parent will review soon</Text>
+            </View>
+          </>
         ) : (
           dailyChores.map(c => (
             <AnimatedManagedQuestRow
@@ -1920,21 +2010,22 @@ function EvolveScreen({ fromIdx, onDone, monsterId }: { fromIdx: MonsterIdx; onD
 
 // ─── Parent Screens ───────────────────────────────────────────────────────────
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid }: {
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApprove, onReject, baseRate }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: () => void;
   onAddKid: () => void;
+  managedChores: ManagedChore[];
+  onApprove: (id: string) => void;
+  onReject: (id: string, note: string) => void;
+  baseRate: string;
 }) {
   const kids = [
     { name: 'Sam',    level: 12, emoji: '🧒', bg: '#C5E8FF' },
     { name: 'Lily',   level: 8,  emoji: '👧', bg: '#FFEFC5' },
     { name: 'Max',    level: 5,  emoji: '👦', bg: '#E8C5FF' },
   ];
-  const topHabits = [
-    { name: 'Make bed',          count: 7, icon: '🛏️' },
-    { name: 'Read for 20 minutes', count: 5, icon: '📖' },
-    { name: 'Drink water',       count: 5, icon: '💧' },
-  ];
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectNote, setRejectNote]   = useState('');
   const tasksCompleted = 24;
   const tasksTotal     = 32;
   const xpEarned       = 1250;
@@ -2011,25 +2102,88 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid }: {
           <MascotBanner message="Small steps today lead to big rewards tomorrow!" />
         </View>
 
-        {/* Top habits */}
-        <View style={{ paddingHorizontal: 16 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ fontSize: scale(17), fontWeight: '800', color: '#1A1A1A' }}>Top habits</Text>
-            <TouchableOpacity activeOpacity={0.7}><Text style={{ fontSize: scale(14), fontWeight: '600', color: '#6B35F0' }}>View all</Text></TouchableOpacity>
-          </View>
-          <View style={{ gap: 0, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', overflow: 'hidden', ...SOLID_SHADOW }}>
-            {topHabits.map((h, i) => (
-              <View key={h.name} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: i < topHabits.length - 1 ? 1 : 0, borderBottomColor: '#F0EEE8', gap: 12 }}>
-                <Text style={{ fontSize: scale(20), width: 28, textAlign: 'center' }}>{h.icon}</Text>
-                <Text style={{ flex: 1, fontSize: scale(15), fontWeight: '500', color: '#1A1A1A' }}>{h.name}</Text>
-                <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#ABABAB', marginRight: 10 }}>{h.count}x</Text>
-                <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#3B8A3A', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ color: '#FFF', fontSize: scale(13), fontWeight: '700' }}>✓</Text>
-                </View>
+        {/* Needs approval */}
+        {(() => {
+          const pending = managedChores.filter(c => c.status === 'pending');
+          return (
+            <View style={{ paddingHorizontal: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <Text style={{ fontSize: scale(17), fontWeight: '800', color: '#1A1A1A' }}>Needs approval</Text>
+                {pending.length > 0 && (
+                  <View style={p.pendingTabBadge}>
+                    <Text style={p.pendingTabBadgeText}>{pending.length}</Text>
+                  </View>
+                )}
               </View>
-            ))}
-          </View>
-        </View>
+              {pending.length === 0 ? (
+                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, alignItems: 'center', gap: 6, ...SOLID_SHADOW }}>
+                  <Text style={{ fontSize: scale(28) }}>✅</Text>
+                  <Text style={{ fontSize: scale(15), fontWeight: '700', color: '#1A1A1A' }}>All caught up!</Text>
+                  <Text style={{ fontSize: scale(13), color: '#ABABAB' }}>No chores waiting for approval</Text>
+                </View>
+              ) : (
+                <View style={{ gap: 10 }}>
+                  {pending.map(chore => (
+                    <View key={chore.id} style={p.pendingReviewCard}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                        <View style={[p.choreManageIcon, { backgroundColor: chore.bg }]}>
+                          <ChoreIcon icon={chore.icon} size={38} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={p.choreManageName}>{chore.name}</Text>
+                          <Text style={p.choreManageFreq}>
+                            {chore.assignedTo.length > 0 ? chore.assignedTo.join(', ') : 'Everyone'}
+                            {' · '}{'⭐'.repeat(chore.difficulty)}
+                          </Text>
+                        </View>
+                        <Text style={p.choreManageRate}>
+                          ${(parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2)}
+                        </Text>
+                      </View>
+                      {rejectingId === chore.id ? (
+                        <View style={{ gap: 8 }}>
+                          <TextInput
+                            style={[p.formInput, { minHeight: 44 }]}
+                            placeholder="Optional note for kid..."
+                            value={rejectNote}
+                            onChangeText={setRejectNote}
+                            multiline
+                            placeholderTextColor={C.hint}
+                          />
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity
+                              style={p.rejectConfirmBtn}
+                              onPress={() => { onReject(chore.id, rejectNote); setRejectingId(null); setRejectNote(''); }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={p.rejectConfirmBtnText}>Send back</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[p.rejectBtn, { flex: 1 }]}
+                              onPress={() => { setRejectingId(null); setRejectNote(''); }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={p.rejectBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <TouchableOpacity style={p.approveBtn} onPress={() => onApprove(chore.id)} activeOpacity={0.7}>
+                            <Text style={p.approveBtnText}>✓ Approve</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={p.rejectBtn} onPress={() => { setRejectingId(chore.id); setRejectNote(''); }} activeOpacity={0.7}>
+                            <Text style={p.rejectBtnText}>✗ Send back</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })()}
 
       </ScrollView>
     </CreamBg>
@@ -2044,7 +2198,12 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit, baseRate }: {
   baseRate: string;
 }) {
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
-  const filtered = chores.filter(c => activeTab === 'active' ? !c.completed : c.completed);
+
+  const filtered = chores.filter(c => {
+    if (activeTab === 'active')    return c.status === 'active' || c.status === 'rejected' || c.status === 'pending';
+    if (activeTab === 'completed') return c.status === 'approved';
+    return false;
+  });
 
   return (
     <CreamBg>
@@ -2079,23 +2238,24 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit, baseRate }: {
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 100, gap: 10 }}>
         {filtered.map(chore => (
-          <TouchableOpacity key={chore.id} style={p.choreManageRow} onPress={() => onEdit(chore)} activeOpacity={0.7}>
-            <View style={[p.choreManageIcon, { backgroundColor: chore.bg }]}>
-              <ChoreIcon icon={chore.icon} size={38} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={p.choreManageName}>{chore.name}</Text>
-              <Text style={p.choreManageFreq}>
-                {chore.frequency} · {chore.assignedTo.length > 0 ? chore.assignedTo.join(', ') : 'Everyone'}
-              </Text>
-            </View>
-            <View style={{ alignItems: 'flex-end', gap: 2 }}>
-              <Text style={{ fontSize: scale(12) }}>{'⭐'.repeat(chore.difficulty)}</Text>
-              <Text style={p.choreManageRate}>${(parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2)}</Text>
-            </View>
-            <Text style={p.choreManageDrag}>⠿</Text>
-          </TouchableOpacity>
-        ))}
+            <TouchableOpacity key={chore.id} style={p.choreManageRow} onPress={() => onEdit(chore)} activeOpacity={0.7}>
+              <View style={[p.choreManageIcon, { backgroundColor: chore.bg }]}>
+                <ChoreIcon icon={chore.icon} size={38} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={p.choreManageName}>{chore.name}</Text>
+                <Text style={p.choreManageFreq}>
+                  {chore.frequency} · {chore.assignedTo.length > 0 ? chore.assignedTo.join(', ') : 'Everyone'}
+                </Text>
+              </View>
+              <View style={{ alignItems: 'flex-end', gap: 2 }}>
+                <Text style={{ fontSize: scale(12) }}>{'⭐'.repeat(chore.difficulty)}</Text>
+                <Text style={p.choreManageRate}>${(parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2)}</Text>
+              </View>
+              <Text style={p.choreManageDrag}>⠿</Text>
+            </TouchableOpacity>
+          ))
+        )}
         {filtered.length === 0 && (
           <Text style={{ color: C.muted, textAlign: 'center', marginTop: 40, fontSize: scale(14) }}>
             No {activeTab} chores
@@ -2139,7 +2299,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
       assignedTo,
       icon: selectedIcon.icon,
       bg: selectedIcon.bg,
-      completed: existing?.completed ?? false,
+      status: existing?.status ?? 'active' as const,
     };
     onSave(chore);
   };
@@ -3798,10 +3958,26 @@ export default function App() {
     }
   }, [xp, monsterIdx]);
 
-  const completeManagedChore = useCallback((id: string) => {
+  const submitManagedChore = useCallback((id: string) => {
     const chore = managedChores.find(c => c.id === id);
-    if (!chore || chore.completed) return;
-    setManagedChores(prev => prev.map(c => c.id === id ? { ...c, completed: true } : c));
+    if (!chore || (chore.status !== 'active' && chore.status !== 'rejected')) return;
+    if (requireApproval) {
+      setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'pending' as const, rejectionNote: undefined } : c));
+    } else {
+      setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const } : c));
+      const newXp = xp + chore.difficulty;
+      setXp(newXp);
+      setCoins(prev => prev + Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]));
+      if (monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[monsterIdx].needed) {
+        setScreen('evolve');
+      }
+    }
+  }, [managedChores, xp, monsterIdx, baseRate, requireApproval]);
+
+  const approveManagedChore = useCallback((id: string) => {
+    const chore = managedChores.find(c => c.id === id);
+    if (!chore || chore.status !== 'pending') return;
+    setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const } : c));
     const newXp = xp + chore.difficulty;
     setXp(newXp);
     setCoins(prev => prev + Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]));
@@ -3809,6 +3985,10 @@ export default function App() {
       setScreen('evolve');
     }
   }, [managedChores, xp, monsterIdx, baseRate]);
+
+  const rejectManagedChore = useCallback((id: string, note: string) => {
+    setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'rejected' as const, rejectionNote: note || undefined } : c));
+  }, [managedChores]);
 
   const handleBattleWin = useCallback(() => {
     const boss = getWeeklyBoss(monsterIdx);
@@ -3976,7 +4156,7 @@ export default function App() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={completeManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} />}
+            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} requireApproval={requireApproval} />}
             {screen === 'world'      && <WorldScreen monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} />}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} />
@@ -3989,7 +4169,7 @@ export default function App() {
           </>
         ) : (
           <>
-            {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => setShowKidProfile(true)} />}
+            {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => setShowKidProfile(true)} managedChores={managedChores} onApprove={approveManagedChore} onReject={rejectManagedChore} baseRate={baseRate} />}
             {parentScreen === 'chores'     && <ParentChoresScreen chores={managedChores} onBack={() => setParentScreen('parentHome')} onAdd={() => { setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} />}
             {(parentScreen === 'addChore' || parentScreen === 'editChore') && (
               <AddEditChoreScreen
@@ -4302,6 +4482,14 @@ const s = StyleSheet.create({
   homeQuestCheck:     { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#1A1A1A' },
   homeQuestCheckDone: { backgroundColor: '#6B35F0', borderColor: '#6B35F0', alignItems: 'center', justifyContent: 'center' },
   homeQuestCheckDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: 'white' },
+  homeQuestCardPending: { borderColor: '#E6A817', backgroundColor: '#FFFBF0' },
+  homeQuestSweepPending: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFF3C4', borderRadius: 14 },
+  pendingLabel: { fontSize: scale(13), fontWeight: '600' as const, color: '#C47F00' },
+  pendingBadge: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FFF3C4', borderWidth: 2, borderColor: '#E6A817', alignItems: 'center' as const, justifyContent: 'center' as const },
+  homeQuestCardRejected: { borderColor: '#E84040', backgroundColor: '#FFF5F5' },
+  rejectionBubble: { marginTop: 4, backgroundColor: '#FFE5E5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  rejectionNote: { fontSize: scale(12), color: '#C00', fontStyle: 'italic' as const },
+  retryLabel: { fontSize: scale(12), fontWeight: '700' as const, color: '#E84040', marginTop: 2 },
   allDoneCard:        { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', padding: 32, alignItems: 'center' as const, gap: 8, ...SOLID_SHADOW },
   allDoneEmoji:       { fontSize: 48, marginBottom: 4 },
   allDoneTitle:       { fontSize: scale(20), fontWeight: '800' as const, color: '#1A1A1A', textAlign: 'center' as const },
@@ -4558,6 +4746,17 @@ const p = StyleSheet.create({
   rateDot:          { width: 8, height: 8, borderRadius: 4 },
   noteCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 4, ...SOLID_SHADOW },
   noteText:         { flex: 1, fontSize: scale(14), color: '#1A1A1A', lineHeight: 20 },
+
+  // Pending approval styles
+  approveBtn:           { flex: 1, backgroundColor: '#C5F215', borderRadius: 10, borderWidth: 2, borderColor: '#1A1A1A', padding: 10, alignItems: 'center' as const },
+  approveBtnText:       { fontSize: scale(14), fontWeight: '800' as const, color: '#1A1A1A' },
+  rejectBtn:            { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 2, borderColor: '#1A1A1A', padding: 10, alignItems: 'center' as const },
+  rejectBtnText:        { fontSize: scale(14), fontWeight: '700' as const, color: '#E84040' },
+  rejectConfirmBtn:     { flex: 1, backgroundColor: '#E84040', borderRadius: 10, padding: 10, alignItems: 'center' as const },
+  rejectConfirmBtnText: { fontSize: scale(14), fontWeight: '800' as const, color: '#FFFFFF' },
+  pendingReviewCard:    { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#E6A817', padding: 14, ...SOLID_SHADOW },
+  pendingTabBadge:      { backgroundColor: '#E6A817', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center' as const, justifyContent: 'center' as const, paddingHorizontal: 5 },
+  pendingTabBadgeText:  { fontSize: scale(11), fontWeight: '800' as const, color: '#FFFFFF' },
 });
 
 // ─── Settings Styles (ps prefix) ─────────────────────────────────────────────
