@@ -2255,7 +2255,7 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit, baseRate }: {
               <Text style={p.choreManageDrag}>⠿</Text>
             </TouchableOpacity>
           ))
-        )}
+        }
         {filtered.length === 0 && (
           <Text style={{ color: C.muted, textAlign: 'center', marginTop: 40, fontSize: scale(14) }}>
             No {activeTab} chores
