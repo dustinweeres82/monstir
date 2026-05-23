@@ -53,7 +53,9 @@ interface Boss {
 
 interface ManagedChore {
   id: string; name: string; description: string;
-  frequency: string; rate: string; icon: string | number; bg: string; completed: boolean;
+  frequency: string; icon: string | number; bg: string; completed: boolean;
+  difficulty: 1 | 2 | 3;
+  assignedTo: string[];
 }
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -157,6 +159,9 @@ function msUntilSunday(): number {
 
 const FREQUENCY_OPTIONS = ['Every day', '2 times per week', '3 times per week', 'Once a week', 'As needed'];
 
+const DIFFICULTY_MULTIPLIERS: Record<1 | 2 | 3, number> = { 1: 1.0, 2: 1.5, 3: 2.0 };
+const DIFFICULTY_LABELS: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
+
 const CHORE_ICONS: { icon: string | number; bg: string }[] = [
   { icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7' },
   { icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6' },
@@ -171,12 +176,12 @@ const CHORE_ICONS: { icon: string | number; bg: string }[] = [
 ];
 
 const DEFAULT_MANAGED_CHORES: ManagedChore[] = [
-  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        rate: '0.50', icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', completed: false },
-  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        rate: '0.50', icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', completed: false },
-  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', rate: '1.00', icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', completed: false },
-  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', rate: '0.75', icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', completed: true  },
-  { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', rate: '0.50', icon: '🪴',                                             bg: '#F0F7F0', completed: false },
-  { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        rate: '0.25', icon: '🐾',                                             bg: '#FFF9E6', completed: false },
+  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', completed: false },
+  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', completed: false },
+  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', completed: false },
+  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', completed: true  },
+  { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', completed: false },
+  { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', completed: false },
 ];
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -692,7 +697,7 @@ function AnimatedQuestRow({ chore, done, onPress, baseRate }: { chore: Chore; do
   );
 }
 
-function AnimatedManagedQuestRow({ chore, onPress }: { chore: ManagedChore; onPress: () => void }) {
+function AnimatedManagedQuestRow({ chore, onPress, baseRate }: { chore: ManagedChore; onPress: () => void; baseRate: string }) {
   const checkScale   = useRef(new Animated.Value(chore.completed ? 1 : 0)).current;
   const sweepOpacity = useRef(new Animated.Value(chore.completed ? 1 : 0)).current;
   const prevDone     = useRef(chore.completed);
@@ -710,7 +715,7 @@ function AnimatedManagedQuestRow({ chore, onPress }: { chore: ManagedChore; onPr
     prevDone.current = chore.completed;
   }, [chore.completed]);
 
-  const coinsAmt = Math.round(parseFloat(chore.rate) * 100);
+  const coinsAmt = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
 
   return (
     <TouchableOpacity
@@ -738,9 +743,10 @@ function AnimatedManagedQuestRow({ chore, onPress }: { chore: ManagedChore; onPr
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
+  currentKidName: string;
   onSwitchToParent: () => void;
   onOpenDebug: () => void;
   dbgMonsterSize: number;
@@ -755,7 +761,10 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
   const pct        = Math.min(100, Math.round((xp / need) * 100));
-  const dailyChores  = managedChores.filter(c => c.frequency === 'Every day');
+  const dailyChores  = managedChores.filter(c =>
+    c.frequency === 'Every day' &&
+    (c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName))
+  );
   const remaining    = dailyChores.filter(c => !c.completed).length;
   const allDailyDone = dailyChores.length > 0 && dailyChores.every(c => c.completed);
   const dollars    = (coins / 100).toFixed(2);
@@ -815,10 +824,10 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
 
   const handleCompleteManaged = useCallback((c: ManagedChore) => {
     pulseMonster();
-    showPop('+1 XP', 'xp');
-    showPop(`+${fmtCoins(Math.round(parseFloat(c.rate) * 100))}`, 'coin', 120);
+    showPop(`+${c.difficulty} XP`, 'xp');
+    showPop(`+${fmtCoins(Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[c.difficulty]))}`, 'coin', 120);
     onCompleteManaged(c.id);
-  }, [pulseMonster, showPop, onCompleteManaged]);
+  }, [pulseMonster, showPop, onCompleteManaged, baseRate]);
 
   return (
     <View style={s.homeRoot}>
@@ -915,6 +924,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
               key={c.id}
               chore={c}
               onPress={() => handleCompleteManaged(c)}
+              baseRate={baseRate}
             />
           ))
         )}
@@ -2026,11 +2036,12 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid }: {
   );
 }
 
-function ParentChoresScreen({ chores, onBack, onAdd, onEdit }: {
+function ParentChoresScreen({ chores, onBack, onAdd, onEdit, baseRate }: {
   chores: ManagedChore[];
   onBack: () => void;
   onAdd: () => void;
   onEdit: (c: ManagedChore) => void;
+  baseRate: string;
 }) {
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
   const filtered = chores.filter(c => activeTab === 'active' ? !c.completed : c.completed);
@@ -2074,9 +2085,14 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit }: {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={p.choreManageName}>{chore.name}</Text>
-              <Text style={p.choreManageFreq}>{chore.frequency}</Text>
+              <Text style={p.choreManageFreq}>
+                {chore.frequency} · {chore.assignedTo.length > 0 ? chore.assignedTo.join(', ') : 'Everyone'}
+              </Text>
             </View>
-            <Text style={p.choreManageRate}>${chore.rate}</Text>
+            <View style={{ alignItems: 'flex-end', gap: 2 }}>
+              <Text style={{ fontSize: scale(12) }}>{'⭐'.repeat(chore.difficulty)}</Text>
+              <Text style={p.choreManageRate}>${(parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2)}</Text>
+            </View>
             <Text style={p.choreManageDrag}>⠿</Text>
           </TouchableOpacity>
         ))}
@@ -2090,17 +2106,20 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit }: {
   );
 }
 
-function AddEditChoreScreen({ existing, onBack, onSave, onDelete }: {
+function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate }: {
   existing: ManagedChore | null;
   onBack: () => void;
   onSave: (c: ManagedChore) => void;
   onDelete?: () => void;
+  kids: string[];
+  baseRate: string;
 }) {
   const isEdit = existing !== null;
   const [name, setName]               = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
   const [frequency, setFrequency]     = useState(existing?.frequency ?? FREQUENCY_OPTIONS[0]);
-  const [rate, setRate]               = useState(existing?.rate ?? '');
+  const [difficulty, setDifficulty]   = useState<1 | 2 | 3>(existing?.difficulty ?? 1);
+  const [assignedTo, setAssignedTo]   = useState<string[]>(existing?.assignedTo ?? []);
   const [selectedIcon, setSelectedIcon] = useState<{ icon: string | number; bg: string }>(
     existing ? { icon: existing.icon, bg: existing.bg } : CHORE_ICONS[0]
   );
@@ -2116,7 +2135,8 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete }: {
       name,
       description,
       frequency,
-      rate,
+      difficulty,
+      assignedTo,
       icon: selectedIcon.icon,
       bg: selectedIcon.bg,
       completed: existing?.completed ?? false,
@@ -2186,18 +2206,57 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete }: {
           </TouchableOpacity>
         </View>
 
+        {/* Difficulty */}
         <View style={p.formCard}>
-          <Text style={p.formLabel}>Rate</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={p.rateDollarSign}>$</Text>
-            <TextInput
-              style={[p.formInput, { flex: 1 }]}
-              value={rate}
-              onChangeText={setRate}
-              placeholder="0.50"
-              placeholderTextColor={C.hint}
-              keyboardType="decimal-pad"
-            />
+          <Text style={p.formLabel}>Difficulty</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {([1, 2, 3] as const).map(level => {
+              const active = difficulty === level;
+              const pay = (parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[level]).toFixed(2);
+              return (
+                <TouchableOpacity
+                  key={level}
+                  style={[p.difficultyBtn, active && p.difficultyBtnActive]}
+                  onPress={() => setDifficulty(level)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={p.difficultyStars}>{'⭐'.repeat(level)}</Text>
+                  <Text style={[p.difficultyLabel, active && p.difficultyLabelActive]}>
+                    {DIFFICULTY_LABELS[level]}
+                  </Text>
+                  <Text style={[p.difficultyPay, active && p.difficultyPayActive]}>${pay}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Assign to */}
+        <View style={p.formCard}>
+          <Text style={p.formLabel}>Assign to</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <TouchableOpacity
+              style={[p.kidPill, assignedTo.length === 0 && p.kidPillActive]}
+              onPress={() => setAssignedTo([])}
+              activeOpacity={0.7}
+            >
+              <Text style={[p.kidPillText, assignedTo.length === 0 && p.kidPillTextActive]}>Everyone</Text>
+            </TouchableOpacity>
+            {kids.map(kid => {
+              const selected = assignedTo.includes(kid);
+              return (
+                <TouchableOpacity
+                  key={kid}
+                  style={[p.kidPill, selected && p.kidPillActive]}
+                  onPress={() => setAssignedTo(prev =>
+                    prev.includes(kid) ? prev.filter(k => k !== kid) : [...prev, kid]
+                  )}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[p.kidPillText, selected && p.kidPillTextActive]}>{kid}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -3702,6 +3761,8 @@ export default function App() {
   const [managedChores, setManagedChores]     = useState<ManagedChore[]>(DEFAULT_MANAGED_CHORES);
   const [editingChore, setEditingChore]       = useState<ManagedChore | null>(null);
   const [baseRate, setBaseRate]               = useState('0.50');
+  const [kids, setKids]                       = useState<string[]>(['Sam', 'Lily', 'Max']);
+  const [currentKidName]                      = useState('Sam');
   const [weeklyCapEnabled, setWeeklyCap]      = useState(false);
   const [requireApproval, setRequireApproval] = useState(true);
   const [showKidProfile, setShowKidProfile]   = useState(false);
@@ -3741,13 +3802,13 @@ export default function App() {
     const chore = managedChores.find(c => c.id === id);
     if (!chore || chore.completed) return;
     setManagedChores(prev => prev.map(c => c.id === id ? { ...c, completed: true } : c));
-    const newXp = xp + 1;
+    const newXp = xp + chore.difficulty;
     setXp(newXp);
-    setCoins(prev => prev + Math.round(parseFloat(chore.rate) * 100));
+    setCoins(prev => prev + Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]));
     if (monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[monsterIdx].needed) {
       setScreen('evolve');
     }
-  }, [managedChores, xp, monsterIdx]);
+  }, [managedChores, xp, monsterIdx, baseRate]);
 
   const handleBattleWin = useCallback(() => {
     const boss = getWeeklyBoss(monsterIdx);
@@ -3915,7 +3976,7 @@ export default function App() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={completeManagedChore} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} />}
+            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={completeManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} />}
             {screen === 'world'      && <WorldScreen monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} />}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} />
@@ -3929,13 +3990,15 @@ export default function App() {
         ) : (
           <>
             {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => setShowKidProfile(true)} />}
-            {parentScreen === 'chores'     && <ParentChoresScreen chores={managedChores} onBack={() => setParentScreen('parentHome')} onAdd={() => { setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} />}
+            {parentScreen === 'chores'     && <ParentChoresScreen chores={managedChores} onBack={() => setParentScreen('parentHome')} onAdd={() => { setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} />}
             {(parentScreen === 'addChore' || parentScreen === 'editChore') && (
               <AddEditChoreScreen
                 existing={editingChore}
                 onBack={() => setParentScreen('chores')}
                 onSave={saveChore}
                 onDelete={editingChore ? () => deleteChore(editingChore.id) : undefined}
+                kids={kids}
+                baseRate={baseRate}
               />
             )}
             {parentScreen === 'payRates'  && <PayRatesScreen onBack={() => setParentScreen('parentHome')} onRateGuide={() => setParentScreen('rateGuide')} baseRate={baseRate} setBaseRate={setBaseRate} weeklyCapEnabled={weeklyCapEnabled} setWeeklyCap={setWeeklyCap} requireApproval={requireApproval} setRequireApproval={setRequireApproval} />}
@@ -4451,6 +4514,19 @@ const p = StyleSheet.create({
   formDropdownRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 14 },
   formDropdownValue:{ fontSize: scale(16), color: '#1A1A1A' },
   rateDollarSign:   { fontSize: scale(18), fontWeight: '600', color: '#1A1A1A' },
+  // Difficulty picker
+  difficultyBtn:        { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 12, borderWidth: 2, borderColor: '#ECEAE4', padding: 10, alignItems: 'center' as const, gap: 4 },
+  difficultyBtnActive:  { backgroundColor: '#EAE4FF', borderColor: '#6B35F0' },
+  difficultyStars:      { fontSize: scale(14) },
+  difficultyLabel:      { fontSize: scale(12), fontWeight: '700' as const, color: '#ABABAB' },
+  difficultyLabelActive:{ color: '#6B35F0' },
+  difficultyPay:        { fontSize: scale(13), fontWeight: '700' as const, color: '#ABABAB' },
+  difficultyPayActive:  { color: '#3B8A3A' },
+  // Kid assignment pills
+  kidPill:          { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100, borderWidth: 2, borderColor: '#ECEAE4', backgroundColor: '#F7F6F2' },
+  kidPillActive:    { backgroundColor: '#C5F215', borderColor: '#1A1A1A' },
+  kidPillText:      { fontSize: scale(14), fontWeight: '600' as const, color: '#ABABAB' },
+  kidPillTextActive:{ color: '#1A1A1A' },
   iconPickerItem:   { width: 56, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   iconPickerSelected: { borderColor: '#6B35F0', backgroundColor: '#EAE4FF' },
   saveBtn:          { backgroundColor: '#C5F215', borderRadius: 14, borderWidth: 1.5, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
