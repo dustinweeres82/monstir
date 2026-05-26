@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  StatusBar, Platform, Image, TextInput, Switch, Modal,
+  StatusBar, Platform, Image, TextInput, Switch, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
 } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
@@ -31,11 +31,11 @@ TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: 
 
 type ChoreId = 'dishes' | 'trash' | 'bed' | 'vacuum' | 'laundry' | 'sweep' | 'wipe' | 'mop' | 'plants' | 'recycling' | 'windows' | 'bathroom';
 type Tab     = 'home' | 'world' | 'wallet';
-type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow';
+type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' | 'kidPayout';
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type ParentTab    = 'kidView' | 'chores' | 'rewards' | 'settings';
-type ParentScreen = 'parentHome' | 'chores' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings';
+type ParentScreen = 'parentHome' | 'chores' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings' | 'parentPayout';
 type ViewMode     = 'kid' | 'parent';
 
 interface Chore   { id: ChoreId; name: string; icon: string | number; bg: string; xp: number; multiplier: number; }
@@ -63,18 +63,18 @@ interface ManagedChore {
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
 const CHORES: Chore[] = [
-  { id: 'dishes',   name: 'Wash the dishes',          icon: require('./assets/icons/chore=iconDishes.png'),  bg: '#FFF9E6', xp: 1, multiplier: 1.0 },
-  { id: 'trash',    name: 'Take out the trash',        icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 1, multiplier: 1.0 },
-  { id: 'bed',      name: 'Make your bed',              icon: require('./assets/icons/chore=iconBed.png'),     bg: '#EAF3FB', xp: 1, multiplier: 0.5 },
-  { id: 'vacuum',   name: 'Vacuum the living room',    icon: require('./assets/icons/chore=iconVacuum.png'),  bg: '#F5F0FB', xp: 2, multiplier: 2.0 },
-  { id: 'laundry',  name: 'Put away laundry',           icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF0F0', xp: 1, multiplier: 1.0 },
-  { id: 'sweep',    name: 'Sweep the kitchen',          icon: require('./assets/icons/chore=iconBroom.png'),   bg: '#FFF9E6', xp: 1, multiplier: 1.0 },
-  { id: 'wipe',     name: 'Wipe down counters',         icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#F0F7F0', xp: 1, multiplier: 0.5 },
-  { id: 'mop',      name: 'Mop the floor',              icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', xp: 2, multiplier: 1.5 },
-  { id: 'plants',   name: 'Water the plants',           icon: '🪴',                                            bg: '#F0F7F0', xp: 1, multiplier: 0.5 },
-  { id: 'recycling',name: 'Sort the recycling',         icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 1, multiplier: 0.5 },
-  { id: 'windows',  name: 'Clean the windows',          icon: '🪟',                                            bg: '#EAF3FB', xp: 1, multiplier: 1.0 },
-  { id: 'bathroom', name: 'Clean the bathroom',         icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#F5F0FB', xp: 2, multiplier: 2.5 },
+  { id: 'dishes',   name: 'Wash the dishes',          icon: require('./assets/icons/chore=iconDishes.png'),  bg: '#FFF9E6', xp: 10, multiplier: 1.0 },
+  { id: 'trash',    name: 'Take out the trash',        icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 10, multiplier: 1.0 },
+  { id: 'bed',      name: 'Make your bed',              icon: require('./assets/icons/chore=iconBed.png'),     bg: '#EAF3FB', xp: 10, multiplier: 0.5 },
+  { id: 'vacuum',   name: 'Vacuum the living room',    icon: require('./assets/icons/chore=iconVacuum.png'),  bg: '#F5F0FB', xp: 25, multiplier: 2.0 },
+  { id: 'laundry',  name: 'Put away laundry',           icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF0F0', xp: 10, multiplier: 1.0 },
+  { id: 'sweep',    name: 'Sweep the kitchen',          icon: require('./assets/icons/chore=iconBroom.png'),   bg: '#FFF9E6', xp: 10, multiplier: 1.0 },
+  { id: 'wipe',     name: 'Wipe down counters',         icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
+  { id: 'mop',      name: 'Mop the floor',              icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', xp: 25, multiplier: 1.5 },
+  { id: 'plants',   name: 'Water the plants',           icon: '🪴',                                            bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
+  { id: 'recycling',name: 'Sort the recycling',         icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
+  { id: 'windows',  name: 'Clean the windows',          icon: '🪟',                                            bg: '#EAF3FB', xp: 10, multiplier: 1.0 },
+  { id: 'bathroom', name: 'Clean the bathroom',         icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#F5F0FB', xp: 25, multiplier: 2.5 },
 ];
 
 const choreCoins = (chore: Chore, baseRate: string): number =>
@@ -83,15 +83,22 @@ const choreCoins = (chore: Chore, baseRate: string): number =>
 const fmtCoins = (cents: number): string =>
   cents >= 100 ? `$${(cents / 100).toFixed(2)}` : `${cents}¢`;
 
+const MONSTER_FALLBACK_NAMES = [
+  'Zorp','Gloop','Fizzle','Blorp','Snuggz','Wumbo','Glitch','Zappy',
+  'Munchie','Wobble','Boing','Squigg','Noodlz','Chompy','Flapz','Zumi',
+];
+const randomFallbackName = () =>
+  MONSTER_FALLBACK_NAMES[Math.floor(Math.random() * MONSTER_FALLBACK_NAMES.length)];
+
 const MONSTERS: Monster[] = [
-  { name: 'Grumble',  level: 1, needed: 3   },
-  { name: 'Fanglet',  level: 2, needed: 8   },
-  { name: 'Bristor',  level: 3, needed: 18  },
-  { name: 'Vexling',  level: 4, needed: 35  },
-  { name: 'Thornax',  level: 5, needed: 60  },
-  { name: 'Zorphax',  level: 6, needed: 100 },
-  { name: 'Dreadmaw', level: 7, needed: 160 },
-  { name: 'Vorthak',  level: 8, needed: 250 },
+  { name: 'Grumble',  level: 1, needed: 100 },  // 0 → 100
+  { name: 'Fanglet',  level: 2, needed: 150 },  // 100 → 250
+  { name: 'Bristor',  level: 3, needed: 250 },  // 250 → 500  (Evolution 1)
+  { name: 'Vexling',  level: 4, needed: 300 },  // 500 → 800
+  { name: 'Thornax',  level: 5, needed: 400 },  // 800 → 1200
+  { name: 'Zorphax',  level: 6, needed: 500 },  // 1200 → 1700 (Evolution 2)
+  { name: 'Dreadmaw', level: 7, needed: 600 },  // 1700 → 2300
+  { name: 'Vorthak',  level: 8, needed: 700 },  // 2300 → 3000 (max)
 ];
 
 const BOSSES: Boss[] = [
@@ -162,6 +169,7 @@ function msUntilSunday(): number {
 const FREQUENCY_OPTIONS = ['Every day', '2 times per week', '3 times per week', 'Once a week', 'As needed'];
 
 const DIFFICULTY_MULTIPLIERS: Record<1 | 2 | 3, number> = { 1: 1.0, 2: 1.5, 3: 2.0 };
+const XP_BY_DIFFICULTY:      Record<1 | 2 | 3, number> = { 1: 10,  2: 25,  3: 50  };
 const DIFFICULTY_LABELS: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 
 const CHORE_ICONS: { icon: string | number; bg: string }[] = [
@@ -181,7 +189,7 @@ const DEFAULT_MANAGED_CHORES: ManagedChore[] = [
   { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active' },
   { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active' },
   { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active' },
-  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'approved' },
+  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active' },
   { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active' },
   { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active' },
 ];
@@ -200,10 +208,14 @@ const C = {
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 
 
-// ─── Win odds: 0 chores = 10%, all chores = 90% ───────────────────────────────
+// ─── Win odds: weekly XP vs level threshold ───────────────────────────────────
+// ≥70% of level XP → likely win (70–90%), <40% → likely loss (10–40%)
 
-function calcWinOdds(doneCount: number): number {
-  return Math.round(10 + (doneCount / CHORES.length) * 80);
+function calcWinOdds(weeklyXp: number, levelNeeded: number): number {
+  const ratio = levelNeeded > 0 ? Math.min(1, weeklyXp / levelNeeded) : 0;
+  if (ratio >= 0.7) return Math.round(lerp(70, 90, (ratio - 0.7) / 0.3));
+  if (ratio < 0.4)  return Math.round(lerp(10, 40, ratio / 0.4));
+  return Math.round(lerp(40, 70, (ratio - 0.4) / 0.3));
 }
 
 // ─── Battle narration ─────────────────────────────────────────────────────────
@@ -588,7 +600,7 @@ const NAV_TABS: { id: Tab; label: string; icon: ReturnType<typeof require> }[] =
   { id: 'wallet', label: 'Wallet',   icon: require('./assets/icons/Property 1=navWallet.png') },
 ];
 
-function TabBar({ active, onNav, onGoals }: { active: Tab; onNav: (t: Tab) => void; onGoals: () => void }) {
+function TabBar({ active, onNav }: { active: Tab; onNav: (t: Tab) => void }) {
   return (
     <View style={s.tabBar} pointerEvents="box-none">
       <View style={s.tabBarInner}>
@@ -598,7 +610,7 @@ function TabBar({ active, onNav, onGoals }: { active: Tab; onNav: (t: Tab) => vo
             <TouchableOpacity
               key={t.id}
               style={s.tab}
-              onPress={() => t.id === 'wallet' ? onGoals() : onNav(t.id)}
+              onPress={() => onNav(t.id)}
               activeOpacity={0.7}
             >
               <View style={[s.tabIconWrap, isActive && s.tabIconWrapActive]}>
@@ -621,7 +633,13 @@ function ChoreRow({ chore, done, onPress, baseRate }: { chore: Chore; done: bool
       </View>
       <View style={s.choreInfo}>
         <Text style={[s.choreName, done && s.choreNameDone]}>{chore.name}</Text>
-        <Text style={s.choreSub}><Text style={s.choreGold}>+{fmtCoins(choreCoins(chore, baseRate))}</Text>{'  ·  +' + chore.xp + ' XP'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(13), height: scale(13) }} resizeMode="contain" />
+          <Text style={s.choreGold}>+{fmtCoins(choreCoins(chore, baseRate))}</Text>
+          <Text style={s.choreSub}>·</Text>
+          <Image source={require('./assets/icons/icon-star.png')} style={{ width: scale(12), height: scale(12) }} resizeMode="contain" />
+          <Text style={[s.choreSub, { color: '#C47F00' }]}>+{chore.xp} XP</Text>
+        </View>
       </View>
       <View style={[s.choreCheck, done && s.choreCheckDone]}>
         {done && <View style={s.checkDot} />}
@@ -778,9 +796,15 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate }: { chore: ManagedC
             <Animated.Text style={[s.pendingLabel, { opacity: pendingPulse }]}>⏳ Waiting for approval...</Animated.Text>
           ) : isRejected ? (
             <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={{ fontSize: scale(14) }}>🪙</Text>
-                <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                  <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
+                  <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                  <Image source={require('./assets/icons/icon-star.png')} style={{ width: scale(13), height: scale(13) }} resizeMode="contain" />
+                  <Text style={[s.homeQuestReward, { color: '#C47F00' }]}>{XP_BY_DIFFICULTY[chore.difficulty]} XP</Text>
+                </View>
               </View>
               <View style={s.rejectionBubble}>
                 <Text style={s.rejectionNote}>{chore.rejectionNote || "Let's try that again!"}</Text>
@@ -788,9 +812,15 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate }: { chore: ManagedC
               <Text style={s.retryLabel}>Tap to resubmit</Text>
             </>
           ) : (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Text style={{ fontSize: scale(14) }}>🪙</Text>
-              <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
+                <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                <Image source={require('./assets/icons/icon-star.png')} style={{ width: scale(13), height: scale(13) }} resizeMode="contain" />
+                <Text style={[s.homeQuestReward, { color: '#C47F00' }]}>{XP_BY_DIFFICULTY[chore.difficulty]} XP</Text>
+              </View>
             </View>
           )}
         </View>
@@ -811,7 +841,7 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate }: { chore: ManagedC
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate, requireApproval }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
   currentKidName: string;
@@ -826,6 +856,10 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   platformAspect: number;
   baseRate: string;
   requireApproval: boolean;
+  onNavigateToWallet: () => void;
+  onRenameMonster: (name: string) => void;
+  kidProfiles: { name: string; avatarColor: string }[];
+  onSwitchToKid: (name: string) => void;
 }) {
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
@@ -840,6 +874,18 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const dollars    = (coins / 100).toFixed(2);
   const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
+  const [showRename, setShowRename]     = useState(false);
+  const [renameText, setRenameText]     = useState(monsterName);
+  const [toastMsg, setToastMsg]         = useState<string | null>(null);
+  const toastTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (msg: string) => {
+    setToastMsg(null);
+    setTimeout(() => {
+      setToastMsg(msg);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToastMsg(null), 2100);
+    }, 0);
+  };
 
   // Monster idle bob
   const bobAnim = useRef(new Animated.Value(0)).current;
@@ -916,20 +962,20 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
           <AvatarPickerSheet selected={kidAvatarIdx} onSelect={setKidAvatarIdx} />
           <View style={{ gap: 2 }}>
             <ViewSwitcher
-              selected="Kid view"
+              selected={currentKidName || 'Kid view'}
               options={[
-                { label: 'Kid view',    emoji: '🧒', bg: '#EAE4FF' },
+                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF' })),
                 { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
               ]}
-              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); }}
+              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
             <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
           </View>
         </View>
-        <View style={s.homeBalancePill}>
+        <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
           <Text style={s.homeBalanceText}>${dollars}</Text>
-          <Text style={{ fontSize: scale(18) }}>🪙</Text>
-        </View>
+          <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={s.homeScroll}>
@@ -963,7 +1009,10 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
           </TouchableOpacity>
           <View style={s.homeCharInfo}>
             <View style={s.homeCharNameRow}>
-              <Text style={s.homeCharName}>{monsterName || monster.name}</Text>
+              <TouchableOpacity onPress={() => { setRenameText(monsterName); setShowRename(true); }} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={s.homeCharName}>{monsterName}</Text>
+                <Image source={require('./assets/icons/icon-pencil.png')} style={{ width: scale(16), height: scale(16), opacity: 0.5 }} resizeMode="contain" />
+              </TouchableOpacity>
               <Text style={s.homeCharLevel}>LEVEL {monster.level}</Text>
             </View>
             <View style={s.homeXpTrack}>
@@ -1035,6 +1084,39 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         ))}
       </View>
 
+      {/* Rename mascot modal */}
+      <Modal visible={showRename} transparent animationType="fade" onRequestClose={() => setShowRename(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', paddingBottom: 32, paddingHorizontal: 16 }}>
+          <View style={{ backgroundColor: '#F7F6F2', borderRadius: 24, padding: 24, gap: 16 }}>
+            <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>Name your mascot</Text>
+            <TextInput
+              style={{ backgroundColor: '#ECEAE4', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}
+              value={renameText}
+              onChangeText={setRenameText}
+              placeholder="Give them a name…"
+              placeholderTextColor="#ABABAB"
+              maxLength={12}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={() => { onRenameMonster(renameText.trim() || monsterName); setShowRename(false); showToast('Name saved!'); }}
+            />
+            <TouchableOpacity
+              style={{ backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center' }}
+              onPress={() => { onRenameMonster(renameText.trim() || monsterName); setShowRename(false); showToast('Name saved!'); }}
+              activeOpacity={0.85}
+            >
+              <Text style={{ fontSize: scale(16), fontWeight: '900', color: '#FFFFFF' }}>Save name</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowRename(false)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <Text style={{ fontSize: scale(14), color: '#ABABAB', fontWeight: '600' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {toastMsg && <Toast key={toastMsg + Date.now()} message={toastMsg} />}
     </View>
   );
 }
@@ -1061,10 +1143,15 @@ function formatCountdown(ms: number) {
   return `${m}M`;
 }
 
-function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToParent }: {
-  monsterIdx: MonsterIdx; coins: number; xp: number;
+function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName }: {
+  monsterIdx: MonsterIdx; coins: number; xp: number; weeklyXp: number;
   done: Partial<Record<ChoreId, boolean>>; onStartBattle: () => void;
   onSwitchToParent: () => void;
+  onNavigateToWallet: () => void;
+  monsterName: string;
+  kidProfiles: { name: string; avatarColor: string }[];
+  onSwitchToKid: (name: string) => void;
+  currentKidName: string;
 }) {
   const boss        = getWeeklyBoss(monsterIdx);
   const monster     = MONSTERS[monsterIdx];
@@ -1073,8 +1160,9 @@ function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToPar
   const dollars = (coins / 100).toFixed(2);
   const doneCount   = Object.keys(done).length;
   const totalChores = CHORES.length;
-  const chorePct    = Math.round((doneCount / totalChores) * 100);
-  const power       = doneCount * 20 + coins;
+  const chorePct    = Math.min(100, Math.round((weeklyXp / monster.needed) * 100));
+  const winOdds     = calcWinOdds(weeklyXp, monster.needed);
+  const power       = weeklyXp;
   const countdownMs = useCountdown();
   const days        = daysUntilSunday();
   const isBattleDay = days === 0;
@@ -1099,11 +1187,11 @@ function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToPar
         ? `Arriving in ${days} day${days === 1 ? '' : 's'}`
         : boss.tagline;
 
-  // Power forecast: chores remaining to reach next level
-  const choresToNextLevel = Math.max(0, (monster.needed - xp));
-  const powerForecastMsg = choresToNextLevel === 0
-    ? 'You\'re at max power this week!'
-    : `${choresToNextLevel} more chore${choresToNextLevel === 1 ? '' : 's'} to reach Lv ${monster.level + 1}`;
+  // Power forecast: XP remaining to reach next level
+  const xpToNextLevel = Math.max(0, monster.needed - xp);
+  const powerForecastMsg = xpToNextLevel === 0
+    ? 'You\'re at max power — ready to evolve!'
+    : `${xpToNextLevel} XP to reach Lv ${monster.level + 1}`;
 
   return (
     <>
@@ -1113,20 +1201,20 @@ function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToPar
           <AvatarPickerSheet selected={kidAvatarIdx} onSelect={setKidAvatarIdx} />
           <View style={{ gap: 2 }}>
             <ViewSwitcher
-              selected="Kid view"
+              selected={currentKidName || 'Kid view'}
               options={[
-                { label: 'Kid view',    emoji: '🧒', bg: '#EAE4FF' },
+                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF' })),
                 { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
               ]}
-              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); }}
+              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
             <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
           </View>
         </View>
-        <View style={s.homeBalancePill}>
+        <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
           <Text style={s.homeBalanceText}>${dollars}</Text>
-          <Text style={{ fontSize: scale(18) }}>🪙</Text>
-        </View>
+          <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -1158,7 +1246,8 @@ function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToPar
           {/* Teaser text */}
           <View style={w.bossCardContent}>
             <View style={w.bossTagPill}>
-              <Text style={w.bossTagText}>💀  BOSS BATTLE!</Text>
+              <Image source={require('./assets/icons/icon-skull.png')} style={{ width: scale(14), height: scale(14), marginRight: 5 }} resizeMode="contain" />
+              <Text style={w.bossTagText}>BOSS BATTLE!</Text>
             </View>
             <Text style={w.teaserLine1}>{teaserLine1}</Text>
             <Text style={w.teaserLine2}>{teaserLine2}</Text>
@@ -1189,21 +1278,26 @@ function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToPar
 
         {/* ── Your Readiness ── */}
         <View style={w.sectionCard}>
-          <Text style={w.sectionTitle}>⚡  Your readiness</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
+            <Text style={w.sectionTitle}>Your readiness</Text>
+          </View>
 
-          {/* Chore progress */}
+          {/* Weekly XP progress */}
           <View style={w.readinessRow}>
-            <Text style={w.readinessLabel}>Chores</Text>
-            <Text style={w.readinessValue}>{doneCount} / {totalChores}</Text>
+            <Text style={w.readinessLabel}>Weekly XP</Text>
+            <Text style={w.readinessValue}>{weeklyXp} / {monster.needed}</Text>
           </View>
           <View style={w.trackWrap}>
             <View style={[w.trackFill, { width: `${chorePct}%` as any }]} />
           </View>
 
-          {/* Power level */}
+          {/* Win odds */}
           <View style={[w.readinessRow, { marginTop: scale(12) }]}>
-            <Text style={w.readinessLabel}>Battle power</Text>
-            <Text style={[w.readinessValue, { color: '#6B35F0' }]}>{power}</Text>
+            <Text style={w.readinessLabel}>Win chance</Text>
+            <Text style={[w.readinessValue, {
+              color: winOdds >= 70 ? '#2A7A2A' : winOdds < 40 ? '#CC3333' : '#6B35F0',
+            }]}>{winOdds}%</Text>
           </View>
 
           {/* Power forecast */}
@@ -1214,20 +1308,23 @@ function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToPar
 
         {/* ── What's at Stake ── */}
         <View style={w.sectionCard}>
-          <Text style={w.sectionTitle}>🏆  What's at stake</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+            <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
+            <Text style={w.sectionTitle}>What's at stake</Text>
+          </View>
           <View style={w.stakeRow}>
             <View style={w.stakeItem}>
-              <Image source={require('./assets/iconCoin.png')} style={w.stakeIcon} resizeMode="contain" />
+              <Image source={require('./assets/icons/icon-coin.png')} style={w.stakeIcon} resizeMode="contain" />
               <Text style={w.stakeVal}>{boss.bonus}¢</Text>
               <Text style={w.stakeLbl}>Coins</Text>
             </View>
             <View style={w.stakeItem}>
-              <Image source={require('./assets/iconHPstar.png')} style={w.stakeIcon} resizeMode="contain" />
+              <Image source={require('./assets/icons/icon-star.png')} style={w.stakeIcon} resizeMode="contain" />
               <Text style={w.stakeVal}>75</Text>
               <Text style={w.stakeLbl}>XP</Text>
             </View>
             <View style={w.stakeItem}>
-              <Image source={require('./assets/iconShard.png')} style={w.stakeIcon} resizeMode="contain" />
+              <Image source={require('./assets/icons/icon-gem.png')} style={w.stakeIcon} resizeMode="contain" />
               <Text style={w.stakeVal}>1</Text>
               <Text style={w.stakeLbl}>Shard</Text>
             </View>
@@ -1235,7 +1332,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, onStartBattle, onSwitchToPar
           {monsterIdx < 7 && (
             <View style={w.evolutionHint}>
               <Text style={w.evolutionHintText}>
-                ✨  Win this battle and {monster.name} could evolve!
+                ✨  Win this battle and {monsterName} could evolve!
               </Text>
             </View>
           )}
@@ -1362,9 +1459,9 @@ function BossIntroScreen({ monsterIdx, onReady }: {
   };
 
   const rewards = [
-    { icon: require('./assets/iconCoin.png'),   label: `${boss.bonus}¢` },
-    { icon: require('./assets/iconHPstar.png'), label: '50 xp'          },
-    { icon: require('./assets/iconShard.png'),  label: '1 shard'        },
+    { icon: require('./assets/icons/icon-coin.png'),   label: `${boss.bonus}¢` },
+    { icon: require('./assets/icons/icon-star.png'), label: '50 xp'          },
+    { icon: require('./assets/icons/icon-gem.png'),  label: '1 shard'        },
   ];
 
   return (
@@ -1389,9 +1486,11 @@ function BossIntroScreen({ monsterIdx, onReady }: {
 
       <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 60, paddingBottom: 32 }}>
 
-        {/* 💀 BOSS BATTLE! ⚡ pill */}
-        <View style={bi.badgePill}>
-          <Text style={bi.badgeText}>💀 <Text style={{ color: '#FFC928' }}>BOSS</Text> BATTLE! ⚡</Text>
+        {/* BOSS BATTLE pill */}
+        <View style={[bi.badgePill, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+          <Image source={require('./assets/icons/icon-skull.png')} style={{ width: scale(16), height: scale(16) }} resizeMode="contain" />
+          <Text style={bi.badgeText}><Text style={{ color: '#FFC928' }}>BOSS</Text> BATTLE! </Text>
+          <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
         </View>
 
         {/* Boss name + tagline */}
@@ -1463,7 +1562,10 @@ function ResultScreen({ monsterIdx, won, bonusCoins, onDone, monsterImg }: {
   const boss = getWeeklyBoss(monsterIdx);
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20 }}>
-      <Text style={{ fontSize: scale(48) }}>{won ? '🏆' : '💀'}</Text>
+      {won
+        ? <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(56), height: scale(56) }} resizeMode="contain" />
+        : <Image source={require('./assets/icons/icon-skull.png')} style={{ width: scale(56), height: scale(56) }} resizeMode="contain" />
+      }
       <Text style={{ fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -0.5 }}>
         {won ? 'Victory!' : 'Defeated'}
       </Text>
@@ -1483,8 +1585,8 @@ function ResultScreen({ monsterIdx, won, bonusCoins, onDone, monsterImg }: {
 
 // ── 5. Interactive Battle Arena ───────────────────────────────────────────────
 
-function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose }: {
-  monsterIdx: MonsterIdx; monsterImg: number; initialCores: number; onWin: () => void; onLose: () => void;
+function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose, monsterName }: {
+  monsterIdx: MonsterIdx; monsterImg: number; initialCores: number; onWin: () => void; onLose: () => void; monsterName: string;
 }) {
   const boss    = getWeeklyBoss(monsterIdx);
   const monster = MONSTERS[monsterIdx];
@@ -1530,16 +1632,16 @@ function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose
 
     if (type === 'attack') {
       const d = rnd(13, 22); newEH = Math.max(0, newEH - d);
-      msg = `${monster.name} attacks! Dealt ${d} damage!`;
+      msg = `${monsterName} attacks! Dealt ${d} damage!`;
     } else if (type === 'zap') {
       const d = rnd(18, 28); newEH = Math.max(0, newEH - d);
-      msg = `${monster.name} used 🧿 Zap Shot! Dealt ${d} damage!`;
+      msg = `${monsterName} used 🧿 Zap Shot! Dealt ${d} damage!`;
     } else if (type === 'charge') {
       const h = rnd(16, 24); newPH = Math.min(PLAYER_MAX, newPH + h);
-      msg = `${monster.name} used 🧿🧿 Overcharge! Restored +${h} HP!`;
+      msg = `${monsterName} used 🧿🧿 Overcharge! Restored +${h} HP!`;
     } else {
       const d = rnd(28, 44); newEH = Math.max(0, newEH - d);
-      msg = `${monster.name} used 🧿🧿🧿 Mega Beam! Dealt ${d} damage! Super effective!`;
+      msg = `${monsterName} used 🧿🧿🧿 Mega Beam! Dealt ${d} damage! Super effective!`;
     }
 
     setEnemyHp(newEH); setPlayerHp(newPH); setLog(msg);
@@ -1556,7 +1658,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose
       const atk = ENEMY_ATTACKS[Math.floor(Math.random() * ENEMY_ATTACKS.length)];
       setLog(`${boss.name} used ${atk}! Dealt ${d} damage!`);
       if (fPH <= 0) { setLive(false); setTimeout(onLose, 900); return; }
-      setTimeout(() => { setMyTurn(true); setLog(`What will ${monster.name} do?`); }, 1200);
+      setTimeout(() => { setMyTurn(true); setLog(`What will ${monsterName} do?`); }, 1200);
     }, 1300);
   };
 
@@ -1576,7 +1678,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={b.hpName}>{monster.name}</Text>
+              <Text style={b.hpName}>{monsterName}</Text>
               <Text style={b.hpVal}>{playerHp}/{PLAYER_MAX}</Text>
             </View>
             <View style={b.hpTrack}>
@@ -1608,7 +1710,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose
           <Animated.View style={[b.stageArtP, { transform: [{ translateY: bobPlayer }] }]}>
             <Image source={monsterImg} style={{ width: 90, height: 90 }} resizeMode="contain" />
           </Animated.View>
-          <Text style={b.stageTag}>{monster.name}</Text>
+          <Text style={b.stageTag}>{monsterName}</Text>
         </View>
         <View style={b.stageFighter}>
           <Animated.View style={[b.stageArtE, { transform: [{ translateY: bobEnemy }] }]}>
@@ -1636,7 +1738,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose
         {/* Specials */}
         <View style={b.spRow}>
           <TouchableOpacity style={[b.spCard, b.spCardZap,    (off || cores < 1) && b.spOff]} onPress={() => act('zap')}    activeOpacity={0.85} disabled={off || cores < 1}>
-            <Text style={b.spEmoji}>⚡</Text>
+            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(28), height: scale(28) }} resizeMode="contain" />
             <Text style={b.spLabel}>Zap Shot</Text>
             <Text style={b.spCost}>🧿 1</Text>
           </TouchableOpacity>
@@ -1667,50 +1769,666 @@ function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose
 }
 
 
-function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate }: {
-  coins: number; done: Partial<Record<ChoreId, boolean>>;
-  battleResult: 'win' | 'loss' | null; monsterIdx: MonsterIdx; baseRate: string;
+// ─── Confetti data (module-level, deterministic) ─────────────────────────────
+const CONF_EMOJIS = ['🪙', '⭐', '✨', '💫', '🌟'];
+const CONF_DATA = [
+  { x: 0.08, dur: 2200, delay: 0,   emoji: CONF_EMOJIS[0] },
+  { x: 0.18, dur: 2600, delay: 100, emoji: CONF_EMOJIS[1] },
+  { x: 0.28, dur: 2000, delay: 200, emoji: CONF_EMOJIS[2] },
+  { x: 0.38, dur: 2400, delay: 300, emoji: CONF_EMOJIS[3] },
+  { x: 0.48, dur: 2800, delay: 400, emoji: CONF_EMOJIS[4] },
+  { x: 0.58, dur: 2100, delay: 500, emoji: CONF_EMOJIS[0] },
+  { x: 0.68, dur: 2500, delay: 600, emoji: CONF_EMOJIS[1] },
+  { x: 0.78, dur: 2300, delay: 700, emoji: CONF_EMOJIS[2] },
+  { x: 0.88, dur: 2700, delay: 800, emoji: CONF_EMOJIS[3] },
+  { x: 0.12, dur: 2000, delay: 900, emoji: CONF_EMOJIS[4] },
+  { x: 0.52, dur: 2600, delay: 150, emoji: CONF_EMOJIS[0] },
+  { x: 0.72, dur: 2200, delay: 450, emoji: CONF_EMOJIS[2] },
+];
+
+// ─── KidPayoutScreen ─────────────────────────────────────────────────────────
+
+function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monsterImg, monsterName, onDismiss }: {
+  amount: number; completedCount: number; battleWon: boolean | null;
+  battleBonus: number | null; monsterImg: number; monsterName: string;
+  onDismiss: () => void;
 }) {
-  const completedChores = CHORES.filter(c => done[c.id]);
-  const boss            = getWeeklyBoss(monsterIdx);
-  const bonusCoins      = battleResult === 'win' ? boss.bonus : battleResult === 'loss' ? Math.round(boss.bonus * 0.2) : null;
+  const { width: W, height: H } = Dimensions.get('window');
+  const bgColor = battleWon === true ? '#C5F215' : '#FFF9E6';
+
+  // Confetti animated values — use ref to avoid recreating on re-render
+  const confettiAnims = useRef(
+    CONF_DATA.map(() => new Animated.Value(0))
+  ).current;
+
+  // Monster bob
+  const monsterBob = useBob(0, 10, 2000);
+
+  // Bank counter animation
+  const [displayAmount, setDisplayAmount] = useState(amount);
+
+  useEffect(() => {
+    if (amount === 0) return;
+    const steps = 30;
+    const stepSize = amount / steps;
+    let current = amount;
+    let count = 0;
+    const iv = setInterval(() => {
+      count++;
+      current = Math.max(0, amount - Math.round(stepSize * count));
+      setDisplayAmount(current);
+      if (count >= steps) clearInterval(iv);
+    }, 1500 / steps);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Start confetti loops
+  useEffect(() => {
+    const anims = confettiAnims.map((anim, i) =>
+      Animated.loop(
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: CONF_DATA[i].dur,
+          delay: CONF_DATA[i].delay,
+          useNativeDriver: true,
+        })
+      )
+    );
+    anims.forEach(a => a.start());
+    return () => anims.forEach(a => a.stop());
+  }, []);
+
+  const breakdownBase = completedCount + ' chores ✓';
+  const breakdownSuffix = battleWon === true ? ' + Boss Battle' : battleWon === false ? ' + Better luck next week!' : '';
 
   return (
-    <>
-      <Header title="monstir" showCoins={false} />
-      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} showsVerticalScrollIndicator={false}>
-        <View style={{ padding: 16, gap: 10 }}>
-          <View style={s.walletTotal}>
-            <Text style={s.walletLabel}>THIS WEEK'S ALLOWANCE</Text>
-            <Text style={s.walletAmount}>{coins}¢</Text>
-            <Text style={s.walletSub}>Paid out Sunday</Text>
+    <View style={{ flex: 1, backgroundColor: bgColor }}>
+      {/* Confetti layer */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {confettiAnims.map((anim, i) => {
+          const translateY = anim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [-60, H + 60],
+          });
+          return (
+            <Animated.Text
+              key={i}
+              style={{
+                position: 'absolute',
+                left: CONF_DATA[i].x * W,
+                top: 0,
+                fontSize: scale(22),
+                transform: [{ translateY }],
+                opacity: anim.interpolate({ inputRange: [0, 0.1, 0.85, 1], outputRange: [0, 1, 1, 0] }),
+              }}
+            >
+              {CONF_DATA[i].emoji}
+            </Animated.Text>
+          );
+        })}
+      </View>
+
+      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 40, gap: 16 }} showsVerticalScrollIndicator={false}>
+        {/* Monster */}
+        <Animated.Image
+          source={monsterImg}
+          style={{ width: scale(200), height: scale(200), transform: [{ translateY: monsterBob }] }}
+          resizeMode="contain"
+        />
+
+        {/* Amount */}
+        {amount > 0 ? (
+          <>
+            <Text style={{ fontSize: scale(72), fontWeight: '900', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular', letterSpacing: -2 }}>
+              ${(amount / 100).toFixed(2)}
+            </Text>
+            <Text style={{ fontSize: scale(22), fontWeight: '700', color: '#1A1A1A' }}>earned this week!</Text>
+          </>
+        ) : (
+          <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', textAlign: 'center' }}>Great work this week! 🎉</Text>
+        )}
+
+        {/* Breakdown pill */}
+        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 4, ...SOLID_SHADOW }}>
+          <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' }}>{breakdownBase}{breakdownSuffix}</Text>
+          {battleWon === true && <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />}
+        </View>
+
+        {/* Bank counter */}
+        {amount > 0 && (
+          <View style={{ backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 12 }}>
+            <Text style={{ fontSize: scale(15), fontWeight: '700', color: '#1A1A1A', textAlign: 'center' }}>
+              Bank balance: {fmtCoins(displayAmount)}
+            </Text>
           </View>
-          <Text style={[s.sectionLabel, { paddingHorizontal: 2, paddingTop: 4, backgroundColor: 'transparent' }]}>EARNED FROM CHORES</Text>
-          {completedChores.length === 0
-            ? <Text style={{ fontSize: scale(12), color: C.hint, textAlign: 'center', paddingVertical: 16 }}>No chores completed yet</Text>
-            : completedChores.map(c => (
-              <View key={c.id} style={s.walletRow}>
-                <View style={[s.choreIcon, { backgroundColor: c.bg, width: 30, height: 30, borderRadius: 8 }]}>
-                  <ChoreIcon icon={c.icon} size={25} />
-                </View>
-                <Text style={s.walletRowName}>{c.name}</Text>
-                <Text style={s.walletRowCoins}>+{fmtCoins(choreCoins(c, baseRate))}</Text>
-              </View>
-            ))
-          }
-          {battleResult && bonusCoins !== null && (
-            <View style={s.walletRow}>
-              <View style={[s.choreIcon, { backgroundColor: battleResult === 'win' ? C.win : C.loss, width: 30, height: 30, borderRadius: 8 }]}>
-                <Text style={{ fontSize: scale(14) }}>{battleResult === 'win' ? '⚔' : '🛡'}</Text>
-              </View>
-              <Text style={s.walletRowName}>Battle {battleResult} vs {boss.name}</Text>
-              <Text style={s.walletRowCoins}>+{fmtCoins(bonusCoins)}</Text>
+        )}
+
+        {/* Collect button */}
+        <TouchableOpacity
+          style={{ backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 20, paddingHorizontal: 48, alignItems: 'center', ...SOLID_SHADOW, marginTop: 8 }}
+          onPress={onDismiss}
+          activeOpacity={0.8}
+        >
+          <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>Collect!</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  );
+}
+
+function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
+  goal: SavedGoal;
+  onBack: () => void;
+  onEdit: () => void;
+  baseRate: string;
+  monsterName?: string;
+}) {
+  const mn             = monsterName ?? '';
+  const targetCents    = Math.round(parseFloat(goal.amount || '0') * 100);
+  const pct            = targetCents > 0 ? Math.min(1, goal.savedCents / targetCents) : 0;
+  const leftCents      = Math.max(0, targetCents - goal.savedCents);
+  const weeklyEarnings = Math.max(1, parseFloat(baseRate) * 100 * 5);
+  const weeksToGo      = leftCents > 0 ? Math.ceil(leftCents / weeklyEarnings) : 0;
+  const weeksSaving    = Math.round(goal.savedCents / weeklyEarnings);
+  const totalWeeks     = Math.round(targetCents / weeklyEarnings);
+
+  // Always format as $X.XX — never mix cents and dollars on this screen
+  const fmtD = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+  // Next payday day name (defaults to next Friday; will be driven by a setting later)
+  const nextPayDay = (() => {
+    const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const today = new Date();
+    const daysUntil = ((5 - today.getDay() + 7) % 7) || 7; // next Friday
+    const next = new Date(today);
+    next.setDate(today.getDate() + daysUntil);
+    return DAYS[next.getDay()];
+  })();
+
+  // ── Stage label ────────────────────────────────────────────────────────────
+  const stageLabel =
+    pct >= 1    ? 'Goal reached!'
+    : pct >= 0.9  ? 'Almost done!'
+    : pct >= 0.5  ? 'Over halfway!'
+    : pct >= 0.25 ? 'Building momentum'
+    : 'Just getting started';
+
+  const stageLabelColor = pct >= 1 ? '#2DA44E' : pct >= 0.9 ? '#6B35F0' : '#6B35F0';
+
+  // ── Mascot copy by progress state ──────────────────────────────────────────
+  const mascotMsg =
+    pct >= 1    ? `You did it!! ${mn} is SO proud of you! 🎉`
+    : pct >= 0.75 ? `So close! One more week could do it! 💪`
+    : pct >= 0.5  ? `Halfway there! ${mn} can almost taste the victory! 🎮`
+    : pct >= 0.25 ? `You're building momentum — keep those chores going!`
+    : pct > 0     ? `${mn} is rooting for you! Keep going! 🔥`
+    : `Start completing chores to get closer to your goal! 💪`;
+
+  // ── Stat card helper ────────────────────────────────────────────────────────
+  type CardVariant = 'default' | 'purple' | 'green';
+  const StatCard = ({ icon, value, label, variant = 'default' }: {
+    icon: React.ReactNode; value: string; label: string; variant?: CardVariant;
+  }) => {
+    const bg     = variant === 'purple' ? '#EAE4FF' : variant === 'green' ? '#E6F7EC' : C.bg;
+    const border = variant === 'purple' ? '#6B35F0'  : variant === 'green' ? '#2DA44E' : '#1A1A1A';
+    const valCol = variant === 'purple' ? '#6B35F0'  : variant === 'green' ? '#2DA44E' : '#1A1A1A';
+    return (
+      <View style={{ flex: 1, backgroundColor: bg, borderRadius: 16, borderWidth: 2, borderColor: border, padding: 16, gap: 4, ...SOLID_SHADOW }}>
+        {icon}
+        <Text style={{ fontSize: scale(22), fontWeight: '900', color: valCol, letterSpacing: -0.5, marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit>
+          {value}
+        </Text>
+        <Text style={{ fontSize: scale(12), color: '#ABABAB', fontWeight: '600', lineHeight: 17 }}>
+          {label}
+        </Text>
+      </View>
+    );
+  };
+
+  const coinIcon     = <Image source={require('./assets/icons/icon-coin.png')}     style={{ width: scale(32), height: scale(32) }} resizeMode="contain" />;
+  const calIcon      = <Image source={require('./assets/icons/icon-calendar.png')} style={{ width: scale(32), height: scale(32) }} resizeMode="contain" />;
+  const starIcon     = <Image source={require('./assets/icons/icon-star.png')}     style={{ width: scale(32), height: scale(32) }} resizeMode="contain" />;
+  const streakIcon   = <Image source={require('./assets/icons/icon-streak.png')}   style={{ width: scale(32), height: scale(32) }} resizeMode="contain" />;
+  const gemIcon      = <Image source={require('./assets/icons/icon-gem.png')}      style={{ width: scale(32), height: scale(32) }} resizeMode="contain" />;
+
+  // ── Stat cards per state (0% = 1 row of 2; all others = 2 rows of 2) ────────
+  const statRows: [React.ReactNode, React.ReactNode][] = (() => {
+    if (pct >= 1) {
+      // 100% — celebration layout (green)
+      return [
+        [
+          <StatCard key="a" icon={coinIcon}   value={fmtD(targetCents)}   label="Goal reached!"    variant="green" />,
+          <StatCard key="b" icon={starIcon}   value="100%"                 label="Complete"         variant="green" />,
+        ],
+        [
+          <StatCard key="c" icon={calIcon}    value={`${totalWeeks}w`}     label="It took you"      variant="default" />,
+          <StatCard key="d" icon={gemIcon}    value="Amazing!"             label="You did it"        variant="green" />,
+        ],
+      ];
+    }
+    if (pct >= 0.9) {
+      // 90–99% — final push
+      return [
+        [
+          <StatCard key="a" icon={coinIcon}   value={fmtD(goal.savedCents)} label="Saved so far"    variant="purple" />,
+          <StatCard key="b" icon={coinIcon}   value={fmtD(leftCents)}       label="Almost there!"   variant="purple" />,
+        ],
+        [
+          <StatCard key="c" icon={calIcon}    value={nextPayDay}            label="Could be the day!" variant="green" />,
+          <StatCard key="d" icon={starIcon}   value={`${Math.round(pct * 100)}%`} label="% of the way there" variant="default" />,
+        ],
+      ];
+    }
+    if (pct >= 0.5) {
+      // 50–89% — over halfway
+      return [
+        [
+          <StatCard key="a" icon={coinIcon}   value={fmtD(goal.savedCents)} label="Saved so far"    variant="purple" />,
+          <StatCard key="b" icon={coinIcon}   value={fmtD(leftCents)}       label="So close!"        variant="default" />,
+        ],
+        [
+          <StatCard key="c" icon={calIcon}    value={`~${weeksToGo}w`}      label="Weeks to go"      variant="default" />,
+          <StatCard key="d" icon={streakIcon} value={`${weeksSaving}w`}     label="Weeks on a streak" variant="default" />,
+        ],
+      ];
+    }
+    if (pct >= 0.25) {
+      // 25–49% — building momentum: weeks-to-go appears for the first time
+      return [
+        [
+          <StatCard key="a" icon={coinIcon}   value={fmtD(goal.savedCents)} label="Saved so far"    variant="purple" />,
+          <StatCard key="b" icon={coinIcon}   value={fmtD(leftCents)}       label="Still needed"     variant="default" />,
+        ],
+        [
+          <StatCard key="c" icon={calIcon}    value={`~${weeksToGo}w`}      label="Weeks to go"      variant="default" />,
+          <StatCard key="d" icon={streakIcon} value={`${Math.max(1, weeksSaving)}w`} label="Weeks saving" variant="default" />,
+        ],
+      ];
+    }
+    // 0–24% — just getting started: 2 cards only, no weeks-to-go
+    return [
+      [
+        <StatCard key="a" icon={calIcon}  value={nextPayDay}        label="Next allowance" variant="purple" />,
+        <StatCard key="b" icon={coinIcon} value={fmtD(targetCents)} label="Goal target"    variant="default" />,
+      ],
+    ];
+  })();
+
+  const heroBg = pct >= 1 ? '#2DA44E' : '#6B35F0';
+
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      {/* Edit / close row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
+        <TouchableOpacity onPress={onEdit} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+          <Image source={require('./assets/icons/icon-pencil.png')} style={{ width: scale(24), height: scale(24) }} resizeMode="contain" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onBack} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+          <Text style={{ fontSize: scale(18), fontWeight: '700', color: '#1A1A1A', lineHeight: scale(20) }}>✕</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60, gap: 16 }}>
+
+        {/* ── Hero card ── */}
+        <View style={{ backgroundColor: heroBg, borderRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 32, alignItems: 'center', ...SOLID_SHADOW }}>
+          <View style={{ width: scale(200), height: scale(200), borderRadius: scale(100), backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+            <Image source={goal.icon} style={{ width: scale(180), height: scale(180) }} resizeMode="contain" />
+          </View>
+        </View>
+
+        {/* ── Name ── */}
+        <Text style={{ fontSize: scale(30), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', letterSpacing: -0.5 }}>
+          {goal.name}
+        </Text>
+
+        {/* ── Amount + progress ── */}
+        <View style={{ gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(22), height: scale(22) }} resizeMode="contain" />
+            <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>{fmtD(goal.savedCents)}</Text>
+            <Text style={{ fontSize: scale(16), color: '#ABABAB', fontWeight: '600' }}>/ {fmtD(targetCents)}</Text>
+          </View>
+          <View style={{ height: 14, backgroundColor: '#ECEAE4', borderRadius: 7, overflow: 'hidden' }}>
+            <View style={{ width: `${pct * 100}%` as any, height: '100%', backgroundColor: heroBg, borderRadius: 7 }} />
+          </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+            <Text style={{ fontSize: scale(13), fontWeight: '700', color: heroBg }}>
+              {leftCents > 0 ? `${fmtD(leftCents)} left!` : '🎉 Goal reached!'}
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Stage label pill ── */}
+        <View style={{ alignSelf: 'flex-start', backgroundColor: pct >= 1 ? '#E6F7EC' : '#EAE4FF', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1.5, borderColor: stageLabelColor }}>
+          <Text style={{ fontSize: scale(12), fontWeight: '800', color: stageLabelColor, letterSpacing: 0.3 }}>{stageLabel}</Text>
+        </View>
+
+        {/* ── Stat cards (1 row at 0–24%, 2 rows otherwise) ── */}
+        <View style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>{statRows[0]}</View>
+          {statRows[1] && <View style={{ flexDirection: 'row', gap: 12 }}>{statRows[1]}</View>}
+        </View>
+
+        {/* ── Mascot banner ── */}
+        <MascotBanner message={mascotMsg} />
+
+      </ScrollView>
+    </View>
+  );
+}
+
+function Toast({ message }: { message: string }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(1600),
+      Animated.timing(opacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start();
+  }, []);
+  return (
+    <Animated.View style={{ position: 'absolute', top: 60, left: 24, right: 24, opacity, alignItems: 'center', pointerEvents: 'none' }}>
+      <View style={{ backgroundColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 20, paddingVertical: 12 }}>
+        <Text style={{ color: '#FFFFFF', fontSize: scale(14), fontWeight: '700' }}>{message}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+
+function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName }: {
+  coins: number;
+  done: Partial<Record<ChoreId, boolean>>;
+  battleResult: 'win' | 'loss' | null;
+  monsterIdx: MonsterIdx;
+  baseRate: string;
+  goals: SavedGoal[];
+  onAddGoal: (data: GoalData) => void;
+  onOpenGoalFlow: () => void;
+  currentStreak: number;
+  onEditGoal: (goal: SavedGoal) => void;
+  onDeleteGoal: (id: string) => void;
+  monsterName?: string;
+  weeklyXp: number;
+  onSwitchToParent: () => void;
+  managedChores: ManagedChore[];
+  kidProfiles: { name: string; avatarColor: string }[];
+  onSwitchToKid: (name: string) => void;
+  currentKidName: string;
+}) {
+  const completedChoresCount = managedChores.filter(c => c.status === 'approved').length;
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [selectedGoal, setSelectedGoal]   = useState<SavedGoal | null>(null);
+  const [editingGoal, setEditingGoal]     = useState<SavedGoal | null>(null);
+  const [kidAvatarIdx, setKidAvatarIdx]   = useState(0);
+  const [kidAgeRange,  setKidAgeRange]    = useState('Ages 7–9');
+  const [toastMsg, setToastMsg]           = useState<string | null>(null);
+  const toastTimer                        = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (msg: string) => {
+    setToastMsg(null); // reset first so re-mount triggers fresh animation
+    setTimeout(() => {
+      setToastMsg(msg);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToastMsg(null), 2100);
+    }, 0);
+  };
+  const dollars = (coins / 100).toFixed(2);
+
+  const currentGoal = goals[0] ?? null;
+  const targetCents = currentGoal ? Math.round(parseFloat(currentGoal.amount || '0') * 100) : 0;
+  const savedCents  = currentGoal?.savedCents ?? 0;
+  const pct         = targetCents > 0 ? Math.min(1, savedCents / targetCents) : 0;
+  const leftCents   = Math.max(0, targetCents - savedCents);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <Image
+        source={require('./assets/appBG.png')}
+        style={{ position: 'absolute', width: '100%', aspectRatio: 1024 / 1536, bottom: 0 }}
+        resizeMode="contain"
+      />
+      {/* Same header as Home / World tabs */}
+      <View style={[s.homeHeader, { backgroundColor: 'transparent' }]}>
+        <View style={s.homeHeaderLeft}>
+          <AvatarPickerSheet selected={kidAvatarIdx} onSelect={setKidAvatarIdx} />
+          <View style={{ gap: 2 }}>
+            <ViewSwitcher
+              selected={currentKidName || 'Kid view'}
+              options={[
+                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF' })),
+                { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
+              ]}
+              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
+            />
+            <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
+          </View>
+        </View>
+        <View style={s.homeBalancePill}>
+          <Text style={s.homeBalanceText}>${dollars}</Text>
+          <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
+        </View>
+      </View>
+
+      <ScrollView
+        style={{ flex: 1, backgroundColor: C.bg }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120, paddingTop: 16, gap: 16 }}
+      >
+
+        {/* ── Stat pills row ────────────────────────── */}
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          {/* Streak */}
+          <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW }}>
+            <Image source={require('./assets/icons/icon-streak.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
+            <View>
+              <Text style={{ fontSize: scale(24), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{currentStreak}</Text>
+              <Text style={{ fontSize: scale(12), color: '#ABABAB', fontWeight: '600' }}>Day Streak</Text>
             </View>
+          </View>
+          {/* Coins */}
+          <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW }}>
+            <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
+            <View>
+              <Text style={{ fontSize: scale(24), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{coins.toLocaleString()}</Text>
+              <Text style={{ fontSize: scale(12), color: '#ABABAB', fontWeight: '600' }}>Coins</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── Current goal card ─────────────────────── */}
+        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, ...SOLID_SHADOW }}>
+          {/* Header label */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <Image source={require('./assets/icons/icon-goals.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
+            <Text style={{ fontSize: scale(12), fontWeight: '900', color: '#1A1A1A', letterSpacing: 1.5 }}>CURRENT GOAL</Text>
+          </View>
+
+          {currentGoal ? (
+            <TouchableOpacity onPress={() => setSelectedGoal(currentGoal)} activeOpacity={0.85}>
+              {/* Goal image in lavender circle */}
+              <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                <View style={{ width: scale(180), height: scale(180), borderRadius: scale(90), backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center' }}>
+                  <Image source={currentGoal.icon} style={{ width: scale(160), height: scale(160) }} resizeMode="contain" />
+                </View>
+              </View>
+
+              {/* Name */}
+              <Text style={{ fontSize: scale(22), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 12 }}>
+                {currentGoal.name}
+              </Text>
+
+              {/* Amount row */}
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginBottom: 10 }}>
+                <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' }}>{fmtCoins(savedCents)}</Text>
+                <Text style={{ fontSize: scale(14), color: '#ABABAB', fontWeight: '600' }}>/ ${currentGoal.amount}</Text>
+              </View>
+
+              {/* Progress bar + left label */}
+              <View style={{ height: 14, backgroundColor: '#ECEAE4', borderRadius: 7, overflow: 'hidden', marginBottom: 6 }}>
+                <View style={{ width: `${pct * 100}%` as any, height: '100%', backgroundColor: '#6B35F0', borderRadius: 7 }} />
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <Text style={{ fontSize: scale(13), fontWeight: '700', color: '#6B35F0' }}>
+                  {leftCents > 0 ? `${fmtCoins(leftCents)} left!` : '🎉 Goal reached!'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : (
+            /* Empty state */
+            <TouchableOpacity
+              style={{ alignItems: 'center', paddingVertical: 24, gap: 10 }}
+              onPress={() => { setEditingGoal(null); setShowGoalModal(true); }}
+              activeOpacity={0.8}
+            >
+              <View style={{ width: scale(100), height: scale(100), borderRadius: scale(50), backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center' }}>
+                <Image source={require('./assets/icons/icon-goals.png')} style={{ width: scale(52), height: scale(52) }} resizeMode="contain" />
+              </View>
+              <Text style={{ fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' }}>No goal set yet</Text>
+              <Text style={{ fontSize: scale(13), color: '#ABABAB', textAlign: 'center' }}>What are you saving up for?</Text>
+              <View style={{ backgroundColor: '#6B35F0', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 20, paddingVertical: 10, marginTop: 4, ...SOLID_SHADOW }}>
+                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#FFFFFF' }}>+ Set a goal</Text>
+              </View>
+            </TouchableOpacity>
           )}
         </View>
-        <View style={{ height: 96 }} />
+
+        {/* ── This week ─────────────────────────────── */}
+        <View>
+          <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A', marginBottom: 12 }}>This week</Text>
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, flexDirection: 'row', ...SOLID_SHADOW }}>
+            {/* Chores Done */}
+            <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+              <Image source={require('./assets/icons/icon-completed.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
+              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{completedChoresCount}</Text>
+              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontWeight: '600', textAlign: 'center' }}>Chores Done</Text>
+            </View>
+            {/* Divider */}
+            <View style={{ width: 1, backgroundColor: '#ECEAE4', marginVertical: 4 }} />
+            {/* Coins Earned */}
+            <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+              <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
+              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{coins.toLocaleString()}</Text>
+              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontWeight: '600', textAlign: 'center' }}>Coins Earned</Text>
+            </View>
+            {/* Divider */}
+            <View style={{ width: 1, backgroundColor: '#ECEAE4', marginVertical: 4 }} />
+            {/* XP Earned */}
+            <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+              <Image source={require('./assets/icons/icon-star.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
+              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{weeklyXp.toLocaleString()}</Text>
+              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontWeight: '600', textAlign: 'center' }}>XP earned</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── Other goals (if more than one) ───────── */}
+        {goals.length > 1 && (
+          <View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>Other goals</Text>
+              <TouchableOpacity
+                style={{ backgroundColor: '#C5F215', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 14, paddingVertical: 6, ...SOLID_SHADOW }}
+                onPress={() => { setEditingGoal(null); setShowGoalModal(true); }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: scale(13), fontWeight: '800', color: '#1A1A1A' }}>+ Add</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ gap: 10 }}>
+              {goals.slice(1).map(goal => {
+                const tCents = Math.round(parseFloat(goal.amount || '0') * 100);
+                const p      = tCents > 0 ? Math.min(1, goal.savedCents / tCents) : 0;
+                return (
+                  <TouchableOpacity
+                    key={goal.id}
+                    onPress={() => setSelectedGoal(goal)}
+                    activeOpacity={0.8}
+                    style={{ backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, ...SOLID_SHADOW }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                      <Image source={goal.icon} style={{ width: scale(40), height: scale(40) }} resizeMode="contain" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}>{goal.name}</Text>
+                        <Text style={{ fontSize: scale(13), color: '#ABABAB', marginTop: 2 }}>{fmtCoins(goal.savedCents)} saved of ${goal.amount}</Text>
+                      </View>
+                      <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#6B35F0' }}>{Math.round(p * 100)}%</Text>
+                    </View>
+                    <View style={{ height: 8, backgroundColor: '#ECEAE4', borderRadius: 4, overflow: 'hidden' }}>
+                      <View style={{ width: `${p * 100}%` as any, height: 8, backgroundColor: '#6B35F0', borderRadius: 4 }} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+
       </ScrollView>
-    </>
+
+      {/* Goal detail modal */}
+      <Modal
+        visible={selectedGoal !== null && !showGoalModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setSelectedGoal(null)}
+      >
+        <SafeAreaProvider>
+          <StatusBar barStyle="dark-content" />
+          {selectedGoal && (
+            <GoalDetailScreen
+              goal={selectedGoal}
+              onBack={() => setSelectedGoal(null)}
+              onEdit={() => { setEditingGoal(selectedGoal); setSelectedGoal(null); setShowGoalModal(true); }}
+              baseRate={baseRate}
+              monsterName={monsterName}
+            />
+          )}
+        </SafeAreaProvider>
+      </Modal>
+
+      {/* Goal creation / edit modal */}
+      <Modal
+        visible={showGoalModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => { setShowGoalModal(false); setEditingGoal(null); }}
+      >
+        <SafeAreaProvider>
+          <StatusBar barStyle="dark-content" />
+          <GoalCreationFlow
+            onDone={() => { setShowGoalModal(false); setEditingGoal(null); }}
+            onCancel={() => { setShowGoalModal(false); setEditingGoal(null); }}
+            onGoalCreated={(data) => {
+              if (editingGoal) {
+                onEditGoal({ ...editingGoal, name: data.name, amount: data.amount, color: data.color, icon: data.icon, category: data.category });
+                showToast('Goal updated! ✅');
+              } else {
+                onAddGoal(data);
+                showToast('Goal created! 🎯');
+              }
+            }}
+            onDeleteGoal={() => {
+              if (editingGoal) {
+                onDeleteGoal(editingGoal.id);
+                // Dismiss both modals and clear all related state at once
+                // so the wallet screen is fully restored in one render pass
+                setShowGoalModal(false);
+                setEditingGoal(null);
+                setSelectedGoal(null);
+                showToast('Goal deleted');
+              }
+            }}
+            savedCents={editingGoal?.savedCents}
+            initialData={editingGoal ? { name: editingGoal.name, amount: editingGoal.amount, category: editingGoal.category, color: editingGoal.color, icon: editingGoal.icon } : undefined}
+            monsterName={monsterName}
+          />
+        </SafeAreaProvider>
+      </Modal>
+
+      {/* Toast */}
+      {toastMsg && <Toast key={toastMsg + Date.now()} message={toastMsg} />}
+    </View>
   );
 }
 
@@ -2010,7 +2728,89 @@ function EvolveScreen({ fromIdx, onDone, monsterId }: { fromIdx: MonsterIdx; onD
 
 // ─── Parent Screens ───────────────────────────────────────────────────────────
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApprove, onReject, baseRate }: {
+function ParentPayoutScreen({ kidName, coins, baseCoins, battleBonus, battleWon, completedChores, onConfirm, onBack }: {
+  kidName: string; coins: number; baseCoins: number; battleBonus: number | null;
+  battleWon: boolean | null; completedChores: ManagedChore[];
+  onConfirm: () => void; onBack: () => void;
+}) {
+  return (
+    <CreamBg>
+      {/* Header */}
+      <View style={p.screenHeader}>
+        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+          <Text style={p.backBtnText}>←</Text>
+        </TouchableOpacity>
+        <Text style={p.screenTitle}>Payout</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        {/* Intro line */}
+        <Text style={{ fontSize: scale(16), color: '#1A1A1A', fontWeight: '600' }}>
+          Here's what {kidName} earned this week.
+        </Text>
+
+        {/* Main card */}
+        <View style={[p.sectionCard, { gap: 0 }]}>
+          {/* Big amount */}
+          <View style={{ alignItems: 'center', paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: '#ECEAE4' }}>
+            <Text style={{ fontSize: scale(48), fontWeight: '900', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular', letterSpacing: -1 }}>
+              {fmtCoins(coins)}
+            </Text>
+          </View>
+
+          {/* Breakdown rows */}
+          <View style={{ paddingTop: 4 }}>
+            <View style={p.payoutBreakdownRow}>
+              <Text style={p.payoutBreakdownLabel}>Chores completed</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={{ fontSize: scale(13), color: '#3B8A3A' }}>
+                  {completedChores.length} chores ✓
+                </Text>
+                <Text style={p.payoutBreakdownValue}>{fmtCoins(baseCoins)}</Text>
+              </View>
+            </View>
+
+            {battleWon === true && (
+              <View style={p.payoutBreakdownRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <Text style={p.payoutBreakdownLabel}>Boss Battle won</Text>
+                  <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(13), height: scale(13) }} resizeMode="contain" />
+                </View>
+                <Text style={p.payoutBreakdownValue}>+{fmtCoins(battleBonus!)}</Text>
+              </View>
+            )}
+            {battleWon === false && (
+              <View style={[p.payoutBreakdownRow, { borderBottomWidth: 0 }]}>
+                <Text style={{ fontSize: scale(14), color: '#ABABAB', fontStyle: 'italic' }}>Battle bonus not earned this week</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Separator + total */}
+          <View style={{ borderTopWidth: 2, borderTopColor: '#1A1A1A', marginTop: battleWon === null ? 0 : 0 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14 }}>
+              <Text style={p.payoutTotalLabel}>Total</Text>
+              <Text style={p.payoutTotalValue}>{fmtCoins(coins)}</Text>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* Sticky CTA */}
+      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: Platform.OS === 'ios' ? 32 : 16, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#ECEAE4' }}>
+        <TouchableOpacity style={p.payoutCta} onPress={onConfirm} activeOpacity={0.8}>
+          <Text style={p.payoutCtaText}>I've paid {kidName} {fmtCoins(coins)} ✓</Text>
+        </TouchableOpacity>
+        <Text style={{ fontSize: scale(12), color: '#ABABAB', textAlign: 'center', marginTop: 8 }}>
+          This is a reminder to pay, not a transfer. You're in control of how you pay.
+        </Text>
+      </View>
+    </CreamBg>
+  );
+}
+
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApprove, onReject, baseRate, onPayKid, kidName, coins }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: () => void;
   onAddKid: () => void;
@@ -2018,6 +2818,9 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
   onApprove: (id: string) => void;
   onReject: (id: string, note: string) => void;
   baseRate: string;
+  onPayKid: () => void;
+  kidName: string;
+  coins: number;
 }) {
   const kids = [
     { name: 'Sam',    level: 12, emoji: '🧒', bg: '#C5E8FF' },
@@ -2026,6 +2829,8 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
   ];
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectNote, setRejectNote]   = useState('');
+  const isSunday     = daysUntilSunday() === 0;
+  const showPayCell  = coins > 0 || isSunday;
   const tasksCompleted = 24;
   const tasksTotal     = 32;
   const xpEarned       = 1250;
@@ -2102,26 +2907,24 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
           <MascotBanner message="Small steps today lead to big rewards tomorrow!" />
         </View>
 
-        {/* Needs approval */}
+        {/* Needs your attention */}
         {(() => {
           const pending = managedChores.filter(c => c.status === 'pending');
           return (
             <View style={{ paddingHorizontal: 16 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <Text style={{ fontSize: scale(17), fontWeight: '800', color: '#1A1A1A' }}>Needs approval</Text>
+                <Text style={{ fontSize: scale(17), fontWeight: '800', color: '#1A1A1A' }}>Needs your attention</Text>
                 {pending.length > 0 && (
                   <View style={p.pendingTabBadge}>
                     <Text style={p.pendingTabBadgeText}>{pending.length}</Text>
                   </View>
                 )}
               </View>
-              {pending.length === 0 ? (
-                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, alignItems: 'center', gap: 6, ...SOLID_SHADOW }}>
-                  <Text style={{ fontSize: scale(28) }}>✅</Text>
-                  <Text style={{ fontSize: scale(15), fontWeight: '700', color: '#1A1A1A' }}>All caught up!</Text>
-                  <Text style={{ fontSize: scale(13), color: '#ABABAB' }}>No chores waiting for approval</Text>
-                </View>
-              ) : (
+              {pending.length === 0 && coins === 0 ? (
+                <Text style={{ fontSize: scale(14), color: '#ABABAB', fontWeight: '500', paddingVertical: 8 }}>
+                  You're all clear — nothing needs your attention right now.
+                </Text>
+              ) : pending.length === 0 ? null : (
                 <View style={{ gap: 10 }}>
                   {pending.map(chore => (
                     <View key={chore.id} style={p.pendingReviewCard}>
@@ -2131,10 +2934,12 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={p.choreManageName}>{chore.name}</Text>
-                          <Text style={p.choreManageFreq}>
-                            {chore.assignedTo.length > 0 ? chore.assignedTo.join(', ') : 'Everyone'}
-                            {' · '}{'⭐'.repeat(chore.difficulty)}
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 }}>
+                            <Text style={p.choreManageFreq}>{chore.assignedTo.length > 0 ? chore.assignedTo.join(', ') : 'Everyone'}{' · '}</Text>
+                            {Array.from({ length: chore.difficulty }).map((_, i) => (
+                              <Image key={i} source={require('./assets/icons/icon-star.png')} style={{ width: scale(11), height: scale(11) }} resizeMode="contain" />
+                            ))}
+                          </View>
                         </View>
                         <Text style={p.choreManageRate}>
                           ${(parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2)}
@@ -2185,14 +2990,32 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
           );
         })()}
 
+        {/* Pay out — only visible when there are coins to pay or it's Sunday */}
+        {showPayCell && (
+          <TouchableOpacity
+            style={[p.sectionCard, { marginHorizontal: 16, marginTop: 12, backgroundColor: '#C5F215', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 }]}
+            onPress={onPayKid}
+            activeOpacity={0.8}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' }}>Pay {kidName} 💸</Text>
+              <Text style={{ fontSize: scale(13), color: '#1A1A1A', opacity: 0.7, marginTop: 2 }}>
+                {coins > 0 ? `${fmtCoins(coins)} ready to pay out` : "It's payout day — review this week's earnings"}
+              </Text>
+            </View>
+            <Text style={{ fontSize: scale(22) }}>›</Text>
+          </TouchableOpacity>
+        )}
+
       </ScrollView>
     </CreamBg>
   );
 }
 
-function ParentChoresScreen({ chores, onBack, onAdd, onEdit, baseRate }: {
+function ParentChoresScreen({ chores, onBack, showBack, onAdd, onEdit, baseRate }: {
   chores: ManagedChore[];
   onBack: () => void;
+  showBack?: boolean;
   onAdd: () => void;
   onEdit: (c: ManagedChore) => void;
   baseRate: string;
@@ -2209,9 +3032,13 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit, baseRate }: {
     <CreamBg>
       {/* Header */}
       <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
+        {showBack ? (
+          <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+            <Text style={p.backBtnText}>←</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
         <Text style={p.screenTitle}>Chores</Text>
         <TouchableOpacity onPress={onAdd} style={p.addBtn} activeOpacity={0.7}>
           <Text style={p.addBtnText}>+</Text>
@@ -2249,7 +3076,11 @@ function ParentChoresScreen({ chores, onBack, onAdd, onEdit, baseRate }: {
                 </Text>
               </View>
               <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                <Text style={{ fontSize: scale(12) }}>{'⭐'.repeat(chore.difficulty)}</Text>
+                <View style={{ flexDirection: 'row', gap: 2 }}>
+                  {Array.from({ length: chore.difficulty }).map((_, i) => (
+                    <Image key={i} source={require('./assets/icons/icon-star.png')} style={{ width: scale(12), height: scale(12) }} resizeMode="contain" />
+                  ))}
+                </View>
                 <Text style={p.choreManageRate}>${(parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2)}</Text>
               </View>
               <Text style={p.choreManageDrag}>⠿</Text>
@@ -2323,13 +3154,13 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         )}
       </View>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 100 }}>
         {/* Icon Display */}
         <View style={{ alignItems: 'center', marginBottom: 8 }}>
           <View style={[p.iconDisplay, { backgroundColor: selectedIcon.bg }]}>
             <ChoreIcon icon={selectedIcon.icon} size={60} />
             <View style={p.iconEditBadge}>
-              <Text style={{ fontSize: scale(12) }}>✏️</Text>
+              <Image source={require('./assets/icons/icon-pencil.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
             </View>
           </View>
         </View>
@@ -2380,7 +3211,11 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
                   onPress={() => setDifficulty(level)}
                   activeOpacity={0.7}
                 >
-                  <Text style={p.difficultyStars}>{'⭐'.repeat(level)}</Text>
+                  <View style={{ flexDirection: 'row', gap: 2, justifyContent: 'center' }}>
+                    {Array.from({ length: level }).map((_, i) => (
+                      <Image key={i} source={require('./assets/icons/icon-star.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
+                    ))}
+                  </View>
                   <Text style={[p.difficultyLabel, active && p.difficultyLabelActive]}>
                     {DIFFICULTY_LABELS[level]}
                   </Text>
@@ -2451,15 +3286,13 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
   );
 }
 
-function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapEnabled, setWeeklyCap, requireApproval, setRequireApproval }: {
+function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapEnabled, setWeeklyCap }: {
   onBack: () => void;
   onRateGuide: () => void;
   baseRate: string;
   setBaseRate: (v: string) => void;
   weeklyCapEnabled: boolean;
   setWeeklyCap: (v: boolean) => void;
-  requireApproval: boolean;
-  setRequireApproval: (v: boolean) => void;
 }) {
   return (
     <CreamBg>
@@ -2516,18 +3349,6 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
             />
           </View>
 
-          <View style={[p.settingsRow, { borderTopWidth: 1, borderTopColor: C.border, marginTop: 12, paddingTop: 12 }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={p.settingsRowLabel}>Require approval for payouts</Text>
-              <Text style={p.settingsRowSub}>Review and approve payouts to savings or rewards.</Text>
-            </View>
-            <Switch
-              value={requireApproval}
-              onValueChange={setRequireApproval}
-              trackColor={{ false: '#D0CEC8', true: '#C5F215' }}
-              thumbColor={requireApproval ? '#1A1A1A' : '#F4F3F4'}
-            />
-          </View>
         </View>
 
         {/* History row */}
@@ -2611,7 +3432,7 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
 
 // ─── Parent Settings Screens ──────────────────────────────────────────────────
 
-type SettingsSubScreen = 'main' | 'kids' | 'battle' | 'account';
+type SettingsSubScreen = 'main' | 'kids' | 'battle' | 'account' | 'approval';
 
 function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   iconBg: string; iconEmoji: string; title: string; subtitle?: string;
@@ -2634,12 +3455,21 @@ function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   );
 }
 
-function ParentSettingsScreen({ onNav, baseRate, onAddKid }: { onNav: (s: ParentScreen) => void; baseRate: string; onAddKid?: () => void }) {
+function ParentSettingsScreen({ onNav, baseRate, onAddKid, kids, kidApprovalSettings, setKidApprovalSettings }: {
+  onNav: (s: ParentScreen) => void;
+  baseRate: string;
+  onAddKid?: () => void;
+  kids: string[];
+  kidApprovalSettings: Record<string, boolean>;
+  setKidApprovalSettings: (v: Record<string, boolean>) => void;
+}) {
   const [sub, setSub] = useState<SettingsSubScreen>('main');
+  const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
-  if (sub === 'kids')    return <SettingsKidsScreen    onBack={() => setSub('main')} onAddKid={onAddKid} />;
-  if (sub === 'battle')  return <SettingsBattleScreen  onBack={() => setSub('main')} baseRate={baseRate} />;
-  if (sub === 'account') return <SettingsAccountScreen onBack={() => setSub('main')} />;
+  if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} />;
+  if (sub === 'battle')   return <SettingsBattleScreen   onBack={() => setSub('main')} baseRate={baseRate} />;
+  if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} />;
+  if (sub === 'approval') return <SettingsApprovalScreen onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} />;
 
   return (
     <CreamBg>
@@ -2663,7 +3493,7 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid }: { onNav: (s: Parent
           <View style={ps.divider} />
           <SettingsRow iconBg="#10B981" iconEmoji="✅" title="Chore library" subtitle="Manage & create chores" onPress={() => onNav('chores')} />
           <View style={ps.divider} />
-          <SettingsRow iconBg="#6366F1" iconEmoji="🕐" title="Approval settings" subtitle="How chores get verified" />
+          <SettingsRow iconBg="#6366F1" iconEmoji="🕐" title="Approval settings" subtitle={anyApproval ? `${kids.filter(k => kidApprovalSettings[k] !== false).length} of ${kids.length} kids require approval` : 'Auto-approve all'} onPress={() => setSub('approval')} />
         </View>
 
         {/* Battles */}
@@ -2860,6 +3690,116 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
   );
 }
 
+const KID_AVATARS: Record<string, { emoji: string; bg: string }> = {
+  Sam:   { emoji: '🦎', bg: '#E8F5E9' },
+  Lily:  { emoji: '🐱', bg: '#FFF0F6' },
+  Max:   { emoji: '🐉', bg: '#E3F2FD' },
+};
+
+function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidApprovalSettings }: {
+  onBack: () => void;
+  kids: string[];
+  kidApprovalSettings: Record<string, boolean>;
+  setKidApprovalSettings: (v: Record<string, boolean>) => void;
+}) {
+  const allOn  = kids.every(k => kidApprovalSettings[k] !== false);
+  const allOff = kids.every(k => kidApprovalSettings[k] === false);
+
+  const toggle = (kid: string) => {
+    setKidApprovalSettings({ ...kidApprovalSettings, [kid]: !(kidApprovalSettings[kid] ?? true) });
+  };
+  const setAll = (val: boolean) => {
+    setKidApprovalSettings(Object.fromEntries(kids.map(k => [k, val])));
+  };
+
+  return (
+    <CreamBg>
+      <View style={p.screenHeader}>
+        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+          <Text style={p.backBtnText}>←</Text>
+        </TouchableOpacity>
+        <Text style={p.screenTitle}>Approval settings</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 120 }}>
+        {/* Hero */}
+        <View style={[ps.battleHero, { backgroundColor: '#1A3A2A' }]}>
+          <Text style={{ fontSize: scale(44) }}>✅</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={ps.battleHeroTitle}>Chore approval</Text>
+            <Text style={ps.battleHeroSub}>Choose which kids need your sign-off before earning XP and coins.</Text>
+          </View>
+        </View>
+
+        {/* Quick actions */}
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <TouchableOpacity
+            style={[p.sectionCard, { flex: 1, alignItems: 'center', paddingVertical: 14, opacity: allOn ? 0.45 : 1 }]}
+            onPress={() => setAll(true)}
+            activeOpacity={0.7}
+            disabled={allOn}
+          >
+            <Text style={{ fontSize: scale(20), marginBottom: 4 }}>🔒</Text>
+            <Text style={{ fontSize: scale(12), fontWeight: '700', color: C.text }}>Require all</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[p.sectionCard, { flex: 1, alignItems: 'center', paddingVertical: 14, opacity: allOff ? 0.45 : 1 }]}
+            onPress={() => setAll(false)}
+            activeOpacity={0.7}
+            disabled={allOff}
+          >
+            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(22), height: scale(22), marginBottom: 4 }} resizeMode="contain" />
+            <Text style={{ fontSize: scale(12), fontWeight: '700', color: C.text }}>Auto-approve all</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Per-kid toggles */}
+        <View style={p.sectionCard}>
+          {kids.map((kid, idx) => {
+            const needsApproval = kidApprovalSettings[kid] ?? true;
+            const av = KID_AVATARS[kid] ?? { emoji: '🧒', bg: '#F0F0F0' };
+            return (
+              <View key={kid}>
+                {idx > 0 && <View style={{ height: 1, backgroundColor: C.border }} />}
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 }}>
+                  {/* Avatar */}
+                  <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: av.bg, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' }}>
+                    <Text style={{ fontSize: scale(20) }}>{av.emoji}</Text>
+                  </View>
+                  {/* Name + status */}
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: scale(15), fontWeight: '700', color: C.text }}>{kid}</Text>
+                    <Text style={{ fontSize: scale(12), color: needsApproval ? '#2A7A2A' : '#F59E0B', fontWeight: '600', marginTop: 1 }}>
+                      {needsApproval ? 'Needs your approval' : 'Auto-approves'}
+                    </Text>
+                  </View>
+                  {/* Toggle */}
+                  <TouchableOpacity
+                    style={[ps.toggle, needsApproval && ps.toggleOn]}
+                    onPress={() => toggle(kid)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[ps.toggleThumb, needsApproval && ps.toggleThumbOn]} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Explainer */}
+        <View style={p.noteCard}>
+          <Text style={{ fontSize: scale(18), marginRight: 8 }}>💡</Text>
+          <Text style={p.noteText}>
+            When approval is on, a kid's completed chore shows up under "Needs your attention" — XP and coins are held until you tap Approve. When off, they're awarded instantly.
+          </Text>
+        </View>
+      </ScrollView>
+    </CreamBg>
+  );
+}
+
 function SettingsAccountScreen({ onBack }: { onBack: () => void }) {
   return (
     <CreamBg>
@@ -2903,6 +3843,11 @@ function SettingsAccountScreen({ onBack }: { onBack: () => void }) {
 interface GoalCreationFlowProps {
   onDone: () => void;
   onCancel: () => void;
+  onGoalCreated?: (data: GoalData) => void;
+  onDeleteGoal?: () => void;
+  savedCents?: number;
+  initialData?: Partial<GoalData>;
+  monsterName?: string;
 }
 
 interface GoalData {
@@ -2910,77 +3855,105 @@ interface GoalData {
   amount: string;
   category: string;
   color: string;
-  icon: string;
+  icon: number; // ImageRequireSource from require('./assets/icons/goalIcons/…')
 }
 
-const GOAL_COLORS = [
-  '#6B35F0', '#4A9FE8', '#5CB85C',
-  '#F5C842', '#E870A0', '#F08030',
-  '#30C0B0', '#E04040', '#A0A0A8',
+interface SavedGoal {
+  id: string;
+  name: string;
+  amount: string;     // target in dollars e.g. "25.00"
+  category: string;
+  color: string;
+  icon: number; // ImageRequireSource
+  savedCents: number; // how much has been saved so far
+  milestones: string[];   // 4 reward labels e.g. ['Helmet', 'Trick Unlocked', 'Glow Board', 'Celebration!']
+  activityFeed: { label: string; pts: number; when: string }[];  // recent progress items
+}
+
+
+const GOAL_OPTIONS: { icon: number; name: string; amount: string }[] = [
+  { icon: require('./assets/icons/goalIcons/Switch.png'),                name: 'Nintendo Switch',   amount: '299.99' },
+  { icon: require('./assets/icons/goalIcons/Roblox.png'),                name: 'Roblox Gift Card',  amount: '25.00'  },
+  { icon: require('./assets/icons/goalIcons/Bike.png'),                  name: 'New bike',          amount: '120.00' },
+  { icon: require('./assets/icons/goalIcons/Headset.png'),               name: 'Headphones',        amount: '60.00'  },
+  { icon: require('./assets/icons/goalIcons/Scooter.png'),               name: 'Scooter',           amount: '80.00'  },
+  { icon: require('./assets/icons/goalIcons/TV.png'),                    name: 'New TV',            amount: '200.00' },
+  { icon: require('./assets/icons/goalIcons/Shoes.png'),                 name: 'New shoes',         amount: '70.00'  },
+  { icon: require('./assets/icons/goalIcons/Legp.png'),                  name: 'Lego set',          amount: '50.00'  },
+  { icon: require('./assets/icons/goalIcons/Plushie.png'),               name: 'Stuffed animal',    amount: '30.00'  },
+  { icon: require('./assets/icons/goalIcons/Animal.png'),                name: 'Adopt a pet',       amount: '100.00' },
+  { icon: require('./assets/icons/goalIcons/Pizza.png'),                 name: 'Pizza party',       amount: '25.00'  },
+  { icon: require('./assets/icons/goalIcons/Movie.png'),                 name: 'Movie night',       amount: '15.00'  },
+  { icon: require('./assets/icons/goalIcons/Sleepover.png'),             name: 'Sleepover party',   amount: '40.00'  },
+  { icon: require('./assets/icons/goalIcons/Ice Ceam Party.png'),        name: 'Ice cream party',   amount: '20.00'  },
+  { icon: require('./assets/icons/goalIcons/Money.png'),                 name: 'Custom goal',       amount: ''       },
 ];
 
-const GOAL_OPTIONS = [
-  { icon: '🚲', name: 'New bike',          amount: '120.00' },
-  { icon: '🎮', name: 'Roblox Gift Card',  amount: '25.00'  },
-  { icon: '🕹',  name: 'Nintendo Switch',   amount: '299.99' },
-  { icon: '🎧', name: 'Headphones',        amount: '60.00'  },
-  { icon: '📷', name: 'Camera',            amount: '150.00' },
-  { icon: '⭐', name: 'Custom goal',       amount: ''       },
-];
+function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, savedCents, initialData, monsterName }: GoalCreationFlowProps) {
+  // When editing an existing goal, jump straight to details (step 2)
+  const [step, setStep]           = useState<number>(initialData ? 2 : 1);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-const GOAL_CATEGORIES = [
-  { icon: '🧸', label: 'Toys'       },
-  { icon: '📱', label: 'Electronics'},
-  { icon: '⚽', label: 'Sports'     },
-  { icon: '🎮', label: 'Games'      },
-  { icon: '👕', label: 'Clothing'   },
-  { icon: '🎨', label: 'Art & Music'},
-  { icon: '📚', label: 'Books'      },
-  { icon: '⭐', label: 'Other'      },
-];
-
-function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
-  const [step, setStep]             = useState<number>(1);
-  const [goalData, setGoalData]     = useState<GoalData>({
-    name: '', amount: '', category: '', color: '#6B35F0', icon: '🎯',
+  const [goalData, setGoalData] = useState<GoalData>({
+    name:     initialData?.name     ?? '',
+    amount:   initialData?.amount   ?? '',
+    category: initialData?.category ?? '',
+    color:    '#6B35F0',
+    icon:     initialData?.icon     ?? require('./assets/icons/goalIcons/Money.png'),
   });
-  const [selectedOptionIdx, setSelectedOptionIdx] = useState<number | null>(null);
-  const [numpadValue, setNumpadValue]             = useState('');
-  const [photoAdded, setPhotoAdded]               = useState(false);
+  // Tracks which preset key to use for the mascot message (separate from goalData.name
+  // so custom-goal typed names still resolve to the "Custom goal" message)
+  const [mascotKey, setMascotKey]   = useState<string>(initialData?.name ?? '');
+  // Inline amount text field (decimal-pad, replaces old numpad screen)
+  const [amountText, setAmountText] = useState<string>(initialData?.amount ?? '');
+  const [photoAdded, setPhotoAdded] = useState(false);
+  const [search, setSearch]         = useState('');
 
   const go = (n: number) => setStep(n);
 
-  const handleCategorySelect = (_cat: string) => go(3);
-
+  // Selecting a preset auto-fills details and jumps to step 2
   const handleGoalOptionSelect = (idx: number) => {
-    const opt = GOAL_OPTIONS[idx];
-    setSelectedOptionIdx(idx);
-    setGoalData(prev => ({ ...prev, name: opt.name, amount: opt.amount, icon: opt.icon }));
+    const opt      = GOAL_OPTIONS[idx];
+    const autoName = opt.name === 'Custom goal' ? '' : opt.name;
+    setGoalData(prev => ({ ...prev, name: autoName, amount: opt.amount, icon: opt.icon }));
+    setAmountText(opt.amount);
+    setMascotKey(opt.name);
+    go(2);
   };
 
-  const handleNumpadKey = (key: string) => {
-    if (key === '⌫') {
-      setNumpadValue(prev => prev.slice(0, -1));
-    } else if (key === '.') {
-      if (!numpadValue.includes('.')) setNumpadValue(prev => prev + '.');
-    } else {
-      setNumpadValue(prev => (prev.length < 8 ? prev + key : prev));
-    }
+  // ── Mascot bubble copy ──────────────────────────────────────────────────────
+  const mn = monsterName ?? '';
+  const MASCOT_MESSAGES: Record<string, string> = {
+    'Nintendo Switch':  `${mn} is ready to play some games! 🎮`,
+    'Roblox Gift Card': `${mn} wants to jump in Roblox with you! 🌟`,
+    'New bike':         `${mn} says zoom zoom! 🚲`,
+    'Headphones':       `${mn} has great taste in music! 🎧`,
+    'Scooter':          `${mn} says let's ride! 🛴`,
+    'New TV':           `${mn} is ready for movie night! 📺`,
+    'New shoes':        `${mn} loves your style! 👟`,
+    'Lego set':         `${mn} is ready to build! 🧱`,
+    'Stuffed animal':   `${mn} thinks it's super cute! 🧸`,
+    'Adopt a pet':      `${mn} loves animals too! 🐾`,
+    'Pizza party':      `${mn} is getting hungry! 🍕`,
+    'Movie night':      `${mn} has the popcorn ready! 🍿`,
+    'Sleepover party':  `${mn} wants to join the fun! 🌙`,
+    'Ice cream party':  `${mn} says yes to sprinkles! 🍦`,
+    'Custom goal':      `Whatever it is, ${mn}'s going for it with you! 💪`,
   };
+  const mascotMsg = MASCOT_MESSAGES[mascotKey]
+    ?? (monsterName ? `Nice goal! ${monsterName} thinks you're going to crush it! 💪`
+                    : "Nice goal! You're going to crush it! 💪");
 
-  const handleNumpadDone = () => {
-    const parsed = parseFloat(numpadValue);
-    if (!isNaN(parsed)) {
-      setGoalData(prev => ({ ...prev, amount: parsed.toFixed(2) }));
-    }
-    go(4);
-  };
+  // ── Step 2 validation ───────────────────────────────────────────────────────
+  const amountNum  = parseFloat(amountText);
+  const canProceed = goalData.name.trim().length > 0 && !isNaN(amountNum) && amountNum > 0;
 
-  const displayAmount = numpadValue
-    ? '$' + numpadValue
-    : (goalData.amount ? '$' + goalData.amount : '$0');
+  // ── Real-time search filter ─────────────────────────────────────────────────
+  const filteredOptions = GOAL_OPTIONS.filter(opt =>
+    opt.name.toLowerCase().includes(search.toLowerCase())
+  );
 
-  // ── Step 1: Intro ──
+  // ── Step 1: Pick your goal ──────────────────────────────────────────────────
   if (step === 1) {
     return (
       <View style={s.gfRoot}>
@@ -2989,119 +3962,85 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
             <Text style={s.gfBackText}>←</Text>
           </TouchableOpacity>
         </View>
-        <ScrollView contentContainerStyle={s.gfScrollCenter} showsVerticalScrollIndicator={false}>
-          <View style={s.gfRobotCircle}>
-            <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 120, height: 120 }} resizeMode="contain" />
+        <View style={[s.gfScrollTop, { flex: 1 }]}>
+          <Text style={s.gfScreenTitle}>Pick your goal</Text>
+          <Text style={s.gfScreenSub}>What are you saving up for?</Text>
+
+          {/* Search bar */}
+          <View style={s.gfSearchRow}>
+            <Image source={require('./assets/icons/icon-search.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
+            <TextInput
+              style={s.gfSearchInput}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search goals…"
+              placeholderTextColor="#C0BEB8"
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.7} style={s.gfSearchClear}>
+                <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>✕</Text>
+              </TouchableOpacity>
+            )}
           </View>
-          <Text style={s.gfBigTitle}>{"Let's create\na new goal!"}</Text>
-          <Text style={s.gfSubtitle}>What are you saving up for?</Text>
-          <View style={{ height: 32 }} />
-          <TouchableOpacity style={s.gfBtnPrimary} onPress={() => go(2)} activeOpacity={0.85}>
-            <Text style={s.gfBtnPrimaryText}>Create goal</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.gfBtnOutline} onPress={onCancel} activeOpacity={0.7}>
-            <Text style={s.gfBtnOutlineText}>Cancel</Text>
-          </TouchableOpacity>
-        </ScrollView>
+
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            <View style={{ gap: 10, paddingTop: 4, paddingBottom: 32 }}>
+              {filteredOptions.map((opt, idx) => {
+                const realIdx = GOAL_OPTIONS.indexOf(opt);
+                const isCustom = opt.name === 'Custom goal';
+                return (
+                  <TouchableOpacity
+                    key={opt.name}
+                    style={[s.gfGoalRow, isCustom && { borderStyle: 'dashed' }]}
+                    onPress={() => handleGoalOptionSelect(realIdx)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={s.gfGoalIconCircle}>
+                      <Image source={opt.icon} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.gfGoalName}>{opt.name}</Text>
+                      <Text style={s.gfGoalPrice}>
+                        {opt.amount ? `$${opt.amount}` : 'Set your own amount'}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: scale(18), color: '#ABABAB' }}>›</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {filteredOptions.length === 0 && (
+                <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                  <Text style={{ fontSize: scale(40) }}>🤔</Text>
+                  <Text style={{ fontSize: scale(14), color: '#ABABAB', marginTop: 8 }}>No results for "{search}"</Text>
+                  <TouchableOpacity
+                    style={[s.gfBtnPrimary, { marginTop: 16, paddingHorizontal: 24, width: 'auto' }]}
+                    onPress={() => handleGoalOptionSelect(GOAL_OPTIONS.length - 1)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={s.gfBtnPrimaryText}>Create custom goal</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        </View>
       </View>
     );
   }
 
-  // ── Step 2: Category ──
+  // ── Step 2: Goal details ────────────────────────────────────────────────────
   if (step === 2) {
     return (
       <View style={s.gfRoot}>
         <View style={s.gfBackRow}>
-          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(1)} activeOpacity={0.7}>
+          <TouchableOpacity style={s.gfBackBtn} onPress={() => initialData ? onCancel() : go(1)} activeOpacity={0.7}>
             <Text style={s.gfBackText}>←</Text>
           </TouchableOpacity>
         </View>
-        <ScrollView contentContainerStyle={s.gfScrollTop} showsVerticalScrollIndicator={false}>
-          <Text style={s.gfScreenTitle}>What do you want?</Text>
-          <Text style={s.gfScreenSub}>Choose a category or pick something you love!</Text>
-          <View style={s.gfCategoryGrid}>
-            {GOAL_CATEGORIES.map(cat => (
-              <TouchableOpacity
-                key={cat.label}
-                style={s.gfCategoryCard}
-                onPress={() => { handleCategorySelect(cat.label); }}
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: scale(48) }}>{cat.icon}</Text>
-                <Text style={s.gfCategoryLabel}>{cat.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // ── Step 3: Pick goal ──
-  if (step === 3) {
-    return (
-      <View style={s.gfRoot}>
-        <View style={s.gfBackRow}>
-          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(2)} activeOpacity={0.7}>
-            <Text style={s.gfBackText}>←</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={s.gfScrollTop} showsVerticalScrollIndicator={false}>
-          <Text style={s.gfScreenTitle}>Pick your goal</Text>
-          <Text style={s.gfScreenSub}>Here are some popular ideas!</Text>
-          <View style={{ gap: 10, marginTop: 8 }}>
-            {GOAL_OPTIONS.map((opt, idx) => {
-              const selected = selectedOptionIdx === idx;
-              return (
-                <TouchableOpacity
-                  key={opt.name}
-                  style={[s.gfGoalRow, selected && s.gfGoalRowSelected]}
-                  onPress={() => handleGoalOptionSelect(idx)}
-                  activeOpacity={0.7}
-                >
-                  <View style={s.gfGoalIconCircle}>
-                    <Text style={{ fontSize: scale(40) }}>{opt.icon}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.gfGoalName}>{opt.name}</Text>
-                    {opt.amount ? (
-                      <Text style={s.gfGoalPrice}>${opt.amount}</Text>
-                    ) : (
-                      <Text style={s.gfGoalPrice}>Set your own amount</Text>
-                    )}
-                  </View>
-                  <View style={[s.gfGoalCheck, selected && s.gfGoalCheckSelected]}>
-                    {selected && <View style={s.gfGoalCheckDot} />}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <View style={{ height: 24 }} />
-          <TouchableOpacity
-            style={[s.gfBtnPrimary, !selectedOptionIdx && selectedOptionIdx !== 0 && { opacity: 0.4 }]}
-            onPress={() => selectedOptionIdx !== null && go(4)}
-            activeOpacity={0.85}
-          >
-            <Text style={s.gfBtnPrimaryText}>Next</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // ── Step 4: Goal details ──
-  if (step === 4) {
-    return (
-      <View style={s.gfRoot}>
-        <View style={s.gfBackRow}>
-          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(3)} activeOpacity={0.7}>
-            <Text style={s.gfBackText}>←</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={s.gfScrollTop} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={s.gfScrollTop} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text style={s.gfScreenTitle}>Goal details</Text>
-          <Text style={s.gfScreenSub}>{"Let's give your goal a name and set the target amount."}</Text>
+          <Text style={s.gfScreenSub}>Confirm the name and amount.</Text>
 
           {/* Goal name */}
           <View style={{ marginTop: 20 }}>
@@ -3115,168 +4054,148 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
               onChangeText={v => setGoalData(prev => ({ ...prev, name: v.slice(0, 30) }))}
               placeholder="e.g. New bike"
               placeholderTextColor="#C0BEB8"
+              returnKeyType="next"
             />
           </View>
 
-          {/* Target amount */}
+          {/* Target amount — inline decimal-pad input */}
           <View style={{ marginTop: 16 }}>
             <Text style={s.gfFieldLabel}>Target amount</Text>
-            <TouchableOpacity
-              style={s.gfInput}
-              onPress={() => { setNumpadValue(goalData.amount.replace('$', '')); go(5); }}
-              activeOpacity={0.7}
-            >
-              <Text style={{ fontSize: scale(16), color: goalData.amount ? '#1A1A1A' : '#C0BEB8' }}>
-                {goalData.amount ? '$' + goalData.amount : '$0.00'}
-              </Text>
-            </TouchableOpacity>
+            <View style={[s.gfInput, { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 0, height: 52 }]}>
+              <Text style={{ fontSize: scale(16), color: '#1A1A1A', fontWeight: '700' }}>$</Text>
+              <TextInput
+                style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A', paddingVertical: 0 }}
+                value={amountText}
+                onChangeText={v => {
+                  // allow digits and single decimal point, max 8 chars
+                  const clean = v.replace(/[^0-9.]/g, '');
+                  const parts = clean.split('.');
+                  const safe  = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : clean;
+                  if (safe.length <= 8) setAmountText(safe);
+                }}
+                placeholder="0.00"
+                placeholderTextColor="#C0BEB8"
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+              />
+            </View>
           </View>
 
-          {/* Photo */}
+          {/* Photo (optional) */}
           <View style={{ marginTop: 16 }}>
-            <Text style={s.gfFieldLabel}>Add a photo (optional)</Text>
-            <TouchableOpacity style={s.gfPhotoDash} onPress={() => go(6)} activeOpacity={0.7}>
-              <Text style={{ fontSize: scale(28) }}>📷</Text>
-              <Text style={s.gfPhotoText}>Tap to add a photo</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ height: 24 }} />
-          <TouchableOpacity style={s.gfBtnPrimary} onPress={() => go(7)} activeOpacity={0.85}>
-            <Text style={s.gfBtnPrimaryText}>Next</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // ── Step 5: Number pad ──
-  if (step === 5) {
-    const numKeys = ['1','2','3','4','5','6','7','8','9','.','0','⌫'];
-    return (
-      <View style={s.gfRoot}>
-        <View style={s.gfBackRow}>
-          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(4)} activeOpacity={0.7}>
-            <Text style={s.gfBackText}>←</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={s.gfScrollTop}>
-          <Text style={s.gfScreenTitle}>Set target amount</Text>
-          <Text style={s.gfScreenSub}>How much does it cost?</Text>
-          <Text style={s.gfAmountDisplay}>{displayAmount}</Text>
-          <Text style={s.gfAmountHint}>Recommended: $10 – $1,000</Text>
-          <View style={s.gfNumpad}>
-            {numKeys.map(key => (
-              <TouchableOpacity
-                key={key}
-                style={s.gfNumKey}
-                onPress={() => handleNumpadKey(key)}
-                activeOpacity={0.7}
-              >
-                <Text style={s.gfNumKeyText}>{key}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity style={[s.gfBtnPrimary, { marginTop: 16 }]} onPress={handleNumpadDone} activeOpacity={0.85}>
-            <Text style={s.gfBtnPrimaryText}>Done</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  // ── Step 6: Add photo ──
-  if (step === 6) {
-    return (
-      <View style={s.gfRoot}>
-        <View style={s.gfBackRow}>
-          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(4)} activeOpacity={0.7}>
-            <Text style={s.gfBackText}>←</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={s.gfScrollTop} showsVerticalScrollIndicator={false}>
-          <Text style={s.gfScreenTitle}>Add a photo</Text>
-          <Text style={s.gfScreenSub}>Add a photo of what you're saving for!</Text>
-
-          {photoAdded ? (
-            <View style={s.gfPhotoPreview}>
-              <View style={s.gfPhotoPlaceholder}>
-                <Text style={{ fontSize: scale(60) }}>{goalData.icon}</Text>
-                <Text style={{ color: '#ABABAB', marginTop: 8, fontSize: scale(13) }}>Photo preview</Text>
+            <Text style={s.gfFieldLabel}>Add a photo <Text style={s.gfCharCount}>(optional)</Text></Text>
+            {photoAdded ? (
+              <View style={s.gfPhotoPreview}>
+                <View style={[s.gfPhotoPlaceholder, { height: 140 }]}>
+                  <Image source={goalData.icon} style={{ width: scale(52), height: scale(52) }} resizeMode="contain" />
+                  <Text style={{ color: '#ABABAB', marginTop: 6, fontSize: scale(12) }}>Photo preview</Text>
+                </View>
+                <TouchableOpacity style={s.gfPhotoRemove} onPress={() => setPhotoAdded(false)} activeOpacity={0.7}>
+                  <Text style={s.gfPhotoRemoveText}>✕</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={s.gfPhotoRemove}
-                onPress={() => setPhotoAdded(false)}
-                activeOpacity={0.7}
-              >
-                <Text style={s.gfPhotoRemoveText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={[s.gfPhotoDash, { height: 180, marginTop: 20 }]}>
-              <Text style={{ fontSize: scale(40), color: '#ABABAB' }}>📷</Text>
-              <Text style={s.gfPhotoText}>No photo yet</Text>
-            </View>
+            ) : (
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+                <TouchableOpacity
+                  style={[s.gfBtnOutline, { flex: 1, paddingVertical: 12 }]}
+                  onPress={() => setPhotoAdded(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.gfBtnOutlineText}>📷  Camera</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.gfBtnOutline, { flex: 1, paddingVertical: 12 }]}
+                  onPress={() => setPhotoAdded(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.gfBtnOutlineText}>🖼  Gallery</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          <View style={{ height: 32 }} />
+          {/* Primary action button — "Save Changes" when editing, "Next" when creating */}
+          <TouchableOpacity
+            style={[s.gfBtnPrimary, !canProceed && { opacity: 0.4 }]}
+            onPress={() => {
+              if (!canProceed) return;
+              const committed = { ...goalData, amount: parseFloat(amountText).toFixed(2) };
+              setGoalData(committed);
+              if (initialData) {
+                // Edit mode: save immediately, no preview step
+                onGoalCreated?.(committed);
+                onDone();
+              } else {
+                go(3);
+              }
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={s.gfBtnPrimaryText}>{initialData ? 'Save Changes' : 'Next'}</Text>
+          </TouchableOpacity>
+
+          {/* Delete button — only shown when editing */}
+          {initialData && (
+            <TouchableOpacity
+              style={[s.gfBtnOutline, { marginTop: 12, paddingVertical: 16 }]}
+              onPress={() => setShowDeleteConfirm(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={[s.gfBtnOutlineText, { color: '#E53E3E' }]}>Delete Goal</Text>
+            </TouchableOpacity>
           )}
 
-          <View style={{ gap: 12, marginTop: 24 }}>
-            <TouchableOpacity style={s.gfBtnOutline} onPress={() => setPhotoAdded(true)} activeOpacity={0.7}>
-              <Text style={s.gfBtnOutlineText}>📷  Take a photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.gfBtnOutline} onPress={() => setPhotoAdded(true)} activeOpacity={0.7}>
-              <Text style={s.gfBtnOutlineText}>🖼  Choose from gallery</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => go(7)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 12 }}>
-              <Text style={s.gfSkipLink}>Skip for now</Text>
-            </TouchableOpacity>
-          </View>
         </ScrollView>
+
+        {/* Delete confirmation — absolutely-positioned overlay so it sits inside the
+            same modal layer as GoalCreationFlow. A nested <Modal> blocks the outer
+            modal from dismissing on iOS, so we use a plain View overlay instead. */}
+        {showDeleteConfirm && (
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', paddingBottom: 32, paddingHorizontal: 16 }}>
+            <View style={{ backgroundColor: '#F7F6F2', borderRadius: 24, padding: 24, gap: 12 }}>
+              <Text style={{ fontSize: scale(22), fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.3 }}>
+                Delete this goal?
+              </Text>
+              {(savedCents ?? 0) > 0 ? (
+                <Text style={{ fontSize: scale(15), color: '#6B6B6B', lineHeight: 22 }}>
+                  {`Your progress ($${((savedCents ?? 0) / 100).toFixed(2)} saved) will stay in your balance. This can't be undone.`}
+                </Text>
+              ) : (
+                <Text style={{ fontSize: scale(15), color: '#6B6B6B', lineHeight: 22 }}>
+                  {"This can't be undone."}
+                </Text>
+              )}
+              <TouchableOpacity
+                style={[s.gfBtnPrimary, { backgroundColor: '#1A1A1A', marginTop: 8 }]}
+                onPress={() => onDeleteGoal?.()}
+                activeOpacity={0.85}
+              >
+                <Text style={s.gfBtnPrimaryText}>Yes, delete it</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.gfBtnOutline, { paddingVertical: 16 }]}
+                onPress={() => setShowDeleteConfirm(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={s.gfBtnOutlineText}>Keep saving</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
       </View>
     );
   }
 
-  // ── Step 7: Choose color ──
-  if (step === 7) {
+  // ── Step 3: Goal preview ────────────────────────────────────────────────────
+  if (step === 3) {
+    // Snapshot the formatted amount for display
+    const displayAmt = goalData.amount ? `$${goalData.amount}` : `$${parseFloat(amountText).toFixed(2)}`;
     return (
       <View style={s.gfRoot}>
         <View style={s.gfBackRow}>
-          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(4)} activeOpacity={0.7}>
-            <Text style={s.gfBackText}>←</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={s.gfScrollTop} showsVerticalScrollIndicator={false}>
-          <Text style={s.gfScreenTitle}>Choose a color</Text>
-          <Text style={s.gfScreenSub}>Pick a color for your goal card!</Text>
-          <View style={s.gfColorGrid}>
-            {GOAL_COLORS.map(color => {
-              const selected = goalData.color === color;
-              return (
-                <TouchableOpacity
-                  key={color}
-                  style={[s.gfColorSwatch, { backgroundColor: color }, selected && s.gfColorSwatchSelected]}
-                  onPress={() => setGoalData(prev => ({ ...prev, color }))}
-                  activeOpacity={0.8}
-                >
-                  {selected && <Text style={s.gfColorCheck}>✓</Text>}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <View style={{ height: 24 }} />
-          <TouchableOpacity style={s.gfBtnPrimary} onPress={() => go(8)} activeOpacity={0.85}>
-            <Text style={s.gfBtnPrimaryText}>Next</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // ── Step 8: Goal preview ──
-  if (step === 8) {
-    return (
-      <View style={s.gfRoot}>
-        <View style={s.gfBackRow}>
-          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(7)} activeOpacity={0.7}>
+          <TouchableOpacity style={s.gfBackBtn} onPress={() => go(2)} activeOpacity={0.7}>
             <Text style={s.gfBackText}>←</Text>
           </TouchableOpacity>
         </View>
@@ -3285,115 +4204,44 @@ function GoalCreationFlow({ onDone, onCancel }: GoalCreationFlowProps) {
           <Text style={s.gfScreenSub}>{"Here's how your goal will look!"}</Text>
 
           {/* Goal card */}
-          <View style={[s.gfPreviewCard, { borderLeftColor: goalData.color, borderLeftWidth: 5 }]}>
-            <Text style={{ fontSize: scale(60), textAlign: 'center', marginBottom: 8 }}>{goalData.icon}</Text>
+          <View style={[s.gfPreviewCard, { borderColor: goalData.color }]}>
+            <Image source={goalData.icon} style={{ width: scale(64), height: scale(64), alignSelf: 'center', marginBottom: 8 }} resizeMode="contain" />
             <Text style={s.gfPreviewName}>{goalData.name || 'My goal'}</Text>
-            <Text style={s.gfPreviewAmount}>{goalData.amount ? '$' + goalData.amount : '$0.00'}</Text>
+            <Text style={s.gfPreviewAmount}>{displayAmt}</Text>
             <View style={s.gfProgressTrack}>
               <View style={[s.gfProgressFill, { width: '0%', backgroundColor: goalData.color }]} />
             </View>
             <Text style={s.gfProgressPct}>0%</Text>
           </View>
 
-          {/* Robot message */}
-          <View style={s.gfRobotRow}>
-            <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 50, height: 50 }} resizeMode="contain" />
-            <View style={s.gfSpeechBubble}>
-              <Text style={s.gfSpeechText}>{"Nice goal! You're going to crush it! 💪"}</Text>
-            </View>
-          </View>
+          {/* Mascot bubble — goal-specific copy using child's monster name */}
+          <MascotBanner message={mascotMsg} />
 
           <View style={{ height: 24 }} />
-          <TouchableOpacity style={s.gfBtnPrimary} onPress={() => go(9)} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={s.gfBtnPrimary}
+            onPress={() => {
+              const finalData: GoalData = { ...goalData, amount: goalData.amount || parseFloat(amountText).toFixed(2) };
+              onGoalCreated?.(finalData);
+              onDone();
+            }}
+            activeOpacity={0.85}
+          >
             <Text style={s.gfBtnPrimaryText}>Create goal</Text>
           </TouchableOpacity>
         </ScrollView>
       </View>
     );
   }
-
-  // ── Step 9: Goal created! ──
-  if (step === 9) {
-    return (
-      <View style={s.gfRoot}>
-        {/* Confetti dots */}
-        {['#6B35F0','#F5C842','#E870A0','#5CB85C','#F08030','#4A9FE8'].map((c, i) => (
-          <View key={i} style={[s.gfConfettiDot, { backgroundColor: c, top: 60 + (i * 37) % 120, left: 20 + (i * 57) % (300) }]} />
-        ))}
-        <ScrollView contentContainerStyle={s.gfScrollCenter} showsVerticalScrollIndicator={false}>
-          <Text style={s.gfCreatedTitle}>Goal created!</Text>
-          <Text style={s.gfSubtitle}>{"You're all set and ready to start saving!"}</Text>
-
-          <View style={s.gfRobotCircle}>
-            <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 120, height: 120 }} resizeMode="contain" />
-          </View>
-
-          {/* Goal card preview */}
-          <View style={[s.gfPreviewCard, { borderLeftColor: goalData.color, borderLeftWidth: 5 }]}>
-            <Text style={{ fontSize: scale(48), textAlign: 'center', marginBottom: 8 }}>{goalData.icon}</Text>
-            <Text style={s.gfPreviewName}>{goalData.name || 'My goal'}</Text>
-            <Text style={s.gfPreviewAmount}>{goalData.amount ? '$' + goalData.amount : '$0.00'}</Text>
-            <View style={s.gfProgressTrack}>
-              <View style={[s.gfProgressFill, { width: '0%', backgroundColor: goalData.color }]} />
-            </View>
-            <Text style={s.gfProgressPct}>0%</Text>
-          </View>
-
-          <View style={{ height: 24 }} />
-          <TouchableOpacity style={s.gfBtnPrimary} onPress={() => go(10)} activeOpacity={0.85}>
-            <Text style={s.gfBtnPrimaryText}>View my goal</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={onDone} activeOpacity={0.7} style={{ paddingVertical: 14, alignItems: 'center' }}>
-            <Text style={s.gfSkipLink}>Back to home</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // ── Step 10: Next allowance ──
-  return (
-    <View style={s.gfRoot}>
-      <View style={s.gfBackRow}>
-        <TouchableOpacity style={s.gfBackBtn} onPress={() => go(9)} activeOpacity={0.7}>
-          <Text style={s.gfBackText}>←</Text>
-        </TouchableOpacity>
-      </View>
-      <ScrollView contentContainerStyle={s.gfScrollCenter} showsVerticalScrollIndicator={false}>
-        <Text style={s.gfScreenTitle}>Next allowance</Text>
-        <Text style={s.gfScreenSub}>{"Here's when you'll get your next allowance!"}</Text>
-        <Text style={{ fontSize: scale(72), textAlign: 'center', marginVertical: 16 }}>📅</Text>
-        <Text style={s.gfAllowanceLabel}>Next payday</Text>
-        <Text style={s.gfAllowanceDate}>Friday, May 31</Text>
-        <Text style={s.gfAllowanceDays}>3 days away</Text>
-
-        {/* Robot message */}
-        <View style={[s.gfRobotRow, { marginTop: 24, marginBottom: 8 }]}>
-          <Image source={require('./assets/monstirs/robot monstir/robot_1.png')} style={{ width: 50, height: 50 }} resizeMode="contain" />
-          <View style={s.gfSpeechBubble}>
-            <Text style={s.gfSpeechText}>{"Can't wait to see your progress! 🚀"}</Text>
-          </View>
-        </View>
-
-        <View style={{ height: 24 }} />
-        <TouchableOpacity style={s.gfBtnPrimary} onPress={onDone} activeOpacity={0.85}>
-          <Text style={s.gfBtnPrimaryText}>Awesome!</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
-  );
 }
 
 // ─── Onboarding Flow ─────────────────────────────────────────────────────────
 
 interface OnboardingFlowProps {
-  onDone: () => void;
-  onCreateAccount: () => void;
-  onLogin: () => void;
-  onContinueAsKid: () => void;
+  onReady: () => void;
 }
 
-function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: OnboardingFlowProps) {
+function OnboardingFlow({ onReady }: OnboardingFlowProps) {
   const [step, setStep] = useState<number>(0);
 
   const PaginationDots = ({ current }: { current: number }) => (
@@ -3416,7 +4264,7 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
       <CreamBg>
         <TouchableOpacity
           style={ob.skipBtn}
-          onPress={onDone}
+          onPress={onReady}
           activeOpacity={0.7}
         >
           <Text style={ob.skipText}>Skip</Text>
@@ -3461,7 +4309,7 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
   if (step === 1) {
     return (
       <View style={{ flex: 1, backgroundColor: '#EAE4FF' }}>
-        <TouchableOpacity style={ob.skipBtn} onPress={onDone} activeOpacity={0.7}>
+        <TouchableOpacity style={ob.skipBtn} onPress={onReady} activeOpacity={0.7}>
           <Text style={ob.skipText}>Skip</Text>
         </TouchableOpacity>
 
@@ -3504,7 +4352,7 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
   if (step === 2) {
     return (
       <CreamBg>
-        <TouchableOpacity style={ob.skipBtn} onPress={onDone} activeOpacity={0.7}>
+        <TouchableOpacity style={ob.skipBtn} onPress={onReady} activeOpacity={0.7}>
           <Text style={ob.skipText}>Skip</Text>
         </TouchableOpacity>
 
@@ -3537,81 +4385,96 @@ function OnboardingFlow({ onDone, onCreateAccount, onLogin, onContinueAsKid }: O
           <Text style={ob.slideSubtitle}>
             Unlock cool items, accessories, and new evolutions!
           </Text>
-          <TouchableOpacity style={ob.nextBtn} onPress={() => setStep(3)} activeOpacity={0.85}>
+          <TouchableOpacity style={ob.nextBtn} onPress={onReady} activeOpacity={0.85}>
             <Text style={ob.nextBtnText}>Next →</Text>
           </TouchableOpacity>
         </View>
       </CreamBg>
     );
   }
+}
 
-  // Slide 3 — Let's get started (CTA, full screen lime green)
+// ─── Landing Screen ───────────────────────────────────────────────────────────
+
+function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCreateAccount: () => void }) {
+  const [email, setEmail]       = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw]     = useState(false);
+
   return (
     <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: 60, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        {/* Parent + kid + robot illustration */}
-        <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', marginBottom: 24, gap: 8 }}>
-          <Text style={{ fontSize: scale(56) }}>👩</Text>
-          <Text style={{ fontSize: scale(56) }}>👦</Text>
-          <Image
-            source={require('./assets/monstirs/robot monstir/robot_1.png')}
-            style={{ width: 80, height: 80 }}
-            resizeMode="contain"
+
+      {/* ── Background texture ── */}
+      <Image
+        source={require('./assets/appBGsignup.png')}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        resizeMode="contain"
+      />
+
+      {/* ── Sparkle decorations ── */}
+      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: 28, color: '#1A1A1A', fontWeight: '900' }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: 24, color: '#6B35F0'             }}>✦</Text>
+      <View style={{ position: 'absolute', top: 198, right: 28, width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+      <View style={{ position: 'absolute', top: 172, left: 118, width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF6B2B' }} />
+      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: 22, color: '#F5C518'          }}>✦</Text>
+      <View style={{ position: 'absolute', bottom: 210, right: 76, width: 5, height: 5, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+
+      {/* ── Main content ── */}
+      <View style={{ flex: 1, paddingHorizontal: 28, justifyContent: 'center', alignItems: 'center', paddingBottom: 80 }}>
+
+        <Image source={require('./assets/monstirLogo.png')} style={{ width: 280, height: 103, marginBottom: 36 }} resizeMode="contain" />
+
+        <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>Welcome back!</Text>
+        <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>Log in to your Monstir account.</Text>
+
+        {/* Email */}
+        <TextInput
+          style={{ width: '100%', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18, fontSize: scale(16), color: '#1A1A1A', marginBottom: 12 }}
+          value={email}
+          onChangeText={setEmail}
+          placeholder="Email"
+          placeholderTextColor="#C0BEB8"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          returnKeyType="next"
+        />
+
+        {/* Password */}
+        <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18, marginBottom: 20 }}>
+          <TextInput
+            style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor="#C0BEB8"
+            secureTextEntry={!showPw}
+            returnKeyType="done"
+            onSubmitEditing={onLogin}
           />
-        </View>
-
-        <Text style={{ fontSize: scale(30), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 8 }}>
-          Let's get started!
-        </Text>
-        <Text style={{ fontSize: scale(15), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>
-          Create an account to save your progress and Monstirs.
-        </Text>
-
-        {/* Features list card */}
-        <View style={ob.featuresCard}>
-          {([
-            { icon: '🛡', label: 'Safe & kid-friendly' },
-            { icon: '📊', label: 'Track progress' },
-            { icon: '🔒', label: 'Secure & private' },
-          ] as { icon: string; label: string }[]).map((item, i) => (
-            <View key={i}>
-              {i > 0 && <View style={ob.featureDivider} />}
-              <View style={ob.featureRow}>
-                <Text style={{ fontSize: scale(22) }}>{item.icon}</Text>
-                <Text style={ob.featureLabel}>{item.label}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        <View style={{ gap: 12, marginTop: 28 }}>
-          <TouchableOpacity
-            style={ob.createAccountBtn}
-            onPress={onCreateAccount}
-            activeOpacity={0.85}
-          >
-            <Text style={ob.createAccountBtnText}>Create account</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={ob.haveAccountBtn}
-            onPress={onLogin}
-            activeOpacity={0.85}
-          >
-            <Text style={ob.haveAccountBtnText}>I have an account</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={onContinueAsKid}
-            activeOpacity={0.7}
-            style={{ paddingVertical: 14, alignItems: 'center' }}
-          >
-            <Text style={{ fontSize: scale(15), fontWeight: '600', color: '#6B35F0' }}>
-              Continue as kid
-            </Text>
+          <TouchableOpacity onPress={() => setShowPw(v => !v)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={{ fontSize: scale(16), color: '#ABABAB' }}>{showPw ? '🙈' : '👁'}</Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+
+        {/* Log in */}
+        <TouchableOpacity
+          style={{ width: '100%', backgroundColor: '#6B35F0', borderRadius: 100, paddingVertical: 18, alignItems: 'center', marginBottom: 14, borderWidth: 2.5, borderColor: '#1A1A1A' }}
+          onPress={onLogin}
+          activeOpacity={0.85}
+        >
+          <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#FFFFFF' }}>Log in</Text>
+        </TouchableOpacity>
+
+        {/* Create an account */}
+        <TouchableOpacity
+          style={{ width: '100%', backgroundColor: '#FFFFFF', borderRadius: 100, paddingVertical: 18, alignItems: 'center', borderWidth: 2.5, borderColor: '#1A1A1A', shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 0, elevation: 3 }}
+          onPress={onCreateAccount}
+          activeOpacity={0.85}
+        >
+          <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' }}>Create an account</Text>
+        </TouchableOpacity>
+
+      </View>
     </View>
   );
 }
@@ -3716,9 +4579,11 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
 
 // ─── Sign Up Screen ───────────────────────────────────────────────────────────
 
+interface SessionUser { name: string; email: string; }
+
 interface SignupScreenProps {
   onBack: () => void;
-  onSuccess: () => void;
+  onSuccess: (user: SessionUser) => void;
   onLogin: () => void;
 }
 
@@ -3729,118 +4594,187 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword]       = useState(false);
   const [showConfirm, setShowConfirm]         = useState(false);
+  const [error, setError]                     = useState('');
+
+  const handleSubmit = () => {
+    if (!name.trim() || !email.trim() || !password || !confirmPassword) {
+      setError('Please fill in all fields.'); return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords don\'t match.'); return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.'); return;
+    }
+    setError('');
+    onSuccess({ name: name.trim(), email: email.trim().toLowerCase() });
+  };
+
+  const inputStyle = {
+    width: '100%' as const,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 100,
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    fontSize: scale(16),
+    color: '#1A1A1A',
+  };
 
   return (
-    <CreamBg>
-      {/* Decorative elements */}
-      <Text style={auth.leafDecor}>🌿</Text>
-      <View style={auth.purpleBlob} />
-      <Text style={[auth.sparkle, { top: 120, right: 60 }]}>⭐</Text>
-      <Text style={[auth.sparkle, { top: 200, left: 40 }]}>✦</Text>
+    <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
 
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {/* Back button */}
-        <TouchableOpacity onPress={onBack} style={auth.backBtn} activeOpacity={0.7}>
-          <Text style={auth.backBtnText}>←</Text>
-        </TouchableOpacity>
+      {/* ── Background texture ── */}
+      <Image
+        source={require('./assets/appBGsignup.png')}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        resizeMode="contain"
+      />
 
-        <Text style={auth.title}>Create account</Text>
-        <Text style={auth.subtitle}>Join Monstir and start your adventure!</Text>
+      {/* ── Sparkle decorations ── */}
+      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: 28, color: '#1A1A1A', fontWeight: '900' }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: 24, color: '#6B35F0'             }}>✦</Text>
+      <View style={{ position: 'absolute', top: 198, right: 28, width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+      <View style={{ position: 'absolute', top: 172, left: 118, width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF6B2B' }} />
+      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: 22, color: '#F5C518'          }}>✦</Text>
+      <View style={{ position: 'absolute', bottom: 210, right: 76, width: 5, height: 5, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
 
-        <View style={{ gap: 14, marginTop: 28 }}>
-          {/* Name input */}
-          <View style={auth.inputRow}>
-            <Text style={auth.inputIcon}>👤</Text>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 28, paddingTop: 56, paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Back button */}
+          <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ marginBottom: 16, alignSelf: 'flex-start' }}>
+            <Text style={{ fontSize: scale(24), color: '#1A1A1A', fontWeight: '900' }}>←</Text>
+          </TouchableOpacity>
+
+          {/* Logo */}
+          <Image
+            source={require('./assets/monstirLogo.png')}
+            style={{ width: 280, height: 103, alignSelf: 'center', marginBottom: 32 }}
+            resizeMode="contain"
+          />
+
+          {/* Heading */}
+          <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>
+            Create account
+          </Text>
+          <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>
+            Join Monstir and start your adventure!
+          </Text>
+
+          <View style={{ gap: 12 }}>
+            {/* Name */}
             <TextInput
-              style={auth.textInput}
+              style={inputStyle}
               value={name}
               onChangeText={setName}
               placeholder="Name"
               placeholderTextColor="#C0BEB8"
               autoCapitalize="words"
+              returnKeyType="next"
             />
-          </View>
 
-          {/* Email input */}
-          <View style={auth.inputRow}>
-            <Text style={auth.inputIcon}>📧</Text>
+            {/* Email */}
             <TextInput
-              style={auth.textInput}
+              style={inputStyle}
               value={email}
               onChangeText={setEmail}
               placeholder="Email"
               placeholderTextColor="#C0BEB8"
               keyboardType="email-address"
               autoCapitalize="none"
+              returnKeyType="next"
             />
-          </View>
 
-          {/* Password input */}
-          <View style={auth.inputRow}>
-            <Text style={auth.inputIcon}>🔒</Text>
-            <TextInput
-              style={[auth.textInput, { flex: 1 }]}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              placeholderTextColor="#C0BEB8"
-              secureTextEntry={!showPassword}
-            />
-            <TouchableOpacity onPress={() => setShowPassword(v => !v)} activeOpacity={0.7} style={{ paddingHorizontal: 8 }}>
-              <Text style={{ fontSize: scale(18) }}>{showPassword ? '🙈' : '👁'}</Text>
+            {/* Password */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18 }}>
+              <TextInput
+                style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor="#C0BEB8"
+                secureTextEntry={!showPassword}
+                returnKeyType="next"
+              />
+              <TouchableOpacity onPress={() => setShowPassword(v => !v)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={{ fontSize: scale(16), color: '#ABABAB' }}>{showPassword ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Confirm password */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18 }}>
+              <TextInput
+                style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="Confirm password"
+                placeholderTextColor="#C0BEB8"
+                secureTextEntry={!showConfirm}
+                returnKeyType="done"
+                onSubmitEditing={handleSubmit}
+              />
+              <TouchableOpacity onPress={() => setShowConfirm(v => !v)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={{ fontSize: scale(16), color: '#ABABAB' }}>{showConfirm ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Validation error */}
+            {!!error && (
+              <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontWeight: '600', marginTop: -4 }}>
+                {error}
+              </Text>
+            )}
+
+            {/* Create account button */}
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#6B35F0',
+                borderRadius: 100,
+                paddingVertical: 18,
+                alignItems: 'center',
+                marginTop: 8,
+                borderWidth: 2.5,
+                borderColor: '#1A1A1A',
+              }}
+              onPress={handleSubmit}
+              activeOpacity={0.85}
+            >
+              <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#FFFFFF' }}>Create an account</Text>
+            </TouchableOpacity>
+
+            {/* Log in link */}
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 100,
+                paddingVertical: 18,
+                alignItems: 'center',
+                borderWidth: 2.5,
+                borderColor: '#1A1A1A',
+                shadowColor: '#1A1A1A',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.12,
+                shadowRadius: 0,
+                elevation: 3,
+              }}
+              onPress={onLogin}
+              activeOpacity={0.85}
+            >
+              <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' }}>Log in</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Confirm password input */}
-          <View style={auth.inputRow}>
-            <Text style={auth.inputIcon}>🔒</Text>
-            <TextInput
-              style={[auth.textInput, { flex: 1 }]}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm password"
-              placeholderTextColor="#C0BEB8"
-              secureTextEntry={!showConfirm}
-            />
-            <TouchableOpacity onPress={() => setShowConfirm(v => !v)} activeOpacity={0.7} style={{ paddingHorizontal: 8 }}>
-              <Text style={{ fontSize: scale(18) }}>{showConfirm ? '🙈' : '👁'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Create account button */}
-          <TouchableOpacity style={auth.primaryBtn} onPress={onSuccess} activeOpacity={0.85}>
-            <Text style={auth.primaryBtnText}>Create account</Text>
-          </TouchableOpacity>
-
-          {/* Divider */}
-          <View style={auth.dividerRow}>
-            <View style={auth.dividerLine} />
-            <Text style={auth.dividerText}>or</Text>
-            <View style={auth.dividerLine} />
-          </View>
-
-          {/* Google button */}
-          <TouchableOpacity style={auth.googleBtn} activeOpacity={0.85}>
-            <Text style={{ color: '#4285F4', fontWeight: '900', fontSize: scale(18) }}>G</Text>
-            <Text style={auth.googleBtnText}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          {/* Log in link */}
-          <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 4 }}>
-            <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>Already have an account?</Text>
-            <TouchableOpacity onPress={onLogin} activeOpacity={0.7}>
-              <Text style={{ fontSize: scale(14), color: '#6B35F0', fontWeight: '700' }}>Log in</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </CreamBg>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
-type AppMode = 'splash' | 'onboarding' | 'login' | 'signup' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
+type AppMode = 'splash' | 'onboarding' | 'landing' | 'login' | 'signup' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
 
 // ─── Splash Screen ────────────────────────────────────────────────────────────
 
@@ -3901,10 +4835,13 @@ const splashStyles = StyleSheet.create({
 });
 
 export default function App() {
-  const [appMode, setAppMode] = useState<AppMode>('splash');
+  const [appMode, setAppMode]       = useState<AppMode>('splash');
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [kidWelcomeName, setKidWelcomeName] = useState('there');
   const [selectedMonsterId,   setSelectedMonsterId]   = useState<MonsterId>('slime');
   const [selectedMonsterName, setSelectedMonsterName] = useState<string>('');
+  const fallbackMonsterName = useRef(randomFallbackName()).current;
+  const effectiveMonsterName = selectedMonsterName || fallbackMonsterName;
   const [screen, setScreen]             = useState<Screen>('home');
   const [tab, setTab]                   = useState<Tab>('home');
   const [monsterIdx, setMonsterIdx]     = useState<MonsterIdx>(0);
@@ -3917,15 +4854,29 @@ export default function App() {
   // Parent state
   const [viewMode, setViewMode]               = useState<ViewMode>('kid');
   const [parentScreen, setParentScreen]       = useState<ParentScreen>('parentHome');
+  const [prevParentScreen, setPrevParentScreen] = useState<ParentScreen>('parentHome');
   const [parentTab, setParentTab]             = useState<ParentTab>('chores');
   const [managedChores, setManagedChores]     = useState<ManagedChore[]>(DEFAULT_MANAGED_CHORES);
   const [editingChore, setEditingChore]       = useState<ManagedChore | null>(null);
   const [baseRate, setBaseRate]               = useState('0.50');
-  const [kids, setKids]                       = useState<string[]>(['Sam', 'Lily', 'Max']);
-  const [currentKidName]                      = useState('Sam');
+  const [setupChildren, setSetupChildren]     = useState<import('./src/screens/ParentOnboarding').OnboardingChild[]>([]);
+  const [kids, setKids]                       = useState<string[]>([]);
+  const [currentKidName, setCurrentKidName]   = useState('');
+  const [kidOnboardingDone, setKidOnboardingDone] = useState<Record<string, boolean>>({});
   const [weeklyCapEnabled, setWeeklyCap]      = useState(false);
-  const [requireApproval, setRequireApproval] = useState(true);
+  // Per-kid approval settings — true = needs parent sign-off, false = auto-approve
+  const [kidApprovalSettings, setKidApprovalSettings] = useState<Record<string, boolean>>({});
+  const requireApproval = kidApprovalSettings[currentKidName] ?? true;
   const [showKidProfile, setShowKidProfile]   = useState(false);
+  const [pendingEvolution, setPendingEvolution] = useState(false);
+  const [goals, setGoals] = useState<SavedGoal[]>([]);
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [lastChoreDate, setLastChoreDate] = useState<string>('');
+  const [weeklyXp, setWeeklyXp]           = useState(0);
+  const [kidPayoutPending, setKidPayoutPending] = useState(false);
+  const [payoutSnapshot, setPayoutSnapshot] = useState<{
+    amount: number; completedCount: number; battleWon: boolean | null; battleBonus: number | null;
+  } | null>(null);
 
   // ── Global debug state (dev only) ─────────────────────────────────────────
   const [debugOpen, setDebugOpen]             = useState(false);
@@ -3942,6 +4893,22 @@ export default function App() {
     setKwDbg(prev => ({ ...KW_DEBUG_DEFAULTS, ...prev }));
   }, []);
 
+  // Fire deferred evolution when the kid switches back to their view
+  useEffect(() => {
+    if (viewMode === 'kid' && pendingEvolution) {
+      setPendingEvolution(false);
+      setScreen('evolve');
+    }
+  }, [viewMode, pendingEvolution]);
+
+  // Fire deferred kid payout celebration when the kid switches back to their view
+  useEffect(() => {
+    if (viewMode === 'kid' && kidPayoutPending) {
+      setKidPayoutPending(false);
+      setScreen('kidPayout' as any);
+    }
+  }, [viewMode, kidPayoutPending]);
+
   // Allow audio to play through iOS silent switch
   useEffect(() => {
     Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
@@ -3952,6 +4919,7 @@ export default function App() {
     const newXp = xp + c.xp;
     setDone(prev => ({ ...prev, [c.id]: true }));
     setXp(newXp);
+    setWeeklyXp(prev => prev + c.xp);
     setCoins(prev => prev + choreCoins(c, baseRate));
     if (monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[monsterIdx].needed) {
       setScreen('evolve');
@@ -3965,30 +4933,108 @@ export default function App() {
       setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'pending' as const, rejectionNote: undefined } : c));
     } else {
       setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const } : c));
-      const newXp = xp + chore.difficulty;
+      // ── XP with streak bonus ──────────────────────────────────────────────────
+      const today = new Date().toDateString();
+      const isNewDay = lastChoreDate !== today;
+      const newStreak = isNewDay ? currentStreak + 1 : currentStreak;
+      const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
+      let earnedXp = baseXp;
+      if (isNewDay && newStreak > 0 && newStreak % 7 === 0) earnedXp += 25;          // +25 flat on 7-day
+      else if (isNewDay && newStreak > 0 && newStreak % 3 === 0) earnedXp = Math.round(earnedXp * 1.1); // +10% on 3-day
+      const newXp = xp + earnedXp;
       setXp(newXp);
-      setCoins(prev => prev + Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]));
+      setWeeklyXp(prev => prev + earnedXp);
+      const earnedCoins = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+      setCoins(prev => prev + earnedCoins);
       if (monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[monsterIdx].needed) {
         setScreen('evolve');
       }
+      // Update active goal progress
+      setGoals(prev => {
+        if (prev.length === 0) return prev;
+        return prev.map((g, i) => i === 0 ? {
+          ...g,
+          savedCents: g.savedCents + earnedCoins,
+          activityFeed: [
+            { label: chore.name, pts: earnedCoins, when: 'Today' },
+            ...g.activityFeed.slice(0, 9),
+          ],
+        } : g);
+      });
+      // Streak update
+      if (isNewDay) {
+        setCurrentStreak(newStreak);
+        setLastChoreDate(today);
+      }
     }
-  }, [managedChores, xp, monsterIdx, baseRate, requireApproval]);
+  }, [managedChores, xp, monsterIdx, baseRate, kidApprovalSettings, currentKidName, currentStreak, lastChoreDate]);
 
   const approveManagedChore = useCallback((id: string) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore || chore.status !== 'pending') return;
     setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const } : c));
-    const newXp = xp + chore.difficulty;
+    // ── XP with streak bonus ──────────────────────────────────────────────────
+    const today = new Date().toDateString();
+    const isNewDay = lastChoreDate !== today;
+    const newStreak = isNewDay ? currentStreak + 1 : currentStreak;
+    const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
+    let earnedXp = baseXp;
+    if (isNewDay && newStreak > 0 && newStreak % 7 === 0) earnedXp += 25;
+    else if (isNewDay && newStreak > 0 && newStreak % 3 === 0) earnedXp = Math.round(earnedXp * 1.1);
+    const newXp = xp + earnedXp;
     setXp(newXp);
-    setCoins(prev => prev + Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]));
+    setWeeklyXp(prev => prev + earnedXp);
+    const earnedCoins = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+    setCoins(prev => prev + earnedCoins);
     if (monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[monsterIdx].needed) {
-      setScreen('evolve');
+      if (viewMode === 'kid') {
+        setScreen('evolve');
+      } else {
+        setPendingEvolution(true);
+      }
     }
-  }, [managedChores, xp, monsterIdx, baseRate]);
+    // Update active goal progress
+    setGoals(prev => {
+      if (prev.length === 0) return prev;
+      return prev.map((g, i) => i === 0 ? {
+        ...g,
+        savedCents: g.savedCents + earnedCoins,
+        activityFeed: [
+          { label: chore.name, pts: earnedCoins, when: 'Today' },
+          ...g.activityFeed.slice(0, 9),
+        ],
+      } : g);
+    });
+    // Streak update
+    if (isNewDay) {
+      setCurrentStreak(newStreak);
+      setLastChoreDate(today);
+    }
+  }, [managedChores, xp, monsterIdx, baseRate, viewMode, currentStreak, lastChoreDate]);
 
   const rejectManagedChore = useCallback((id: string, note: string) => {
     setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'rejected' as const, rejectionNote: note || undefined } : c));
   }, [managedChores]);
+
+  const confirmPayout = useCallback(() => {
+    setCoins(0);
+    setKidPayoutPending(true);
+    setParentScreen('parentHome');
+  }, []);
+
+  const openPayout = useCallback(() => {
+    const approvedChores = managedChores.filter(c => c.status === 'approved');
+    const boss = getWeeklyBoss(monsterIdx);
+    const bBonus = battleResult === 'win' ? boss.bonus : null;
+    const base = Math.max(0, coins - (bBonus ?? 0));
+    setPayoutSnapshot({
+      amount: coins,
+      completedCount: approvedChores.length,
+      battleWon: battleResult === 'win' ? true : battleResult === 'loss' ? false : null,
+      battleBonus: bBonus,
+    });
+    setParentScreen('parentPayout');
+  }, [managedChores, monsterIdx, battleResult, coins]);
 
   const handleBattleWin = useCallback(() => {
     const boss = getWeeklyBoss(monsterIdx);
@@ -3996,6 +5042,7 @@ export default function App() {
     setCoins(prev => prev + bonus);
     setBonusCoins(bonus);
     setBattleResult('win');
+    setWeeklyXp(0); // reset weekly XP after battle
     setScreen('result');
   }, [monsterIdx]);
 
@@ -4005,6 +5052,7 @@ export default function App() {
     setCoins(prev => prev + consolation);
     setBonusCoins(consolation);
     setBattleResult('loss');
+    setWeeklyXp(0); // reset weekly XP after battle
     setScreen('result');
   }, [monsterIdx]);
 
@@ -4021,16 +5069,26 @@ export default function App() {
     setScreen('home');
   }, []);
 
-  // Parent navigation
-  const navParent = (s: ParentScreen) => setParentScreen(s);
+  // Parent navigation — always track where we came from so back buttons work correctly
+  const navParent = (s: ParentScreen) => {
+    setPrevParentScreen(parentScreen);
+    setParentScreen(s);
+  };
   const navParentTab = (t: ParentTab) => {
     setParentTab(t);
     if (t === 'kidView') { setViewMode('kid'); return; }
+    // Tab bar taps are root navigations — there's no "back" from here
+    setPrevParentScreen('parentHome');
     if (t === 'chores')   setParentScreen('chores');
     if (t === 'rewards')  setParentScreen('rewards');
     if (t === 'settings') setParentScreen('settings');
   };
-  const openEditChore = (chore: ManagedChore) => { setEditingChore(chore); setParentScreen('editChore'); };
+  const goBack = () => setParentScreen(prevParentScreen);
+  const openEditChore = (chore: ManagedChore) => {
+    setPrevParentScreen(parentScreen);
+    setEditingChore(chore);
+    setParentScreen('editChore');
+  };
   const saveChore = (chore: ManagedChore) => {
     setManagedChores(prev => {
       const exists = prev.find(c => c.id === chore.id);
@@ -4039,6 +5097,40 @@ export default function App() {
     setParentScreen('chores');
   };
   const deleteChore = (id: string) => { setManagedChores(prev => prev.filter(c => c.id !== id)); setParentScreen('chores'); };
+
+  const addGoal = useCallback((data: GoalData) => {
+    const goal: SavedGoal = {
+      id: Date.now().toString(),
+      name: data.name,
+      amount: data.amount,
+      category: data.category,
+      color: data.color,
+      icon: data.icon,
+      savedCents: 0,
+      milestones: ['Keep it up!', 'Halfway there!', 'Almost done!', 'Goal unlocked!'],
+      activityFeed: [],
+    };
+    setGoals(prev => [...prev, goal]);
+  }, []);
+
+  const editGoal = useCallback((updated: SavedGoal) => {
+    setGoals(prev => prev.map(g => g.id === updated.id ? updated : g));
+  }, []);
+
+  const deleteGoal = useCallback((id: string) => {
+    setGoals(prev => prev.filter(g => g.id !== id));
+  }, []);
+
+  // Switch the active kid — shows KidWelcome the first time, otherwise goes straight to kid view
+  const switchToKid = (name: string) => {
+    setCurrentKidName(name);
+    setKidWelcomeName(name);
+    if (!kidOnboardingDone[name]) {
+      setAppMode('kidWelcome');
+    } else {
+      setViewMode('kid');
+    }
+  };
 
   if (appMode === 'splash') {
     return (
@@ -4054,10 +5146,21 @@ export default function App() {
         <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
           <StatusBar barStyle="dark-content" />
           <OnboardingFlow
-            onDone={() => setAppMode('app')}
+            onReady={() => setAppMode('landing')}
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'landing') {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#C5F215' }}>
+          <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
+          <LandingScreen
+            onLogin={() => setAppMode('app')}
             onCreateAccount={() => setAppMode('signup')}
-            onLogin={() => setAppMode('login')}
-            onContinueAsKid={() => setAppMode('app')}
           />
         </SafeAreaView>
       </SafeAreaProvider>
@@ -4082,12 +5185,12 @@ export default function App() {
   if (appMode === 'signup') {
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-          <StatusBar barStyle="dark-content" />
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#C5F215' }}>
+          <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
           <SignupScreen
-            onBack={() => setAppMode('onboarding')}
-            onSuccess={() => setAppMode('parentOnboarding')}
-            onLogin={() => setAppMode('login')}
+            onBack={() => setAppMode('landing')}
+            onSuccess={(user) => { setSessionUser(user); setAppMode('parentOnboarding'); }}
+            onLogin={() => setAppMode('landing')}
           />
         </SafeAreaView>
       </SafeAreaProvider>
@@ -4100,9 +5203,13 @@ export default function App() {
         <StatusBar barStyle="dark-content" />
         <ParentOnboarding
           onComplete={(setup) => {
-            const firstName = setup.children[0]?.name?.trim() || 'there';
-            setKidWelcomeName(firstName);
-            setAppMode('kidWelcome');
+            const names = setup.children.map(c => c.name.trim()).filter(Boolean);
+            setSetupChildren(setup.children);
+            setKids(names);
+            setKidApprovalSettings(Object.fromEntries(names.map(k => [k, true])));
+            if (names.length > 0) setCurrentKidName(names[0]);
+            setViewMode('parent');
+            setAppMode('app');
           }}
         />
       </SafeAreaProvider>
@@ -4121,6 +5228,8 @@ export default function App() {
                 setSelectedMonsterId(monsterId);
               }
               setSelectedMonsterName(monsterName);
+              setKidOnboardingDone(prev => ({ ...prev, [currentKidName]: true }));
+              setViewMode('kid');
               setAppMode('app');
             }}
           />
@@ -4151,41 +5260,54 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-    <SafeAreaView edges={['top']} style={[s.root, (screen === 'home' || viewMode === 'parent') && { backgroundColor: viewMode === 'parent' ? '#FFFFFF' : '#C5F215' }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={viewMode === 'parent' ? '#FFFFFF' : (screen === 'home' ? '#C5F215' : C.surface)} />
+    <SafeAreaView edges={['top']} style={[s.root, (screen === 'home' || viewMode === 'parent') && { backgroundColor: viewMode === 'parent' ? '#FFFFFF' : '#C5F215' }, (viewMode === 'kid' && screen === 'wallet') && { backgroundColor: C.bg }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={viewMode === 'parent' ? '#FFFFFF' : (screen === 'home' ? '#C5F215' : viewMode === 'kid' && screen === 'wallet' ? C.bg : C.surface)} />
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={selectedMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} requireApproval={requireApproval} />}
-            {screen === 'world'      && <WorldScreen monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} />}
+            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} requireApproval={requireApproval} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={setSelectedMonsterName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor }))} onSwitchToKid={switchToKid} />}
+            {screen === 'world'      && <WorldScreen monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} weeklyXp={weeklyXp} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor }))} onSwitchToKid={switchToKid} />}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} />
             </Modal>
-            {screen === 'arena'      && <BattleArenaScreen monsterIdx={monsterIdx} monsterImg={currentMonsterImg} initialCores={Math.min(Math.max(3, Object.keys(done).length), 10)} onWin={handleBattleWin} onLose={handleBattleLose} />}
+            {screen === 'arena'      && <BattleArenaScreen monsterIdx={monsterIdx} monsterImg={currentMonsterImg} initialCores={Math.min(Math.max(3, Object.keys(done).length), 10)} onWin={handleBattleWin} onLose={handleBattleLose} monsterName={effectiveMonsterName} />}
             {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} won={battleResult === 'win'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
-            {screen === 'wallet'   && <WalletScreen coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} />}
-            {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} />}
-            {showTabBar && <TabBar active={tab} onNav={navTab} onGoals={() => setScreen('goalFlow')} />}
+            {screen === 'wallet'   && <WalletScreen coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={goals} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={currentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={() => setViewMode('parent')} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor }))} onSwitchToKid={switchToKid} />}
+            {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} onGoalCreated={addGoal} monsterName={effectiveMonsterName} />}
+            {screen === 'kidPayout' && payoutSnapshot && <KidPayoutScreen amount={payoutSnapshot.amount} completedCount={payoutSnapshot.completedCount} battleWon={payoutSnapshot.battleWon} battleBonus={payoutSnapshot.battleBonus} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setPayoutSnapshot(null); setScreen('home'); setTab('home'); }} />}
+            {showTabBar && <TabBar active={tab} onNav={navTab} />}
           </>
         ) : (
           <>
-            {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => setShowKidProfile(true)} managedChores={managedChores} onApprove={approveManagedChore} onReject={rejectManagedChore} baseRate={baseRate} />}
-            {parentScreen === 'chores'     && <ParentChoresScreen chores={managedChores} onBack={() => setParentScreen('parentHome')} onAdd={() => { setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} />}
-            {(parentScreen === 'addChore' || parentScreen === 'editChore') && (
-              <AddEditChoreScreen
-                existing={editingChore}
-                onBack={() => setParentScreen('chores')}
-                onSave={saveChore}
-                onDelete={editingChore ? () => deleteChore(editingChore.id) : undefined}
-                kids={kids}
-                baseRate={baseRate}
-              />
-            )}
-            {parentScreen === 'payRates'  && <PayRatesScreen onBack={() => setParentScreen('parentHome')} onRateGuide={() => setParentScreen('rateGuide')} baseRate={baseRate} setBaseRate={setBaseRate} weeklyCapEnabled={weeklyCapEnabled} setWeeklyCap={setWeeklyCap} requireApproval={requireApproval} setRequireApproval={setRequireApproval} />}
-            {parentScreen === 'rateGuide' && <RateGuideScreen onBack={() => setParentScreen('payRates')} />}
+            {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => setShowKidProfile(true)} managedChores={managedChores} onApprove={approveManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} kidName={currentKidName} coins={coins} />}
+            {parentScreen === 'parentPayout' && payoutSnapshot && <ParentPayoutScreen kidName={currentKidName} coins={payoutSnapshot.amount} baseCoins={payoutSnapshot.amount - (payoutSnapshot.battleBonus ?? 0)} battleBonus={payoutSnapshot.battleBonus} battleWon={payoutSnapshot.battleWon} completedChores={managedChores.filter(c => c.status === 'approved')} onConfirm={confirmPayout} onBack={goBack} />}
+            {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ParentChoresScreen chores={managedChores} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} />}
+            {parentScreen === 'payRates'  && <PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} weeklyCapEnabled={weeklyCapEnabled} setWeeklyCap={setWeeklyCap} />}
+            {parentScreen === 'rateGuide' && <RateGuideScreen onBack={goBack} />}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'settings'  && <ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => setShowKidProfile(true)} />}
-            <ParentTabBar active={parentTab} onNav={navParentTab} />
+            {parentScreen === 'settings'  && <ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => setShowKidProfile(true)} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} />}
+            {parentScreen !== 'parentPayout' && (
+              <ParentTabBar active={parentTab} onNav={navParentTab} />
+            )}
+            {/* Add / Edit chore — slides up as a bottom sheet */}
+            <Modal
+              visible={parentScreen === 'addChore' || parentScreen === 'editChore'}
+              animationType="slide"
+              presentationStyle="pageSheet"
+              onRequestClose={goBack}
+            >
+              <SafeAreaProvider>
+                <StatusBar barStyle="dark-content" />
+                <AddEditChoreScreen
+                  existing={editingChore}
+                  onBack={goBack}
+                  onSave={saveChore}
+                  onDelete={editingChore ? () => deleteChore(editingChore.id) : undefined}
+                  kids={kids}
+                  baseRate={baseRate}
+                />
+              </SafeAreaProvider>
+            </Modal>
           </>
         )}
         <EvolutionAnimation
@@ -4547,7 +5669,7 @@ const s = StyleSheet.create({
   walletRowName:   { flex: 1, fontSize: scale(12), fontWeight: '700', color: C.text },
   walletRowCoins:  { fontSize: scale(13), fontWeight: '900', color: C.gold },
   // ── Goal flow ──
-  gfRoot:              { flex: 1, backgroundColor: 'transparent' },
+  gfRoot:              { flex: 1, backgroundColor: '#FFFFFF' },
   gfBackRow:           { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 4 },
   gfBackBtn:           { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   gfBackText:          { fontSize: scale(24), color: '#1A1A1A', fontWeight: '600' },
@@ -4564,6 +5686,9 @@ const s = StyleSheet.create({
   gfBtnOutline:        { borderRadius: 14, padding: 16, alignItems: 'center', width: '100%', borderWidth: 1.5, borderColor: '#ECEAE4', backgroundColor: '#FFFFFF' },
   gfBtnOutlineText:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
   gfSkipLink:          { fontSize: scale(15), fontWeight: '600', color: '#ABABAB' },
+  gfSearchRow:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F3EF', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 8, marginBottom: 12 },
+  gfSearchInput:       { flex: 1, fontSize: scale(15), color: '#1A1A1A', paddingVertical: 0 },
+  gfSearchClear:       { padding: 4 },
   gfCategoryGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', marginTop: 8 },
   gfCategoryCard:      { width: '31%', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 8, ...SOLID_SHADOW },
   gfCategoryLabel:     { fontSize: scale(13), fontWeight: '600', color: '#1A1A1A', marginTop: 6, textAlign: 'center' },
@@ -4757,6 +5882,15 @@ const p = StyleSheet.create({
   pendingReviewCard:    { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#E6A817', padding: 14, ...SOLID_SHADOW },
   pendingTabBadge:      { backgroundColor: '#E6A817', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center' as const, justifyContent: 'center' as const, paddingHorizontal: 5 },
   pendingTabBadgeText:  { fontSize: scale(11), fontWeight: '800' as const, color: '#FFFFFF' },
+
+  // Payout screen styles
+  payoutBreakdownRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#ECEAE4' },
+  payoutBreakdownLabel: { fontSize: scale(15), color: '#1A1A1A', fontWeight: '600' as const },
+  payoutBreakdownValue: { fontSize: scale(15), color: '#1A1A1A', fontWeight: '700' as const },
+  payoutTotalLabel: { fontSize: scale(17), fontWeight: '800' as const, color: '#1A1A1A' },
+  payoutTotalValue: { fontSize: scale(17), fontWeight: '900' as const, color: '#3B8A3A' },
+  payoutCta: { backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 18, alignItems: 'center' as const, ...SOLID_SHADOW },
+  payoutCtaText: { fontSize: scale(17), fontWeight: '900' as const, color: '#1A1A1A' },
 });
 
 // ─── Settings Styles (ps prefix) ─────────────────────────────────────────────
@@ -4848,6 +5982,7 @@ const w = StyleSheet.create({
   },
   bossTagPill: {
     alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
