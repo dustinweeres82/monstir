@@ -34,7 +34,7 @@ type Tab     = 'home' | 'world' | 'wallet';
 type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' | 'kidPayout';
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-type ParentTab    = 'kidView' | 'chores' | 'rewards' | 'settings';
+type ParentTab    = 'home' | 'chores' | 'money' | 'settings';
 type ParentScreen = 'parentHome' | 'chores' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings' | 'parentPayout';
 type ViewMode     = 'kid' | 'parent';
 
@@ -48,7 +48,15 @@ interface Boss {
   bonus: number;
   weakness: string;           // what chore type counters this boss
   video: ReturnType<typeof require>;
+  bgImage?: ReturnType<typeof require>;   // static BG image (replaces video when set)
+  bossImage?: ReturnType<typeof require>; // boss character overlay (with reveal/darkness logic)
   tiers: number[];            // monsterIdx values that can face this boss
+  threat: 'Easy' | 'Medium' | 'Hard' | 'Extreme';
+  threatNote: string;
+  hp: number;                 // boss HP per stat table
+  attackMin: number;          // boss attack roll min
+  attackMax: number;          // boss attack roll max
+  zapZone: 'very-wide' | 'wide' | 'normal' | 'narrow' | 'very-narrow';
 }
 
 interface ManagedChore {
@@ -58,6 +66,7 @@ interface ManagedChore {
   rejectionNote?: string;
   difficulty: 1 | 2 | 3;
   assignedTo: string[];
+  weeklyCompletions: number;
 }
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -102,33 +111,117 @@ const MONSTERS: Monster[] = [
 ];
 
 const BOSSES: Boss[] = [
+  // ── Boss 1 — Tier 0 ────────────────────────────────────────────────────────
   {
     name: 'Dust Grumble',
     tagline: "It was just sitting there. Waiting.",
     taglineHighlight: 'waiting',
-    power: 50, bonus: 20,
+    power: 30, bonus: 15,
     weakness: 'Sweeping',
     video: require('./assets/boss-intro.mp4'),
-    tiers: [0, 1],
+    bgImage: require('./assets/bosses/toothpastebossBG.png'),
+    bossImage: require('./assets/bosses/toothpasteboss.png'),
+    tiers: [0],
+    threat: 'Easy',   threatNote: 'A great first boss to practise on.',
+    hp: 28, attackMin: 2, attackMax: 4, zapZone: 'very-wide',
   },
+  // ── Boss 2 — Tier 0-1 ──────────────────────────────────────────────────────
+  {
+    name: 'Mold Sprout',
+    tagline: "Forgotten corners bloom with rot.",
+    taglineHighlight: 'rot',
+    power: 40, bonus: 20,
+    weakness: 'Wiping',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [0, 1],
+    threat: 'Easy',   threatNote: "Slow and predictable. Don't get complacent.",
+    hp: 36, attackMin: 3, attackMax: 6, zapZone: 'wide',
+  },
+  // ── Boss 3 — Tier 1-2 ──────────────────────────────────────────────────────
   {
     name: 'Junk Giant',
     tagline: "He Collects It All. You Clean It Up.",
     taglineHighlight: 'all',
-    power: 65, bonus: 28,
+    power: 50, bonus: 25,
     weakness: 'Organizing',
     video: require('./assets/boss-junk-giant.mp4'),
-    tiers: [0, 1],
+    tiers: [1, 2],
+    threat: 'Medium', threatNote: 'Many kids lose streak here.',
+    hp: 48, attackMin: 4, attackMax: 8, zapZone: 'wide',
   },
+  // ── Boss 4 — Tier 2-3 ──────────────────────────────────────────────────────
+  {
+    name: 'Grime Crawler',
+    tagline: "It doesn't walk. It smears.",
+    taglineHighlight: 'smears',
+    power: 60, bonus: 30,
+    weakness: 'Scrubbing',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [2, 3],
+    threat: 'Medium', threatNote: 'Consistent chores are your best weapon.',
+    hp: 60, attackMin: 6, attackMax: 10, zapZone: 'normal',
+  },
+  // ── Boss 5 — Tier 3-4 ──────────────────────────────────────────────────────
   {
     name: 'Mire Lurker',
     tagline: "Born from the swamp's worst nightmare.",
     taglineHighlight: 'nightmare',
-    power: 80, bonus: 35,
+    power: 70, bonus: 35,
     weakness: 'Mopping',
     video: require('./assets/boss-intro.mp4'),
-    tiers: [2, 3],
+    tiers: [3, 4],
+    threat: 'Medium', threatNote: 'Only kids with a full week survive.',
+    hp: 72, attackMin: 8, attackMax: 12, zapZone: 'normal',
   },
+  // ── Boss 6 — Tier 4-5 ──────────────────────────────────────────────────────
+  {
+    name: 'Clutter Colossus',
+    tagline: "Built from everything you never put away.",
+    taglineHighlight: 'never',
+    power: 80, bonus: 40,
+    weakness: 'Folding',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [4, 5],
+    threat: 'Hard',   threatNote: 'Skipped chores will cost you here.',
+    hp: 85, attackMin: 10, attackMax: 14, zapZone: 'normal',
+  },
+  // ── Boss 7 — Tier 5-6 ──────────────────────────────────────────────────────
+  {
+    name: 'Rust Baron',
+    tagline: "Centuries of neglect made him unstoppable.",
+    taglineHighlight: 'unstoppable',
+    power: 90, bonus: 45,
+    weakness: 'Polishing',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [5, 6],
+    threat: 'Hard',   threatNote: "The Baron doesn't forgive lazy weeks.",
+    hp: 100, attackMin: 12, attackMax: 16, zapZone: 'narrow',
+  },
+  // ── Boss 8 — Tier 6-7 ──────────────────────────────────────────────────────
+  {
+    name: 'Filth Wraith',
+    tagline: "It seeps through walls. It never sleeps.",
+    taglineHighlight: 'never sleeps',
+    power: 100, bonus: 50,
+    weakness: 'Vacuuming',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [6, 7],
+    threat: 'Hard',   threatNote: 'Full completion recommended before fighting.',
+    hp: 120, attackMin: 14, attackMax: 18, zapZone: 'narrow',
+  },
+  // ── Boss 9 — Tier 7 ────────────────────────────────────────────────────────
+  {
+    name: 'Chaos Engine',
+    tagline: "Order is its prey. Chaos is its nature.",
+    taglineHighlight: 'chaos',
+    power: 110, bonus: 55,
+    weakness: 'Sorting',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [7],
+    threat: 'Extreme', threatNote: 'Only the most consistent kids survive.',
+    hp: 160, attackMin: 16, attackMax: 20, zapZone: 'narrow',
+  },
+  // ── Boss 10 — Tier 7 ───────────────────────────────────────────────────────
   {
     name: 'Vorth Akar',
     tagline: "Chaos incarnate. Pure destruction.",
@@ -136,7 +229,9 @@ const BOSSES: Boss[] = [
     power: 120, bonus: 60,
     weakness: 'Discipline',
     video: require('./assets/boss-intro.mp4'),
-    tiers: [4, 5, 6, 7],
+    tiers: [7],
+    threat: 'Extreme', threatNote: 'Top performers only.',
+    hp: 240, attackMin: 18, attackMax: 24, zapZone: 'very-narrow',
   },
 ];
 
@@ -168,6 +263,38 @@ function msUntilSunday(): number {
 
 const FREQUENCY_OPTIONS = ['Every day', '2 times per week', '3 times per week', 'Once a week', 'As needed'];
 
+function frequencyToWeeklyTarget(frequency: string): number {
+  switch (frequency) {
+    case 'Every day':        return 7;
+    case '3 times per week': return 3;
+    case '2 times per week': return 2;
+    case 'Once a week':      return 1;
+    case 'As needed':        return 1;
+    default:                 return 1;
+  }
+}
+
+/** Returns today's date string, offset by `days` for debug simulation. */
+function getSimulatedToday(offsetDays: number = 0): string {
+  if (offsetDays === 0) return new Date().toDateString();
+  return new Date(Date.now() + offsetDays * 86_400_000).toDateString();
+}
+
+/** Resets eligible chores to 'active' at the start of a new day.
+ *  A chore is eligible if its weeklyCompletions is below the weekly target
+ *  and it is currently 'approved' or 'rejected'. 'pending' chores are left
+ *  alone — the parent still needs to act on them. */
+function applyDailyReset(chores: ManagedChore[]): ManagedChore[] {
+  return chores.map(c => {
+    const target      = frequencyToWeeklyTarget(c.frequency);
+    const completions = c.weeklyCompletions ?? 0;
+    if (completions < target && (c.status === 'approved' || c.status === 'rejected')) {
+      return { ...c, status: 'active' as const, rejectionNote: undefined };
+    }
+    return c;
+  });
+}
+
 const DIFFICULTY_MULTIPLIERS: Record<1 | 2 | 3, number> = { 1: 1.0, 2: 1.5, 3: 2.0 };
 const XP_BY_DIFFICULTY:      Record<1 | 2 | 3, number> = { 1: 10,  2: 25,  3: 50  };
 const DIFFICULTY_LABELS: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
@@ -186,12 +313,12 @@ const CHORE_ICONS: { icon: string | number; bg: string }[] = [
 ];
 
 const DEFAULT_MANAGED_CHORES: ManagedChore[] = [
-  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active' },
-  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active' },
-  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active' },
-  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active' },
-  { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active' },
-  { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active' },
+  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active', weeklyCompletions: 0 },
+  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
+  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
+  { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
+  { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
 ];
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -358,7 +485,7 @@ const BOSS_SVGS = [BossGrumbloth, BossMireflax, BossVorthak];
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
-interface SwitcherOption { label: string; emoji: string; bg: string; }
+interface SwitcherOption { label: string; emoji: string; bg: string; image?: number; }
 
 function ViewSwitcher({ selected, options, onSelect, dark = false }: {
   selected: string;
@@ -406,7 +533,9 @@ function ViewSwitcher({ selected, options, onSelect, dark = false }: {
                   onPress={() => closeSheet(() => onSelect(opt))}
                 >
                   <View style={[sw.optionAvatar, { backgroundColor: opt.bg }]}>
-                    <Text style={{ fontSize: scale(18) }}>{opt.emoji}</Text>
+                    {opt.image != null
+                      ? <Image source={opt.image} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
+                      : <Text style={{ fontSize: scale(18) }}>{opt.emoji}</Text>}
                   </View>
                   <Text style={[sw.optionLabel, active && sw.optionLabelActive]}>{opt.label}</Text>
                   {active && <Text style={sw.check}>✓</Text>}
@@ -650,21 +779,24 @@ function ChoreRow({ chore, done, onPress, baseRate }: { chore: Chore; done: bool
 
 // ─── Parent Tab Bar ───────────────────────────────────────────────────────────
 
+const PARENT_NAV_ICONS: Record<ParentTab, { src: number; label: string }> = {
+  home:     { src: require('./assets/icons/NavHomeParent.png'),    label: 'Home'     },
+  chores:   { src: require('./assets/icons/navChores.png'),        label: 'Chores'   },
+  money:    { src: require('./assets/icons/navMoney.png'),         label: 'Money'    },
+  settings: { src: require('./assets/icons/navHomeSettings.png'),  label: 'Settings' },
+};
+
 function ParentTabBar({ active, onNav }: { active: ParentTab; onNav: (t: ParentTab) => void }) {
-  const tabs: { id: ParentTab; icon: string; label: string }[] = [
-    { id: 'kidView',  icon: '🧒', label: 'Kid view' },
-    { id: 'chores',   icon: '📋', label: 'Chores'   },
-    { id: 'rewards',  icon: '🎁', label: 'Rewards'  },
-    { id: 'settings', icon: '⚙️', label: 'Settings' },
-  ];
+  const tabs: ParentTab[] = ['home', 'chores', 'money', 'settings'];
   return (
     <View style={s.tabBar} pointerEvents="box-none">
       <View style={s.tabBarInner}>
         {tabs.map(t => {
-          const isActive = active === t.id;
+          const isActive = active === t;
+          const { src } = PARENT_NAV_ICONS[t];
           return (
-            <TouchableOpacity key={t.id} style={p.tabItem} onPress={() => onNav(t.id)} activeOpacity={0.7}>
-              <Text style={[s.tabIcon, isActive && s.tabIconActive]}>{t.icon}</Text>
+            <TouchableOpacity key={t} style={[{ flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, borderRadius: 32, paddingVertical: 6 }, isActive && s.tabIconWrapActive]} onPress={() => onNav(t)} activeOpacity={0.7}>
+              <Image source={src} style={s.tabIcon} resizeMode="contain" />
             </TouchableOpacity>
           );
         })}
@@ -841,7 +973,7 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate }: { chore: ManagedC
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid, initialAvatarIdx }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
   currentKidName: string;
@@ -858,8 +990,9 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   requireApproval: boolean;
   onNavigateToWallet: () => void;
   onRenameMonster: (name: string) => void;
-  kidProfiles: { name: string; avatarColor: string }[];
+  kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   onSwitchToKid: (name: string) => void;
+  initialAvatarIdx: number;
 }) {
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
@@ -872,7 +1005,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const allDailyDone = dailyChores.length > 0 && dailyChores.every(c => c.status === 'approved');
   const allSubmitted = !allDailyDone && dailyChores.length > 0 && dailyChores.every(c => c.status === 'approved' || c.status === 'pending');
   const dollars    = (coins / 100).toFixed(2);
-  const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
+  const [kidAvatarIdx, setKidAvatarIdx] = useState(initialAvatarIdx);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
   const [showRename, setShowRename]     = useState(false);
   const [renameText, setRenameText]     = useState(monsterName);
@@ -964,12 +1097,11 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
             <ViewSwitcher
               selected={currentKidName || 'Kid view'}
               options={[
-                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF' })),
+                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
                 { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
-            <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
           </View>
         </View>
         <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
@@ -1091,9 +1223,10 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
           <View style={{ backgroundColor: '#F7F6F2', borderRadius: 24, padding: 24, gap: 16 }}>
             <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>Name your mascot</Text>
             <TextInput
-              style={{ backgroundColor: '#ECEAE4', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}
+              style={{ backgroundColor: '#ECEAE4', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}
               value={renameText}
               onChangeText={setRenameText}
+              autoCapitalize="words"
               placeholder="Give them a name…"
               placeholderTextColor="#ABABAB"
               maxLength={12}
@@ -1143,24 +1276,38 @@ function formatCountdown(ms: number) {
   return `${m}M`;
 }
 
-function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName }: {
+function countdownParts(ms: number): [string, string, string, string] {
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return [pad(d), pad(h), pad(m), pad(s)];
+}
+
+function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx }: {
   monsterIdx: MonsterIdx; coins: number; xp: number; weeklyXp: number;
-  done: Partial<Record<ChoreId, boolean>>; onStartBattle: () => void;
+  done: Partial<Record<ChoreId, boolean>>; managedChores: ManagedChore[];
+  onStartBattle: () => void;
   onSwitchToParent: () => void;
   onNavigateToWallet: () => void;
   monsterName: string;
-  kidProfiles: { name: string; avatarColor: string }[];
+  kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   onSwitchToKid: (name: string) => void;
   currentKidName: string;
+  initialAvatarIdx: number;
 }) {
   const boss        = getWeeklyBoss(monsterIdx);
   const monster     = MONSTERS[monsterIdx];
-  const [kidAvatarIdx, setKidAvatarIdx] = useState(0);
+  const [kidAvatarIdx, setKidAvatarIdx] = useState(initialAvatarIdx);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
   const dollars = (coins / 100).toFixed(2);
-  const doneCount   = Object.keys(done).length;
-  const totalChores = CHORES.length;
-  const chorePct    = Math.min(100, Math.round((weeklyXp / monster.needed) * 100));
+  const doneCount   = managedChores.filter(c => c.status === 'approved').length;
+  const totalChores = managedChores.length || 1;
+  const totalWeeklyTarget = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
+  const totalWeeklyDone   = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
+  const chorePct    = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
   const winOdds     = calcWinOdds(weeklyXp, monster.needed);
   const power       = weeklyXp;
   const countdownMs = useCountdown();
@@ -1193,9 +1340,15 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, onStartBattle, onS
     ? 'You\'re at max power — ready to evolve!'
     : `${xpToNextLevel} XP to reach Lv ${monster.level + 1}`;
 
+  const cdParts = countdownParts(countdownMs);
+  const threatSkulls = { Easy: 1, Medium: 3, Hard: 4, Extreme: 5 }[boss.threat] ?? 3;
+  const threatColors: Record<string, string> = { Easy: '#3AB56A', Medium: '#6B35F0', Hard: '#F59E0B', Extreme: '#EF4444' };
+
   return (
-    <>
-      {/* Home-style header */}
+    <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
+      {/* Texture overlay — mirrors CreamBg but with lime green */}
+      <Image source={require('./assets/appBG.png')} style={{ position: 'absolute', width: '100%', aspectRatio: 1024 / 1536, bottom: 0 }} resizeMode="contain" />
+      {/* Header */}
       <View style={s.homeHeader}>
         <View style={s.homeHeaderLeft}>
           <AvatarPickerSheet selected={kidAvatarIdx} onSelect={setKidAvatarIdx} />
@@ -1203,12 +1356,11 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, onStartBattle, onS
             <ViewSwitcher
               selected={currentKidName || 'Kid view'}
               options={[
-                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF' })),
+                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
                 { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
-            <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
           </View>
         </View>
         <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
@@ -1218,144 +1370,176 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, onStartBattle, onS
       </View>
 
       <ScrollView
-        style={{ flex: 1, backgroundColor: C.bg }}
-        contentContainerStyle={{ padding: scale(16), gap: scale(12), paddingBottom: scale(100) }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: scale(16), paddingTop: scale(8), paddingBottom: scale(120), gap: scale(12) }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Boss Teaser Card ── */}
-        <View style={w.bossCard}>
-          {/* Video background */}
-          <Video
-            source={boss.video}
-            style={StyleSheet.absoluteFill}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay
-            isLooping
-            isMuted
-          />
-          {/* Permanent dark gradient so text is always legible */}
-          <LinearGradient
-            colors={['rgba(0,0,0,0.18)', 'rgba(0,0,0,0.62)']}
-            style={StyleSheet.absoluteFill}
-          />
-          {/* Silhouette overlay — fades out as Sunday approaches */}
-          {silhouetteOpacity > 0 && (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0d0820', opacity: silhouetteOpacity }]} />
-          )}
+        {/* ── Boss Card + overlapping Countdown ── */}
+        <View>
+          <View style={w.bossCard}>
+            {boss.bgImage
+              ? <>
+                  <Image source={boss.bgImage} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  {boss.bossImage && (
+                    <Image
+                      source={boss.bossImage}
+                      style={[StyleSheet.absoluteFill, { opacity: 1 - silhouetteOpacity }]}
+                      resizeMode="cover"
+                    />
+                  )}
+                </>
+              : <>
+                  <Video source={boss.video} style={StyleSheet.absoluteFill} resizeMode={ResizeMode.COVER} shouldPlay isLooping isMuted />
+                  <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.65)']} style={StyleSheet.absoluteFill} />
+                  {silhouetteOpacity > 0 && <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0d0820', opacity: silhouetteOpacity }]} />}
+                </>
+            }
 
-          {/* Teaser text */}
-          <View style={w.bossCardContent}>
+            {/* Top-left badge */}
             <View style={w.bossTagPill}>
-              <Image source={require('./assets/icons/icon-skull.png')} style={{ width: scale(14), height: scale(14), marginRight: 5 }} resizeMode="contain" />
+              <Image source={require('./assets/icons/icon-skull.png')} style={{ width: scale(30), height: scale(30), marginRight: 5 }} resizeMode="contain" />
               <Text style={w.bossTagText}>BOSS BATTLE!</Text>
             </View>
-            <Text style={w.teaserLine1}>{teaserLine1}</Text>
-            <Text style={w.teaserLine2}>{teaserLine2}</Text>
 
-            {/* Countdown */}
-            {!isBattleDay && (
-              <View style={w.countdownBox}>
-                <Text style={w.countdownText}>{formatCountdown(countdownMs)}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── Boss Intel ── */}
-        <View style={w.intelRow}>
-          <View style={w.intelChip}>
-            <Text style={w.intelLabel}>WEAK TO</Text>
-            <View style={w.weaknessPill}>
-              <Text style={w.weaknessIcon}>⭐</Text>
-              <Text style={w.weaknessText}>{revealLevel < 2 ? '???' : boss.weakness.toUpperCase()}</Text>
+            {/* Bottom text — extra bottom padding so countdown overlap doesn't cover it */}
+            <View style={[w.bossCardContent, { paddingBottom: isBattleDay ? scale(16) : scale(80) }]}>
+              <Text style={w.teaserLine1}>{teaserLine1}</Text>
+              {!isBattleDay && (
+                <Text style={w.teaserLine2}>
+                  {'Arriving in '}
+                  <Text style={{ color: '#C5F215', fontFamily: 'FredokaOne_400Regular' }}>{days} day{days !== 1 ? 's' : ''}</Text>
+                </Text>
+              )}
             </View>
           </View>
-          <View style={[w.intelChip, { flex: 1 }]}>
-            <Text style={w.intelLabel}>BOSS POWER</Text>
-            <Text style={w.intelValue}>{revealLevel < 2 ? '???  ' : `${boss.power}  `}<Text style={{ fontSize: scale(11), color: C.muted }}>pts</Text></Text>
+
+          {/* Countdown overlaps the bottom of the boss card */}
+          {!isBattleDay && (
+            <View style={w.countdownCard}>
+              {(['DAYS', 'HRS', 'MINS', 'SECS'] as const).map((unit, i) => (
+                <View key={unit} style={w.countdownSegment}>
+                  <Text style={w.countdownNum}>{cdParts[i]}</Text>
+                  <Text style={w.countdownUnit}>{unit}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* ── Boss Stats ── */}
+        <Text style={w.sectionHeader}>Boss stats</Text>
+        <View style={w.intelRow}>
+          {/* Weakness */}
+          <View style={[w.intelChip, { flex: 1, gap: 12 }]}>
+            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>WEAKNESS</Text>
+            {revealLevel < 2 ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Image source={require('./assets/icons/icon-starbox.png')} style={{ width: 48, height: 48 }} resizeMode="contain" />
+                  <Text style={[w.intelValue, { fontSize: scale(16) }]}>???</Text>
+                </View>
+                <Text style={{ fontSize: scale(11), color: C.muted, fontWeight: '600' }}>Do more chores{'\n'}to unlock.</Text>
+                <View style={w.unlockArrow}>
+                  <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: 14, height: 14 }} resizeMode="contain" />
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={w.weaknessPill}>
+                  <Image source={require('./assets/icons/icon-starbox.png')} style={{ width: scale(16), height: scale(16) }} resizeMode="contain" />
+                  <Text style={w.weaknessText}>{boss.weakness}</Text>
+                </View>
+              </>
+            )}
+          </View>
+
+          {/* Threat Level */}
+          <View style={[w.intelChip, { flex: 1, gap: 12 }]}>
+            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>THREAT LEVEL</Text>
+            <View style={{ flexDirection: 'row', gap: 4 }}>
+              {[1,2,3,4,5].map(n => (
+                <Image key={n} source={n <= threatSkulls ? require('./assets/icons/icon-skull.png') : require('./assets/icons/icon-skulldisabled.png')} style={{ width: scale(24), height: scale(24) }} resizeMode="contain" />
+              ))}
+            </View>
+            <View style={[w.threatPill, { backgroundColor: threatColors[boss.threat] }]}>
+              <Text style={w.threatPillText}>{boss.threat}</Text>
+            </View>
+            <Text style={{ fontSize: scale(11), color: C.muted, fontWeight: '600' }}>{boss.threatNote}</Text>
           </View>
         </View>
 
-        {/* ── Your Readiness ── */}
-        <View style={w.sectionCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
-            <Text style={w.sectionTitle}>Your readiness</Text>
-          </View>
+        {/* ── Your Stats ── */}
+        <Text style={w.sectionHeader}>Your stats this week</Text>
 
-          {/* Weekly XP progress */}
-          <View style={w.readinessRow}>
-            <Text style={w.readinessLabel}>Weekly XP</Text>
-            <Text style={w.readinessValue}>{weeklyXp} / {monster.needed}</Text>
+        {/* Readiness */}
+        <View style={w.sectionCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
+            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>YOUR READINESS</Text>
           </View>
-          <View style={w.trackWrap}>
+          <View style={w.readinessRow}>
+            <Text style={w.readinessLabel}>Chores completed</Text>
+            <Text style={w.readinessValue}>{doneCount}/{CHORES.length}</Text>
+          </View>
+          <View style={[w.trackWrap, { marginVertical: 8 }]}>
             <View style={[w.trackFill, { width: `${chorePct}%` as any }]} />
           </View>
-
-          {/* Win odds */}
-          <View style={[w.readinessRow, { marginTop: scale(12) }]}>
-            <Text style={w.readinessLabel}>Win chance</Text>
-            <Text style={[w.readinessValue, {
-              color: winOdds >= 70 ? '#2A7A2A' : winOdds < 40 ? '#CC3333' : '#6B35F0',
-            }]}>{winOdds}%</Text>
+          <View style={w.readinessRow}>
+            <Text style={w.readinessLabel}>Battle power</Text>
+            <Text style={[w.readinessValue, { fontSize: scale(28), color: '#6B35F0' }]}>{power}</Text>
           </View>
-
-          {/* Power forecast */}
-          <View style={w.forecastPill}>
-            <Text style={w.forecastText}>📈  {powerForecastMsg}</Text>
+          <View style={[w.forecastPill, { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }]}>
+            <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#E0D4FF', alignItems: 'center', justifyContent: 'center' }}>
+              <Image source={require('./assets/icons/icon-graph.png')} style={{ width: 22, height: 22 }} resizeMode="contain" />
+            </View>
+            <Text style={[w.forecastText, { flex: 1, textAlign: 'left' }]}>{powerForecastMsg}</Text>
           </View>
         </View>
 
-        {/* ── What's at Stake ── */}
+        {/* What's at Stake */}
         <View style={w.sectionCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-            <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
-            <Text style={w.sectionTitle}>What's at stake</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
+            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>WHAT'S AT STAKE</Text>
           </View>
           <View style={w.stakeRow}>
             <View style={w.stakeItem}>
               <Image source={require('./assets/icons/icon-coin.png')} style={w.stakeIcon} resizeMode="contain" />
-              <Text style={w.stakeVal}>{boss.bonus}¢</Text>
-              <Text style={w.stakeLbl}>Coins</Text>
+              <Text style={w.stakeVal}>{boss.bonus}</Text>
+              <Text style={w.stakeLbl}>coins</Text>
             </View>
             <View style={w.stakeItem}>
               <Image source={require('./assets/icons/icon-star.png')} style={w.stakeIcon} resizeMode="contain" />
-              <Text style={w.stakeVal}>75</Text>
+              <Text style={w.stakeVal}>50xp</Text>
               <Text style={w.stakeLbl}>XP</Text>
             </View>
             <View style={w.stakeItem}>
               <Image source={require('./assets/icons/icon-gem.png')} style={w.stakeIcon} resizeMode="contain" />
               <Text style={w.stakeVal}>1</Text>
-              <Text style={w.stakeLbl}>Shard</Text>
+              <Text style={w.stakeLbl}>shard</Text>
             </View>
           </View>
           {monsterIdx < 7 && (
             <View style={w.evolutionHint}>
-              <Text style={w.evolutionHintText}>
-                ✨  Win this battle and {monsterName} could evolve!
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <Image source={require('./assets/icons/IconStar.png')} style={{ width: 20, height: 20 }} resizeMode="contain" />
+                <Text style={w.evolutionHintText}>Win this battle and {monsterName} could evolve!</Text>
+              </View>
             </View>
           )}
         </View>
 
-        {/* ── Battle Button (always accessible, labelled differently mid-week) ── */}
-        <TouchableOpacity
-          style={[s.battleBtn, isBattleDay && { backgroundColor: '#C5F215' }]}
-          onPress={onStartBattle}
-          activeOpacity={0.85}
-        >
-          <Text style={[s.battleBtnText, isBattleDay && { color: '#111' }]}>
-            {isBattleDay ? '⚔️  Fight Now!' : '⚔️  Preview Battle'}
-          </Text>
+        {/* Battle Button */}
+        <TouchableOpacity style={w.battleBtnPurple} onPress={onStartBattle} activeOpacity={0.85}>
+          <Text style={w.battleBtnPurpleText}>{isBattleDay ? '⚔️  Fight Now!' : 'Battle!'}</Text>
         </TouchableOpacity>
 
         {/* DEBUG */}
         <TouchableOpacity style={s.debugBtn} onPress={onStartBattle} activeOpacity={0.7}>
           <Text style={s.debugBtnText}>🐛  Debug — trigger battle instantly</Text>
         </TouchableOpacity>
-
       </ScrollView>
-    </>
+    </View>
   );
 }
 
@@ -1394,7 +1578,6 @@ function BossIntroScreen({ monsterIdx, onReady }: {
   monsterIdx: MonsterIdx;
   onReady: () => void;
 }) {
-  const [fontsLoaded] = useFonts({ FredokaOne_400Regular });
   const boss = getWeeklyBoss(monsterIdx);
 
   // Responsive font size: fit the longest word within available width.
@@ -1477,9 +1660,9 @@ function BossIntroScreen({ monsterIdx, onReady }: {
         isLooping
       />
 
-      {/* Gradient: strong at top and bottom, clear in the middle */}
+      {/* Gradient: strong at top, fades to subtle at bottom so the card area shows the video */}
       <LinearGradient
-        colors={['rgba(0,0,0,0.72)', 'transparent', 'rgba(0,0,0,0.88)']}
+        colors={['rgba(0,0,0,0.72)', 'transparent', 'rgba(0,0,0,0.28)']}
         locations={[0, 0.42, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -1495,27 +1678,23 @@ function BossIntroScreen({ monsterIdx, onReady }: {
 
         {/* Boss name + tagline */}
         <Animated.View style={{ transform: [{ translateY: nameY }, { translateX: shakeX }], opacity: nameOpacity, marginTop: 10 }}>
-          {fontsLoaded ? (
-            <View>
-              {/* Line 1 — white */}
-              <ScreenHeading
-                textStyle={{ fontSize: bossNameSize, lineHeight: bossNameSize + 2, textAlign: 'center', color: '#FFFFFF' }}
-                dropShadow={{ x: 4, y: 4 }}
-              >
-                {word1}
-              </ScreenHeading>
-              {/* Line 2 — slime lime, overlaps line 1 slightly */}
-              <ScreenHeading
-                style={{ marginTop: -Math.round(bossNameSize * 0.22) }}
-                textStyle={{ fontSize: bossNameSize, lineHeight: bossNameSize + 2, textAlign: 'center', color: '#C5F215' }}
-                dropShadow={{ x: 4, y: 4 }}
-              >
-                {word2}
-              </ScreenHeading>
-            </View>
-          ) : (
-            <Text style={bi.bossNameFallback}>{boss.name}</Text>
-          )}
+          <View>
+            {/* Line 1 — white */}
+            <ScreenHeading
+              textStyle={{ fontSize: bossNameSize, lineHeight: bossNameSize + 2, textAlign: 'center', color: '#FFFFFF' }}
+              dropShadow={{ x: 4, y: 4 }}
+            >
+              {word1}
+            </ScreenHeading>
+            {/* Line 2 — slime lime, overlaps line 1 slightly */}
+            <ScreenHeading
+              style={{ marginTop: -Math.round(bossNameSize * 0.22) }}
+              textStyle={{ fontSize: bossNameSize, lineHeight: bossNameSize + 2, textAlign: 'center', color: '#C5F215' }}
+              dropShadow={{ x: 4, y: 4 }}
+            >
+              {word2}
+            </ScreenHeading>
+          </View>
           <View style={{ marginTop: 12 }}>
             {renderTagline()}
           </View>
@@ -1532,7 +1711,7 @@ function BossIntroScreen({ monsterIdx, onReady }: {
             {rewards.map((r, i) => (
               <View key={i} style={{ alignItems: 'center', gap: 6 }}>
                 <Image source={r.icon} style={{ width: scale(60), height: scale(60) }} resizeMode="contain" />
-                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular' }}>{r.label}</Text>
+                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#FFFFFF', fontFamily: 'FredokaOne_400Regular' }}>{r.label}</Text>
               </View>
             ))}
           </View>
@@ -1583,186 +1762,964 @@ function ResultScreen({ monsterIdx, won, bonusCoins, onDone, monsterImg }: {
   );
 }
 
+// ── 5. Battle Arena — helpers ─────────────────────────────────────────────────
+
+function calcPowerRating(pct: number, idx: number, streak: number): number {
+  let base: number;
+  if (pct >= 100) base = 100;
+  else if (pct >= 80) base = 80;
+  else if (pct >= 60) base = 55;
+  else if (pct >= 40) base = 30;
+  else base = Math.max(5, Math.round((pct / 40) * 15));
+  return base + idx * 10 + (streak >= 5 ? 5 : 0);
+}
+
+function calcWeeklyShards(pct: number): number {
+  if (pct >= 100) return 6;
+  if (pct >= 80)  return 4;
+  if (pct >= 60)  return 3;
+  if (pct >= 40)  return 2;
+  return 1;
+}
+
+function comboFromScore(score: number): { label: string; color: string } {
+  if (score >= 90) return { label: 'UNSTOPPABLE!!',      color: '#C5F215' };
+  if (score >= 75) return { label: 'Out of this world!', color: '#6B35F0' };
+  if (score >= 50) return { label: 'Huge hit!',          color: '#F59E0B' };
+  if (score >= 30) return { label: 'Nice combo!',        color: '#3B8A3A' };
+  return              { label: 'Weak hit...',            color: '#ABABAB' };
+}
+
+// ── Mini-game: Zap Strike ─────────────────────────────────────────────────────
+const ZAP_ZONES: Record<Boss['zapZone'], { green: number; yellow: number; orange: number }> = {
+  'very-wide':   { green: 0.35, yellow: 0.55, orange: 0.75 },
+  'wide':        { green: 0.22, yellow: 0.42, orange: 0.65 },
+  'normal':      { green: 0.15, yellow: 0.35, orange: 0.58 },
+  'narrow':      { green: 0.08, yellow: 0.25, orange: 0.50 },
+  'very-narrow': { green: 0.04, yellow: 0.18, orange: 0.42 },
+};
+
+function ZapStrikeGame({ onScore, zapZone = 'normal' }: { onScore: (s: number) => void; zapZone?: Boss['zapZone'] }) {
+  const needle    = useRef(new Animated.Value(0)).current;
+  const needleRef = useRef(0);
+  const [scores, setScores] = useState<number[]>([]);
+  const [done,   setDone]   = useState(false);
+  const TRACK_W = scale(280);
+  const zones = ZAP_ZONES[zapZone];
+
+  useEffect(() => {
+    const id = needle.addListener(({ value }) => { needleRef.current = value; });
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(needle, { toValue: 1, duration: 900, useNativeDriver: false, easing: Easing.linear }),
+      Animated.timing(needle, { toValue: 0, duration: 900, useNativeDriver: false, easing: Easing.linear }),
+    ]));
+    anim.start();
+    return () => { needle.removeListener(id); anim.stop(); };
+  }, []);
+
+  const getZapScore = (pos: number): number => {
+    const p = Math.abs(pos - 0.5) * 2; // 0=center, 1=edge
+    if (p < zones.green)  return 100;
+    if (p < zones.yellow) return 65;
+    if (p < zones.orange) return 40;
+    return 0;
+  };
+
+  const handleTap = () => {
+    if (done) return;
+    const score = getZapScore(needleRef.current);
+    setScores(prev => {
+      const next = [...prev, score];
+      if (next.length >= 3) {
+        setDone(true);
+        setTimeout(() => onScore(Math.max(...next)), 700);
+      }
+      return next;
+    });
+  };
+
+  const zoneColor = (score: number) =>
+    score >= 100 ? '#22A050' : score >= 65 ? '#C5F215' : score >= 40 ? '#F59E0B' : '#ABABAB';
+
+  return (
+    <View style={{ alignItems: 'center', gap: scale(18), paddingHorizontal: scale(20) }}>
+      <Text style={b.mgTitle}>ZAP STRIKE</Text>
+      <Text style={b.mgInstr}>Tap when the needle hits the green zone!</Text>
+
+      {/* Track */}
+      <View style={{ width: TRACK_W, height: scale(36), borderRadius: scale(18), overflow: 'hidden', borderWidth: 2, borderColor: '#1A1A1A', position: 'relative', backgroundColor: '#FF6B35' }}>
+        <View style={{ position:'absolute', left: TRACK_W*((0.5-zones.orange)), right: TRACK_W*((0.5-zones.orange)), top:0, bottom:0, backgroundColor:'#F59E0B' }} />
+        <View style={{ position:'absolute', left: TRACK_W*((0.5-zones.yellow)), right: TRACK_W*((0.5-zones.yellow)), top:0, bottom:0, backgroundColor:'#C5F215' }} />
+        <View style={{ position:'absolute', left: TRACK_W*((0.5-zones.green)), right: TRACK_W*((0.5-zones.green)), top:0, bottom:0, backgroundColor:'#22A050' }} />
+        <Animated.View style={{
+          position:'absolute', top:0, bottom:0, width: scale(4), backgroundColor:'#1A1A1A',
+          left: needle.interpolate({ inputRange:[0,1], outputRange:[0, TRACK_W - scale(4)] }),
+        }} />
+      </View>
+
+      {/* Score dots */}
+      <View style={{ flexDirection:'row', gap: scale(10) }}>
+        {[0,1,2].map(i => (
+          <View key={i} style={{ width: scale(48), height: scale(40), borderRadius: scale(10), borderWidth: 2, borderColor:'#1A1A1A',
+            backgroundColor: scores[i] !== undefined ? zoneColor(scores[i]) : '#F7F6F2', alignItems:'center', justifyContent:'center' }}>
+            <Text style={{ fontWeight:'900', fontSize: scale(14), color:'#1A1A1A' }}>
+              {scores[i] !== undefined ? scores[i] : '–'}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <TouchableOpacity onPress={handleTap} disabled={done}
+        style={[b.mgMainBtn, done && { backgroundColor: '#ABABAB' }]} activeOpacity={0.8}>
+        <Text style={b.mgMainBtnText}>{done ? '...' : `TAP! (${3 - scores.length} left)`}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ── Mini-game: Frenzy ─────────────────────────────────────────────────────────
+const FRENZY_THRESHOLDS = [
+  { count: 9,  color: '#3B8A3A' },
+  { count: 12, color: '#F59E0B' },
+  { count: 15, color: '#6B35F0' },
+  { count: 17, color: '#C5F215' },
+];
+
+function FrenzyGame({ onScore, onFlash }: { onScore: (s: number) => void; onFlash?: (color: string) => void }) {
+  const [count,   setCount]   = useState(0);
+  const [timeLeft,setTimeLeft]= useState(2000);
+  const [started, setStarted] = useState(false);
+  const [done,    setDone]    = useState(false);
+  const countRef    = useRef(0);
+  const startRef    = useRef(0);
+
+  const frenzyCombo = (n: number): { label: string; color: string } => {
+    if (n >= 17) return { label: 'UNSTOPPABLE!!',      color: '#C5F215' };
+    if (n >= 15) return { label: 'Out of this world!', color: '#6B35F0' };
+    if (n >= 12) return { label: 'Huge hit!',          color: '#F59E0B' };
+    if (n >= 9)  return { label: 'Nice combo!',        color: '#3B8A3A' };
+    if (n > 0)   return { label: 'Weak hit...',        color: '#ABABAB' };
+    return              { label: 'Tap as fast as you can!', color: '#ABABAB' };
+  };
+
+  useEffect(() => {
+    if (!started) return;
+    const iv = setInterval(() => {
+      const elapsed = Date.now() - startRef.current;
+      const rem = Math.max(0, 2000 - elapsed);
+      setTimeLeft(rem);
+      if (rem <= 0) {
+        clearInterval(iv);
+        setDone(true);
+        const score = Math.min(100, Math.round((countRef.current / 17) * 100));
+        setTimeout(() => onScore(score), 600);
+      }
+    }, 50);
+    return () => clearInterval(iv);
+  }, [started]);
+
+  const handleTap = () => {
+    if (done) return;
+    if (!started) { setStarted(true); startRef.current = Date.now(); }
+    const oldCount = countRef.current;
+    countRef.current += 1;
+    setCount(countRef.current);
+    // Flash screen when crossing a tier threshold
+    for (const t of FRENZY_THRESHOLDS) {
+      if (oldCount < t.count && countRef.current >= t.count) {
+        onFlash?.(t.color);
+        break;
+      }
+    }
+  };
+
+  const info = frenzyCombo(count);
+  const timerPct = started ? (timeLeft / 2000) * 100 : 100;
+
+  return (
+    <View style={{ alignItems:'center', gap: scale(14), paddingHorizontal: scale(20) }}>
+      <Text style={b.mgTitle}>FRENZY</Text>
+
+      {/* Timer bar */}
+      <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
+        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6),
+          backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
+      </View>
+
+      <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(72), color:'#1A1A1A', lineHeight: scale(80) }}>{count}</Text>
+      <Text style={{ fontSize: scale(15), fontWeight:'800', color: info.color, textAlign:'center' }}>{info.label}</Text>
+
+      <TouchableOpacity onPress={handleTap} disabled={done}
+        style={[b.mgBigTap, done && { backgroundColor:'#ABABAB' }]} activeOpacity={0.7}>
+        <Text style={{ color:'#fff', fontWeight:'900', fontSize: scale(28) }}>{started ? '⚡' : 'GO!'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ── Mini-game: Overcharge ─────────────────────────────────────────────────────
+function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
+  const charge    = useRef(new Animated.Value(0)).current;
+  const chargeRef = useRef(0);
+  const animRef   = useRef<Animated.CompositeAnimation | null>(null);
+  const [chargeVal, setChargeVal] = useState(0);
+  const [released,  setReleased]  = useState(false);
+  const GREEN_MIN = 0.55, GREEN_MAX = 0.80;
+  const BAR_H = scale(180);
+
+  useEffect(() => {
+    const id = charge.addListener(({ value }) => {
+      chargeRef.current = value;
+      setChargeVal(value);
+    });
+    return () => charge.removeListener(id);
+  }, []);
+
+  const onPressIn = () => {
+    if (released) return;
+    animRef.current = Animated.timing(charge, {
+      toValue: 1, duration: 2500, useNativeDriver: false, easing: Easing.linear,
+    });
+    animRef.current.start(({ finished }) => { if (finished) doRelease(); });
+  };
+
+  const doRelease = () => {
+    if (released) return;
+    animRef.current?.stop();
+    setReleased(true);
+    const pos = chargeRef.current;
+    let score: number;
+    if (pos >= GREEN_MIN && pos <= GREEN_MAX) {
+      score = Math.round(65 + ((pos - GREEN_MIN) / (GREEN_MAX - GREEN_MIN)) * 35);
+    } else if (pos > GREEN_MAX) {
+      score = Math.round(Math.max(0, 65 * (1 - (pos - GREEN_MAX) / (1 - GREEN_MAX))));
+    } else {
+      score = Math.round((pos / GREEN_MIN) * 40);
+    }
+    setTimeout(() => onScore(score), 600);
+  };
+
+  const inGreen = chargeVal >= GREEN_MIN && chargeVal <= GREEN_MAX;
+
+  return (
+    <View style={{ alignItems:'center', gap: scale(16), paddingHorizontal: scale(20) }}>
+      <Text style={b.mgTitle}>OVERCHARGE</Text>
+      <Text style={b.mgInstr}>Hold and release in the green zone!</Text>
+
+      <View style={{ flexDirection:'row', alignItems:'center', gap: scale(16) }}>
+        {/* Vertical charge bar */}
+        <View style={{ width: scale(36), height: BAR_H, borderRadius: scale(10), backgroundColor:'#ECEAE4', borderWidth:2, borderColor:'#1A1A1A', overflow:'hidden', position:'relative' }}>
+          {/* green zone marker */}
+          <View style={{ position:'absolute', bottom: GREEN_MIN * BAR_H, height:(GREEN_MAX - GREEN_MIN) * BAR_H, left:0, right:0, backgroundColor:'rgba(197,242,21,0.35)' }} />
+          {/* fill */}
+          <Animated.View style={{
+            position:'absolute', bottom:0, left:0, right:0,
+            height: charge.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any,
+            backgroundColor: charge.interpolate({
+              inputRange:[0, GREEN_MIN, GREEN_MAX, 1],
+              outputRange:['#6B35F0','#C5F215','#C5F215','#FF3B55'],
+            }) as any,
+          }} />
+        </View>
+
+        {/* Labels */}
+        <View style={{ gap: scale(4) }}>
+          <Text style={{ fontSize: scale(11), fontWeight:'700', color:'#3B8A3A' }}>← GREEN ZONE</Text>
+          <Text style={{ fontSize: scale(11), fontWeight:'700', color:'#F59E0B', marginTop: scale(4) }}>← TOO MUCH</Text>
+        </View>
+      </View>
+
+      <TouchableOpacity
+        onPressIn={onPressIn} onPressOut={doRelease} disabled={released}
+        style={[b.mgMainBtn, { backgroundColor: inGreen ? '#C5F215' : released ? '#ABABAB' : '#6B35F0' }]}
+        activeOpacity={0.9}
+      >
+        <Text style={[b.mgMainBtnText, { color: inGreen ? '#1A1A1A' : '#fff' }]}>
+          {released ? '⚡' : 'HOLD'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ── Attack name flavour text by monster type ──────────────────────────────────
+const ATTACK_NAMES: Record<MonsterId, Record<string, string>> = {
+  slime:  { 'zap-strike':'Goop Zap',     'frenzy':'Slime Frenzy',   'overcharge':'Ooze Overload',  'whack':'Glob Smack',    'block-breaker':'Slime Code',   'power-slash':'Goo Slash',    'earthquake':'Slime Quake',  'defuse':'Bubble Bomb',   'combo-chain':'Slime Chain'   },
+  flamer: { 'zap-strike':'Ember Blast',  'frenzy':'Inferno Frenzy', 'overcharge':'Magma Surge',    'whack':'Scorch Spot',   'block-breaker':'Fire Code',    'power-slash':'Flame Slash',  'earthquake':'Magma Quake',  'defuse':'Fire Bomb',     'combo-chain':'Fire Chain'    },
+  robot:  { 'zap-strike':'Shock Strike', 'frenzy':'Glitch Frenzy',  'overcharge':'Power Surge',    'whack':'Bug Zap',       'block-breaker':'Hack Attack',  'power-slash':'Blade Slash',  'earthquake':'System Crash', 'defuse':'Circuit Bomb',  'combo-chain':'Combo Protocol'},
+};
+function atkName(monsterId: MonsterId, mechanic: string, fallback: string): string {
+  return ATTACK_NAMES[monsterId]?.[mechanic] ?? fallback;
+}
+
+// ── Mini-game: Whack the Weak Spot ────────────────────────────────────────────
+function WhackGame({ onScore }: { onScore: (s: number) => void }) {
+  const [count,   setCount]   = useState(0);
+  const [timeLeft,setTimeLeft]= useState(4000);
+  const [started, setStarted] = useState(false);
+  const [done,    setDone]    = useState(false);
+  const [spot, setSpot] = useState({ x: 50, y: 50 });
+  const countRef = useRef(0);
+  const startRef = useRef(0);
+  const AREA_W   = scale(280);
+  const AREA_H   = scale(160);
+
+  const moveSpot = () => setSpot({ x: 10 + Math.random() * 80, y: 10 + Math.random() * 80 });
+
+  useEffect(() => {
+    if (!started) return;
+    const iv = setInterval(() => {
+      const rem = Math.max(0, 4000 - (Date.now() - startRef.current));
+      setTimeLeft(rem);
+      if (rem <= 0) {
+        clearInterval(iv);
+        setDone(true);
+        setTimeout(() => onScore(Math.min(100, Math.round((countRef.current / 12) * 100))), 400);
+      }
+    }, 50);
+    return () => clearInterval(iv);
+  }, [started]);
+
+  const handleTap = () => {
+    if (done) return;
+    if (!started) { setStarted(true); startRef.current = Date.now(); }
+    countRef.current += 1;
+    setCount(countRef.current);
+    moveSpot();
+  };
+
+  const timerPct = started ? (timeLeft / 4000) * 100 : 100;
+  return (
+    <View style={{ alignItems:'center', gap: scale(10), paddingHorizontal: scale(20) }}>
+      <Text style={b.mgTitle}>WHACK THE WEAK SPOT</Text>
+      <Text style={b.mgInstr}>Tap the glowing spot as fast as you can!</Text>
+      <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
+        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
+      </View>
+      <View style={{ width: AREA_W, height: AREA_H, backgroundColor:'#F0EDFF', borderRadius: scale(12), borderWidth:2, borderColor:'#1A1A1A', overflow:'hidden' }}>
+        <TouchableOpacity
+          onPress={handleTap} disabled={done} activeOpacity={0.7}
+          style={{ position:'absolute', width: scale(52), height: scale(52), borderRadius: scale(26),
+            backgroundColor: done ? '#ABABAB' : '#FF3B55',
+            left: (AREA_W - scale(52)) * (spot.x / 100),
+            top: (AREA_H - scale(52)) * (spot.y / 100),
+            justifyContent:'center', alignItems:'center',
+          }}
+        >
+          <Text style={{ fontSize: scale(22) }}>💥</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(48), color:'#1A1A1A' }}>{count}</Text>
+    </View>
+  );
+}
+
+// ── Mini-game: Block Breaker / Combo Chain ────────────────────────────────────
+const BB_COLORS = ['#FF3B55', '#6B35F0', '#C5F215', '#F59E0B'];
+const BB_LABELS = ['●', '■', '▲', '★'];
+
+function SequenceGame({ onScore, fast = false }: { onScore: (s: number) => void; fast?: boolean }) {
+  const SEQ = useRef(Array.from({ length: 4 }, () => Math.floor(Math.random() * 4))).current;
+  const [gPhase, setGPhase] = useState<'show' | 'wait' | 'input' | 'done'>('show');
+  const [showIdx, setShowIdx] = useState(0);
+  const [inputIdx, setInputIdx] = useState(0);
+  const showDelay = fast ? 380 : 650;
+
+  useEffect(() => {
+    if (gPhase !== 'show') return;
+    if (showIdx < 4) {
+      const t = setTimeout(() => setShowIdx(i => i + 1), showDelay);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setGPhase(fast ? 'input' : 'wait'), fast ? 180 : 420);
+    return () => clearTimeout(t);
+  }, [gPhase, showIdx]);
+
+  useEffect(() => {
+    if (gPhase !== 'wait') return;
+    const t = setTimeout(() => setGPhase('input'), 350);
+    return () => clearTimeout(t);
+  }, [gPhase]);
+
+  const handleTap = (idx: number) => {
+    if (gPhase !== 'input') return;
+    if (SEQ[inputIdx] !== idx) {
+      setGPhase('done');
+      setTimeout(() => onScore(Math.round((inputIdx / 4) * 100)), 500);
+    } else if (inputIdx + 1 >= 4) {
+      setGPhase('done');
+      setTimeout(() => onScore(100), 500);
+    } else {
+      setInputIdx(i => i + 1);
+    }
+  };
+
+  const activeShow = gPhase === 'show' ? showIdx - 1 : -1;
+  const showSequence = gPhase === 'show' || (!fast && gPhase === 'input');
+
+  return (
+    <View style={{ alignItems:'center', gap: scale(14), paddingHorizontal: scale(20) }}>
+      <Text style={b.mgTitle}>{fast ? 'COMBO CHAIN' : 'BLOCK BREAKER'}</Text>
+      <Text style={b.mgInstr}>
+        {gPhase === 'show' ? 'Watch the sequence...' : gPhase === 'wait' ? 'Get ready!' : gPhase === 'input' ? `Repeat it! (${inputIdx + 1}/4)` : '✓'}
+      </Text>
+      <View style={{ flexDirection:'row', gap: scale(8) }}>
+        {SEQ.map((ci, i) => {
+          const lit = gPhase === 'show' && i < showIdx;
+          return (
+            <View key={i} style={{ width: scale(44), height: scale(44), borderRadius: scale(10),
+              backgroundColor: (lit || showSequence) ? BB_COLORS[ci] : '#ECEAE4',
+              borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center',
+              transform:[{ scale: activeShow === i ? 1.2 : 1 }],
+            }}>
+              {(lit || showSequence) && <Text style={{ fontSize: scale(18), fontWeight:'900', color:'#1A1A1A' }}>{BB_LABELS[ci]}</Text>}
+            </View>
+          );
+        })}
+      </View>
+      <View style={{ flexDirection:'row', flexWrap:'wrap', gap: scale(10), justifyContent:'center' }}>
+        {BB_COLORS.map((color, i) => (
+          <TouchableOpacity key={i} onPress={() => handleTap(i)} disabled={gPhase !== 'input'} activeOpacity={0.75}
+            style={{ width: scale(62), height: scale(62), borderRadius: scale(14),
+              backgroundColor: gPhase === 'input' ? color : '#ECEAE4',
+              borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center' }}>
+            <Text style={{ fontSize: scale(22), fontWeight:'900', color:'#1A1A1A' }}>{BB_LABELS[i]}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ── Mini-game: Power Slash ────────────────────────────────────────────────────
+function PowerSlashGame({ onScore }: { onScore: (s: number) => void }) {
+  const TARGET_X_PCT = useRef(10 + Math.random() * 80).current;
+  const AREA_W = scale(280); const AREA_H = scale(190);
+  const START  = { x: AREA_W / 2, y: AREA_H - scale(24) };
+  const END    = { x: AREA_W * (TARGET_X_PCT / 100), y: scale(24) };
+  const lineLen = Math.sqrt((END.x-START.x)**2 + (END.y-START.y)**2);
+  const lineDir = { x:(END.x-START.x)/lineLen, y:(END.y-START.y)/lineLen };
+  const angleDeg = Math.atan2(END.y-START.y, END.x-START.x) * 180 / Math.PI;
+  const [trail, setTrail] = useState<{ x:number; y:number; ok:boolean }[]>([]);
+  const [done,  setDone]  = useState(false);
+  const scored = useRef(false);
+
+  const distToLine = (px:number, py:number) => {
+    const dx = px-START.x, dy = py-START.y;
+    return Math.abs(dx*lineDir.y - dy*lineDir.x);
+  };
+  const coverage = (pts: { x:number; y:number }[]) => {
+    if (!pts.length) return 0;
+    const p = pts[pts.length-1];
+    const proj = (p.x-START.x)*lineDir.x + (p.y-START.y)*lineDir.y;
+    return Math.min(1, Math.max(0, proj/lineLen));
+  };
+
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => !scored.current,
+    onMoveShouldSetPanResponder:  () => !scored.current,
+    onPanResponderGrant: (e) => {
+      const { locationX:x, locationY:y } = e.nativeEvent;
+      setTrail([{ x, y, ok: distToLine(x,y) < scale(26) }]);
+    },
+    onPanResponderMove: (e) => {
+      const { locationX:x, locationY:y } = e.nativeEvent;
+      setTrail(prev => [...prev, { x, y, ok: distToLine(x,y) < scale(26) }]);
+    },
+    onPanResponderRelease: () => {
+      if (scored.current) return;
+      scored.current = true; setDone(true);
+      setTrail(prev => {
+        if (!prev.length) { setTimeout(() => onScore(0), 300); return prev; }
+        const cov = coverage(prev);
+        const acc = prev.filter(p => p.ok).length / prev.length;
+        setTimeout(() => onScore(Math.round(Math.min(100, cov*60 + acc*40))), 400);
+        return prev;
+      });
+    },
+  })).current;
+
+  return (
+    <View style={{ alignItems:'center', gap: scale(10), paddingHorizontal: scale(20) }}>
+      <Text style={b.mgTitle}>POWER SLASH</Text>
+      <Text style={b.mgInstr}>Drag from the circle to the star!</Text>
+      <View style={{ width: AREA_W, height: AREA_H, backgroundColor:'#F0EDFF', borderRadius: scale(12), borderWidth:2, borderColor:'#1A1A1A', overflow:'hidden' }} {...panResponder.panHandlers}>
+        {/* Guide line */}
+        <View style={{ position:'absolute', width: lineLen, height:2, backgroundColor:'#DDDAFF',
+          left: START.x, top: START.y, transformOrigin:'0 0',
+          transform:[{ rotate:`${angleDeg}deg` }] }} />
+        {/* Trail dots */}
+        {trail.map((pt, i) => (
+          <View key={i} style={{ position:'absolute', width: scale(8), height: scale(8), borderRadius: scale(4),
+            backgroundColor: pt.ok ? '#22A050' : '#FF3B55',
+            left: pt.x-scale(4), top: pt.y-scale(4) }} />
+        ))}
+        {/* Start */}
+        <View style={{ position:'absolute', width: scale(32), height: scale(32), borderRadius: scale(16), backgroundColor:'#6B35F0', borderWidth:2, borderColor:'#1A1A1A', left: START.x-scale(16), top: START.y-scale(16), justifyContent:'center', alignItems:'center' }}>
+          <Text style={{ color:'#fff', fontWeight:'900', fontSize: scale(14) }}>●</Text>
+        </View>
+        {/* End */}
+        <View style={{ position:'absolute', width: scale(28), height: scale(28), borderRadius: scale(14), backgroundColor:'#C5F215', borderWidth:2, borderColor:'#1A1A1A', left: END.x-scale(14), top: END.y-scale(14), justifyContent:'center', alignItems:'center' }}>
+          <Text style={{ fontSize: scale(14) }}>★</Text>
+        </View>
+      </View>
+      {done && <Text style={{ fontSize: scale(14), fontWeight:'700', color:'#6B35F0' }}>Slash scored!</Text>}
+    </View>
+  );
+}
+
+// ── Mini-game: Earthquake ─────────────────────────────────────────────────────
+function EarthquakeGame({ onScore }: { onScore: (s: number) => void }) {
+  const [timeLeft, setTimeLeft] = useState(3000);
+  const [started,  setStarted]  = useState(false);
+  const [done,     setDone]     = useState(false);
+  const [count,    setCount]    = useState(0);
+  const lastSide = useRef<'left'|'right'|null>(null);
+  const altCount = useRef(0);
+  const startRef = useRef(0);
+
+  useEffect(() => {
+    if (!started) return;
+    const iv = setInterval(() => {
+      const rem = Math.max(0, 3000 - (Date.now() - startRef.current));
+      setTimeLeft(rem);
+      if (rem <= 0) {
+        clearInterval(iv); setDone(true);
+        setTimeout(() => onScore(Math.min(100, Math.round((altCount.current / 16) * 100))), 400);
+      }
+    }, 50);
+    return () => clearInterval(iv);
+  }, [started]);
+
+  const handleSide = (side: 'left'|'right') => {
+    if (done) return;
+    if (!started) { setStarted(true); startRef.current = Date.now(); }
+    if (lastSide.current === side) return; // same side — no credit
+    lastSide.current = side;
+    altCount.current += 1;
+    setCount(altCount.current);
+  };
+
+  const timerPct = started ? (timeLeft / 3000) * 100 : 100;
+  return (
+    <View style={{ alignItems:'center', gap: scale(12) }}>
+      <Text style={b.mgTitle}>EARTHQUAKE</Text>
+      <Text style={b.mgInstr}>Alternate left and right — don't repeat the same side!</Text>
+      <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
+        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
+      </View>
+      <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(52), color:'#1A1A1A' }}>{count}</Text>
+      <View style={{ flexDirection:'row', gap: scale(12) }}>
+        {(['left','right'] as const).map(side => (
+          <TouchableOpacity key={side} onPress={() => handleSide(side)} disabled={done} activeOpacity={0.6}
+            style={{ width: scale(118), height: scale(76), borderRadius: scale(16),
+              backgroundColor: done ? '#ABABAB' : side === 'left' ? '#6B35F0' : '#FF3B55',
+              borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center' }}>
+            <Text style={{ color:'#fff', fontWeight:'900', fontSize: scale(30) }}>{side === 'left' ? '←' : '→'}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ── Mini-game: Defuse ─────────────────────────────────────────────────────────
+const DEFUSE_WIRES = [
+  { id:0, label:'RED',    bg:'#FF3B55', text:'#fff'     },
+  { id:1, label:'BLUE',   bg:'#3B82F6', text:'#fff'     },
+  { id:2, label:'YELLOW', bg:'#F59E0B', text:'#1A1A1A'  },
+];
+
+function DefuseGame({ onScore }: { onScore: (s: number) => void }) {
+  const wrongWire = useRef(Math.floor(Math.random() * 3)).current;
+  const [timeLeft, setTimeLeft] = useState(3000);
+  const [done, setDone] = useState(false);
+  const startRef = useRef(Date.now());
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const rem = Math.max(0, 3000 - (Date.now() - startRef.current));
+      setTimeLeft(rem);
+      if (rem <= 0) { clearInterval(iv); setDone(true); setTimeout(() => onScore(0), 300); }
+    }, 50);
+    return () => clearInterval(iv);
+  }, []);
+
+  const handleCut = (id: number) => {
+    if (done) return;
+    setDone(true);
+    if (id === wrongWire) {
+      setTimeout(() => onScore(0), 400);
+    } else {
+      const elapsed = Date.now() - startRef.current;
+      const speedBonus = Math.max(0, (3000 - elapsed) / 3000);
+      setTimeout(() => onScore(Math.round(70 + speedBonus * 30)), 400);
+    }
+  };
+
+  const timerPct = (timeLeft / 3000) * 100;
+  return (
+    <View style={{ alignItems:'center', gap: scale(14), paddingHorizontal: scale(20) }}>
+      <Text style={b.mgTitle}>DEFUSE</Text>
+      <Text style={[b.mgInstr, { color:'#FF3B55' }]}>Don't cut the {DEFUSE_WIRES[wrongWire].label} wire!</Text>
+      <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
+        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
+      </View>
+      <View style={{ gap: scale(10), width:'100%' }}>
+        {DEFUSE_WIRES.map(w => (
+          <TouchableOpacity key={w.id} onPress={() => handleCut(w.id)} disabled={done} activeOpacity={0.8}
+            style={{ height: scale(52), borderRadius: scale(14), backgroundColor: done ? '#ECEAE4' : w.bg,
+              borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center', opacity: done ? 0.5 : 1 }}>
+            <Text style={{ color: w.text, fontWeight:'900', fontSize: scale(16) }}>✂ CUT {w.label} WIRE</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 // ── 5. Interactive Battle Arena ───────────────────────────────────────────────
 
-function BattleArenaScreen({ monsterIdx, monsterImg, initialCores, onWin, onLose, monsterName }: {
-  monsterIdx: MonsterIdx; monsterImg: number; initialCores: number; onWin: () => void; onLose: () => void; monsterName: string;
+type BattlePhase = 'choosing' | 'zap-strike' | 'frenzy' | 'overcharge' | 'whack' | 'block-breaker' | 'power-slash' | 'earthquake' | 'defuse' | 'combo-chain' | 'combo-reveal' | 'boss-turn';
+
+type AttackCardId = 'zap-strike'|'frenzy'|'overcharge'|'whack'|'block-breaker'|'power-slash'|'earthquake'|'defuse'|'combo-chain'|'weakness'|'defend';
+interface AttackCard { id: AttackCardId; mechanic: BattlePhase|'weakness'|'defend'; label: string; baseDmg: number; shardCost: number; emoji: string; cardBg: string; }
+
+const ATTACK_POOL: Omit<AttackCard,'label'>[] = [
+  { id:'zap-strike',    mechanic:'zap-strike',    baseDmg:24, shardCost:0, emoji:'⚡', cardBg:'#EAF3FB' },
+  { id:'frenzy',        mechanic:'frenzy',        baseDmg:32, shardCost:0, emoji:'👊', cardBg:'#F0F7F0' },
+  { id:'overcharge',    mechanic:'overcharge',    baseDmg:42, shardCost:2, emoji:'🔋', cardBg:'#EAE4FF' },
+  { id:'whack',         mechanic:'whack',         baseDmg:28, shardCost:0, emoji:'💥', cardBg:'#FFF0EE' },
+  { id:'block-breaker', mechanic:'block-breaker', baseDmg:36, shardCost:0, emoji:'🧩', cardBg:'#FFF9E0' },
+  { id:'power-slash',   mechanic:'power-slash',   baseDmg:30, shardCost:0, emoji:'⚔', cardBg:'#F0EDFF' },
+  { id:'earthquake',    mechanic:'earthquake',    baseDmg:32, shardCost:0, emoji:'🌍', cardBg:'#FFF0E0' },
+  { id:'defuse',        mechanic:'defuse',        baseDmg:38, shardCost:1, emoji:'💣', cardBg:'#FFF0EE' },
+  { id:'combo-chain',   mechanic:'combo-chain',   baseDmg:34, shardCost:0, emoji:'🔗', cardBg:'#F0F7F0' },
+];
+
+function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, totalPower, completionPct, shards: initialShards, weaknessUnlocked, guaranteedWin, onBattleEnd, bossOverride }: {
+  monsterIdx: MonsterIdx; monsterImg: number; monsterName: string; monsterId: MonsterId;
+  totalPower: number; completionPct: number; shards: number; weaknessUnlocked: boolean;
+  guaranteedWin: boolean; onBattleEnd: (result: 'win' | 'loss', shardsUsed: number) => void;
+  bossOverride?: Boss;
 }) {
-  const boss    = getWeeklyBoss(monsterIdx);
-  const monster = MONSTERS[monsterIdx];
+  const boss    = bossOverride ?? getWeeklyBoss(monsterIdx);
   const BossSvg = BOSS_SVGS[monsterIdx % BOSS_SVGS.length];
 
-  const PLAYER_MAX = 100;
-  const ENEMY_MAX  = 120;
-  const ENEMY_ATTACKS = ['Dark Swirl', 'Shadow Claw', 'Chaos Bolt', 'Vortex Slam'];
+  const PLAYER_MAX = Math.round(50 + totalPower * 0.5);
+  const ENEMY_MAX  = boss.hp;
 
-  const [playerHp, setPlayerHp] = useState(PLAYER_MAX);
-  const [enemyHp,  setEnemyHp]  = useState(ENEMY_MAX);
-  const [cores,    setCores]    = useState(initialCores);
-  const [myTurn,   setMyTurn]   = useState(true);
-  const [live,     setLive]     = useState(true);
-  const [log,      setLog]      = useState(`${boss.name} has appeared! Choose an action.`);
+  const [playerHp,    setPlayerHp]    = useState(PLAYER_MAX);
+  const [enemyHp,     setEnemyHp]     = useState(ENEMY_MAX);
+  const [shards,      setShards]      = useState(initialShards);
+  const [shardsUsed,  setShardsUsed]  = useState(0);
+  const [phase,       setPhase]       = useState<BattlePhase>('choosing');
+  const [defending,   setDefending]   = useState(false);
+  const [weaknessUsed,setWeaknessUsed]= useState(false);
+  const [log,         setLog]         = useState(`${boss.name} appears! What will ${monsterName} do?`);
+  const [combo,       setCombo]       = useState<{ label:string; color:string; score:number } | null>(null);
+  const [live,        setLive]        = useState(true);
+  const [hand,        setHand]        = useState<AttackCard[]>([]);
+  const [activeCard,  setActiveCard]  = useState<AttackCard | null>(null);
 
   const playerHpAnim = useRef(new Animated.Value(1)).current;
   const enemyHpAnim  = useRef(new Animated.Value(1)).current;
   const bobPlayer    = useBob(0,   7, 3000);
   const bobEnemy     = useBob(800, 7, 3000);
+  const flashAnim    = useRef(new Animated.Value(0)).current;
 
-  function rnd(a: number, bv: number) { return Math.floor(Math.random() * (bv - a + 1)) + a; }
+  const playerHpRef = useRef(PLAYER_MAX);
+  const enemyHpRef  = useRef(ENEMY_MAX);
 
   const animHp = (anim: Animated.Value, ratio: number) =>
     Animated.timing(anim, { toValue: ratio, duration: 500, useNativeDriver: false }).start();
 
-  const playerHpRef = useRef(playerHp);
-  const enemyHpRef  = useRef(enemyHp);
-  useEffect(() => { playerHpRef.current = playerHp; }, [playerHp]);
-  useEffect(() => { enemyHpRef.current  = enemyHp;  }, [enemyHp]);
-
-  const act = (type: 'attack' | 'zap' | 'charge' | 'mega') => {
-    if (!myTurn || !live) return;
-    const cost = type === 'zap' ? 1 : type === 'charge' ? 2 : type === 'mega' ? 3 : 0;
-    if (cores < cost) return;
-
-    setCores(c => c - cost);
-    setMyTurn(false);
-
-    let newEH = enemyHpRef.current;
-    let newPH = playerHpRef.current;
-    let msg   = '';
-
-    if (type === 'attack') {
-      const d = rnd(13, 22); newEH = Math.max(0, newEH - d);
-      msg = `${monsterName} attacks! Dealt ${d} damage!`;
-    } else if (type === 'zap') {
-      const d = rnd(18, 28); newEH = Math.max(0, newEH - d);
-      msg = `${monsterName} used 🧿 Zap Shot! Dealt ${d} damage!`;
-    } else if (type === 'charge') {
-      const h = rnd(16, 24); newPH = Math.min(PLAYER_MAX, newPH + h);
-      msg = `${monsterName} used 🧿🧿 Overcharge! Restored +${h} HP!`;
-    } else {
-      const d = rnd(28, 44); newEH = Math.max(0, newEH - d);
-      msg = `${monsterName} used 🧿🧿🧿 Mega Beam! Dealt ${d} damage! Super effective!`;
+  // Deal a new random hand of 4 cards whenever entering the choosing phase
+  useEffect(() => {
+    if (phase !== 'choosing' || !live) return;
+    const eligible = ATTACK_POOL
+      .filter(a => a.shardCost === 0 || shards >= a.shardCost)
+      .map(a => ({ ...a, label: atkName(monsterId, a.id, a.id) } as AttackCard));
+    const shuffled = [...eligible].sort(() => Math.random() - 0.5);
+    let picks: AttackCard[] = shuffled.slice(0, 3);
+    if (weaknessUnlocked && !weaknessUsed) {
+      const wCard: AttackCard = { id:'weakness', mechanic:'weakness', label:'Weakness Attack', baseDmg:45, shardCost:0, emoji:'⭐', cardBg:'#FFF9E0' };
+      picks = [wCard, ...picks.slice(0, 2)];
     }
+    const dCard: AttackCard = { id:'defend', mechanic:'defend', label:'Defend', baseDmg:0, shardCost:0, emoji:'🛡', cardBg:'#FFF0F0' };
+    setHand([...picks, dCard]);
+  }, [phase, live]);
 
-    setEnemyHp(newEH); setPlayerHp(newPH); setLog(msg);
+  const flashScreen = (color: string) => {
+    flashAnim.setValue(1);
+    Animated.timing(flashAnim, { toValue: 0, duration: 600, useNativeDriver: false }).start();
+  };
+
+  // Stepped power multiplier from MON-19
+  const powerMult = completionPct >= 100 ? 1.0
+                  : completionPct >= 80  ? 0.75
+                  : completionPct >= 60  ? 0.50
+                  : completionPct >= 40  ? 0.30
+                  : 0.15;
+
+  // Evolution damage cap — per-level, all 8 monster evolutions
+  const EVO_CAP_FACTORS = [0.55, 0.62, 0.68, 0.74, 0.80, 0.88, 0.94, 1.0];
+  const evolutionCapFactor = EVO_CAP_FACTORS[monsterIdx] ?? 1.0;
+
+  const playerDamage = (baseDmg: number, score: number): number => {
+    const raw = baseDmg * (score / 100) * powerMult;
+    const crit = Math.random() < 0.08;
+    const withCrit = crit ? raw * 1.8 : raw;
+    return Math.round(withCrit * evolutionCapFactor);
+  };
+
+  // Aggression multiplier: Bosses 1–3 only. Ends fights fast at very low completion
+  // rather than letting them drag for 20 turns dealing no damage.
+  const bossArrayIdx = BOSSES.indexOf(boss);
+  const isEarlyBoss  = bossArrayIdx >= 0 && bossArrayIdx <= 2;
+  const aggressionMult = isEarlyBoss
+    ? completionPct === 0  ? 7.0
+    : completionPct < 20   ? 5.0
+    : completionPct < 40   ? 3.0
+    : completionPct < 60   ? 2.0
+    : 1.0
+    : 1.0;
+
+  const bossDamage = (isDefending: boolean): number => {
+    const roll    = boss.attackMin + Math.floor(Math.random() * (boss.attackMax - boss.attackMin + 1));
+    const reduced = roll * (1.0 - powerMult * 0.5) * aggressionMult;
+    return Math.round(isDefending ? reduced * 0.5 : reduced);
+  };
+
+  const applyPlayerAttack = (dmg: number, attackName: string) => {
+    const newEH = Math.max(0, enemyHpRef.current - dmg);
+    enemyHpRef.current = newEH;
+    setEnemyHp(newEH);
     animHp(enemyHpAnim, newEH / ENEMY_MAX);
-    animHp(playerHpAnim, newPH / PLAYER_MAX);
+    setLog(`${monsterName} used ${attackName}! Dealt ${dmg} damage!`);
+    if (newEH <= 0) {
+      setLive(false);
+      setTimeout(() => onBattleEnd('win', shardsUsed), 900);
+      return true;
+    }
+    return false;
+  };
 
-    if (newEH <= 0) { setLive(false); setTimeout(onWin, 900); return; }
-
+  const doBossTurn = (wasDefending: boolean) => {
+    setPhase('boss-turn');
+    const ENEMY_ATTACKS = ['Dark Swirl', 'Shadow Claw', 'Chaos Bolt', 'Vortex Slam'];
     setTimeout(() => {
-      const d   = rnd(10, 22);
-      const fPH = Math.max(0, playerHpRef.current - d);
-      setPlayerHp(fPH);
-      animHp(playerHpAnim, fPH / PLAYER_MAX);
-      const atk = ENEMY_ATTACKS[Math.floor(Math.random() * ENEMY_ATTACKS.length)];
-      setLog(`${boss.name} used ${atk}! Dealt ${d} damage!`);
-      if (fPH <= 0) { setLive(false); setTimeout(onLose, 900); return; }
-      setTimeout(() => { setMyTurn(true); setLog(`What will ${monsterName} do?`); }, 1200);
+      const d    = bossDamage(wasDefending);
+      const atk  = ENEMY_ATTACKS[Math.floor(Math.random() * ENEMY_ATTACKS.length)];
+      const shield = wasDefending ? ' (blocked half)' : '';
+      // Guaranteed win: boss can't kill you
+      const newPH = guaranteedWin
+        ? Math.max(1, playerHpRef.current - d)
+        : Math.max(0, playerHpRef.current - d);
+      playerHpRef.current = newPH;
+      setPlayerHp(newPH);
+      animHp(playerHpAnim, newPH / PLAYER_MAX);
+      setLog(`${boss.name} used ${atk}!${shield} Dealt ${d} dmg!`);
+      if (newPH <= 0) {
+        setLive(false);
+        setTimeout(() => onBattleEnd('loss', shardsUsed), 900);
+        return;
+      }
+      setTimeout(() => {
+        setDefending(false);
+        setPhase('choosing');
+        setLog(`What will ${monsterName} do?`);
+      }, 1200);
     }, 1300);
   };
 
-  const off = !myTurn || !live;
+  const handleScore = (attackName: string, baseDmg: number, score: number, shardCost = 0) => {
+    const dmg = playerDamage(baseDmg, score);
+    const info = comboFromScore(score);
+    setCombo({ ...info, score });
+    flashScreen(info.color);
+    if (shardCost > 0) {
+      setShards(s => s - shardCost);
+      setShardsUsed(u => u + shardCost);
+    }
+    setPhase('combo-reveal');
+    setTimeout(() => {
+      setCombo(null);
+      const won = applyPlayerAttack(dmg, attackName);
+      if (!won) doBossTurn(defending);
+    }, 1400);
+  };
+
+  const handleDefend = () => {
+    if (phase !== 'choosing' || !live) return;
+    setDefending(true);
+    setLog(`${monsterName} braces for impact!`);
+    doBossTurn(true);
+  };
+
+  const handleWeakness = () => {
+    if (phase !== 'choosing' || !live || weaknessUsed) return;
+    setWeaknessUsed(true);
+    // Guaranteed ~95 score, base 45 dmg, minimum 20 dmg always applied
+    const rawDmg = playerDamage(45, 95);
+    const dmg = Math.max(20, rawDmg);
+    const info = comboFromScore(95);
+    setCombo({ ...info, score: 95 });
+    flashScreen(info.color);
+    setPhase('combo-reveal');
+    setTimeout(() => {
+      setCombo(null);
+      const won = applyPlayerAttack(dmg, 'Weakness Attack ⭐');
+      if (!won) doBossTurn(defending);
+    }, 1400);
+  };
+
+  const handleCardPlay = (card: AttackCard) => {
+    if (phase !== 'choosing' || !live) return;
+    if (card.id === 'defend')   { handleDefend();   return; }
+    if (card.id === 'weakness') { handleWeakness(); return; }
+    setActiveCard(card);
+    setPhase(card.mechanic as BattlePhase);
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
       <Header title="BATTLE" showCoins={false} />
 
-      {/* HP tracker row */}
+      {/* Flash overlay */}
+      {combo && (
+        <Animated.View pointerEvents="none" style={{
+          ...StyleSheet.absoluteFillObject, zIndex: 99,
+          backgroundColor: combo.color, opacity: flashAnim.interpolate({ inputRange:[0,1], outputRange:[0, 0.35] }),
+        }} />
+      )}
+
+      {/* HP bars */}
       <View style={b.hpRow}>
-        {/* Player */}
         <View style={b.hpCard}>
           <View style={b.hpAvatarWell}>
             <Image source={monsterImg} style={{ width: 34, height: 34 }} resizeMode="contain" />
           </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <View style={{ flex:1 }}>
+            <View style={{ flexDirection:'row', justifyContent:'space-between' }}>
               <Text style={b.hpName}>{monsterName}</Text>
               <Text style={b.hpVal}>{playerHp}/{PLAYER_MAX}</Text>
             </View>
             <View style={b.hpTrack}>
-              <Animated.View style={[b.hpFill, { backgroundColor: '#6B35F0', width: playerHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
+              <Animated.View style={[b.hpFill, { backgroundColor:'#6B35F0', width: playerHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
             </View>
           </View>
         </View>
         <Text style={b.hpVs}>VS</Text>
-        {/* Enemy */}
         <View style={b.hpCard}>
-          <View style={[b.hpAvatarWell, { backgroundColor: '#FFF0EE' }]}>
+          <View style={[b.hpAvatarWell, { backgroundColor:'#FFF0EE' }]}>
             <BossSvg size={30} />
           </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <View style={{ flex:1 }}>
+            <View style={{ flexDirection:'row', justifyContent:'space-between' }}>
               <Text style={b.hpName}>{boss.name}</Text>
-              <Text style={[b.hpVal, enemyHp < ENEMY_MAX * 0.25 && { color: '#CC3322' }]}>{enemyHp}/{ENEMY_MAX}</Text>
+              <Text style={[b.hpVal, enemyHp < ENEMY_MAX * 0.25 && { color:'#CC3322' }]}>{enemyHp}/{ENEMY_MAX}</Text>
             </View>
             <View style={b.hpTrack}>
-              <Animated.View style={[b.hpFill, { backgroundColor: '#FF3B55', width: enemyHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
+              <Animated.View style={[b.hpFill, { backgroundColor:'#FF3B55', width: enemyHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
             </View>
           </View>
         </View>
       </View>
 
-      {/* Fighter art stage */}
+      {/* Stage */}
       <View style={b.stage}>
         <View style={b.stageFighter}>
-          <Animated.View style={[b.stageArtP, { transform: [{ translateY: bobPlayer }] }]}>
-            <Image source={monsterImg} style={{ width: 90, height: 90 }} resizeMode="contain" />
+          <Animated.View style={[b.stageArtP, { transform:[{ translateY: bobPlayer }] }]}>
+            <Image source={monsterImg} style={{ width:90, height:90 }} resizeMode="contain" />
           </Animated.View>
           <Text style={b.stageTag}>{monsterName}</Text>
         </View>
         <View style={b.stageFighter}>
-          <Animated.View style={[b.stageArtE, { transform: [{ translateY: bobEnemy }] }]}>
+          <Animated.View style={[b.stageArtE, { transform:[{ translateY: bobEnemy }] }]}>
             <BossSvg size={90} />
           </Animated.View>
-          <Text style={[b.stageTag, enemyHp < ENEMY_MAX * 0.25 && { color: '#CC3322', fontWeight: '700' }]}>
+          <Text style={[b.stageTag, enemyHp < ENEMY_MAX * 0.25 && { color:'#CC3322', fontWeight:'700' }]}>
             {enemyHp < ENEMY_MAX * 0.25 ? '⚠ WEAKENED' : boss.name}
           </Text>
         </View>
       </View>
 
       {/* Battle log */}
-      <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+      <View style={{ paddingHorizontal:14, paddingBottom:8 }}>
         <View style={s.arenaLog}>
           <Text style={s.arenaLogText}>{log}</Text>
         </View>
       </View>
 
-      {/* Action panel */}
-      <View style={b.actionArea}>
-        {/* Attack */}
-        <TouchableOpacity style={[s.battleBtn, off && { opacity: 0.4 }]} onPress={() => act('attack')} activeOpacity={0.85} disabled={off}>
-          <Text style={s.battleBtnText}>⚔  Attack</Text>
-        </TouchableOpacity>
-        {/* Specials */}
-        <View style={b.spRow}>
-          <TouchableOpacity style={[b.spCard, b.spCardZap,    (off || cores < 1) && b.spOff]} onPress={() => act('zap')}    activeOpacity={0.85} disabled={off || cores < 1}>
-            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(28), height: scale(28) }} resizeMode="contain" />
-            <Text style={b.spLabel}>Zap Shot</Text>
-            <Text style={b.spCost}>🧿 1</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[b.spCard, b.spCardCharge, (off || cores < 2) && b.spOff]} onPress={() => act('charge')} activeOpacity={0.85} disabled={off || cores < 2}>
-            <Text style={b.spEmoji}>💚</Text>
-            <Text style={b.spLabel}>Overcharge</Text>
-            <Text style={b.spCost}>🧿 2</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[b.spCard, b.spCardMega,   (off || cores < 3) && b.spOff]} onPress={() => act('mega')}   activeOpacity={0.85} disabled={off || cores < 3}>
-            <Text style={b.spEmoji}>✨</Text>
-            <Text style={b.spLabel}>Mega Beam</Text>
-            <Text style={b.spCost}>🧿 3</Text>
-          </TouchableOpacity>
-        </View>
-        {/* Core pip bar */}
-        <View style={b.coreRow}>
-          <Text style={b.coreLabel}>CORES</Text>
-          <View style={b.corePips}>
-            {Array.from({ length: 10 }).map((_, i) => (
-              <View key={i} style={[b.corePip, i < cores ? b.corePipOn : b.corePipOff]} />
-            ))}
+      {/* ── Action area ── */}
+      <View style={{ flex:1 }}>
+
+        {/* Combo reveal */}
+        {phase === 'combo-reveal' && combo && (
+          <View style={{ flex:1, alignItems:'center', justifyContent:'center', gap: scale(8) }}>
+            <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(42), color: combo.color, textAlign:'center' }}>{combo.label}</Text>
+            <Text style={{ fontSize: scale(22), fontWeight:'900', color:'#1A1A1A' }}>{combo.score} pts</Text>
           </View>
-          <Text style={b.coreCount}>{cores}</Text>
-        </View>
+        )}
+
+        {/* Boss turn */}
+        {phase === 'boss-turn' && (
+          <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}>
+            <Text style={{ fontSize: scale(32), fontWeight:'900', color:'#CC3322' }}>⚔ Boss Attack!</Text>
+          </View>
+        )}
+
+        {/* ── Mini-games (all use activeCard for name + dmg) ── */}
+        {phase === 'zap-strike'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ZapStrikeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} zapZone={boss.zapZone} /></View>}
+        {phase === 'frenzy'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FrenzyGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} onFlash={flashScreen} /></View>}
+        {phase === 'overcharge'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><OverchargeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
+        {phase === 'whack'         && activeCard && <View style={{ flex:1, justifyContent:'center' }}><WhackGame        onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
+        {phase === 'block-breaker' && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={false} /></View>}
+        {phase === 'power-slash'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><PowerSlashGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
+        {phase === 'earthquake'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><EarthquakeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
+        {phase === 'defuse'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><DefuseGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
+        {phase === 'combo-chain'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={true} /></View>}
+
+        {/* ── Card hand (choosing phase) ── */}
+        {phase === 'choosing' && (
+          <View style={b.actionArea}>
+            <View style={b.handGrid}>
+              {hand.map((card) => (
+                <TouchableOpacity
+                  key={card.id}
+                  style={[b.handCard, { backgroundColor: card.cardBg }]}
+                  onPress={() => handleCardPlay(card)}
+                  activeOpacity={0.82}
+                >
+                  <Text style={b.handEmoji}>{card.emoji}</Text>
+                  <Text style={b.handLabel} numberOfLines={2}>{card.label}</Text>
+                  {card.shardCost > 0 && (
+                    <Text style={b.handCost}>💎 {card.shardCost}</Text>
+                  )}
+                  {card.id === 'defend' && (
+                    <Text style={b.handCost}>Skip turn</Text>
+                  )}
+                  {card.id === 'weakness' && (
+                    <Text style={b.handCost}>One use</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Shard pip bar */}
+            <View style={b.coreRow}>
+              <Text style={b.coreLabel}>SHARDS</Text>
+              <View style={b.corePips}>
+                {Array.from({ length: Math.max(6, shards) }).map((_, i) => (
+                  <View key={i} style={[b.corePip, i < shards ? b.corePipOn : b.corePipOff]} />
+                ))}
+              </View>
+              <Text style={b.coreCount}>💎{shards}</Text>
+            </View>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -2136,7 +3093,7 @@ function Toast({ message }: { message: string }) {
   );
 }
 
-function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName }: {
+function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx }: {
   coins: number;
   done: Partial<Record<ChoreId, boolean>>;
   battleResult: 'win' | 'loss' | null;
@@ -2152,15 +3109,16 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
   weeklyXp: number;
   onSwitchToParent: () => void;
   managedChores: ManagedChore[];
-  kidProfiles: { name: string; avatarColor: string }[];
+  kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   onSwitchToKid: (name: string) => void;
   currentKidName: string;
+  initialAvatarIdx: number;
 }) {
   const completedChoresCount = managedChores.filter(c => c.status === 'approved').length;
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [selectedGoal, setSelectedGoal]   = useState<SavedGoal | null>(null);
   const [editingGoal, setEditingGoal]     = useState<SavedGoal | null>(null);
-  const [kidAvatarIdx, setKidAvatarIdx]   = useState(0);
+  const [kidAvatarIdx, setKidAvatarIdx]   = useState(initialAvatarIdx);
   const [kidAgeRange,  setKidAgeRange]    = useState('Ages 7–9');
   const [toastMsg, setToastMsg]           = useState<string | null>(null);
   const toastTimer                        = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2195,12 +3153,11 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
             <ViewSwitcher
               selected={currentKidName || 'Kid view'}
               options={[
-                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF' })),
+                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
                 { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
-            <AgeRangeSheet selected={kidAgeRange} onSelect={setKidAgeRange} />
           </View>
         </View>
         <View style={s.homeBalancePill}>
@@ -2810,10 +3767,11 @@ function ParentPayoutScreen({ kidName, coins, baseCoins, battleBonus, battleWon,
   );
 }
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApprove, onReject, baseRate, onPayKid, kidName, coins }: {
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onReject, baseRate, onPayKid, kidName, coins, kidProfiles }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: () => void;
   onAddKid: () => void;
+  onEditKid: (k: { name: string; avatarColor: string; avatarIdx: number }) => void;
   managedChores: ManagedChore[];
   onApprove: (id: string) => void;
   onReject: (id: string, note: string) => void;
@@ -2821,20 +3779,16 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
   onPayKid: () => void;
   kidName: string;
   coins: number;
+  kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
 }) {
-  const kids = [
-    { name: 'Sam',    level: 12, emoji: '🧒', bg: '#C5E8FF' },
-    { name: 'Lily',   level: 8,  emoji: '👧', bg: '#FFEFC5' },
-    { name: 'Max',    level: 5,  emoji: '👦', bg: '#E8C5FF' },
-  ];
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectNote, setRejectNote]   = useState('');
   const isSunday     = daysUntilSunday() === 0;
   const showPayCell  = coins > 0 || isSunday;
-  const tasksCompleted = 24;
-  const tasksTotal     = 32;
-  const xpEarned       = 1250;
-  const progress       = tasksCompleted / tasksTotal;
+  const tasksTotal     = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0);
+  const tasksCompleted = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
+  const xpEarned       = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0) * XP_BY_DIFFICULTY[c.difficulty], 0);
+  const progress       = tasksTotal > 0 ? tasksCompleted / tasksTotal : 0;
 
   return (
     <CreamBg>
@@ -2863,13 +3817,12 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
 
         {/* Kids row */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 20, paddingVertical: 12 }}>
-          {kids.map(kid => (
-            <TouchableOpacity key={kid.name} style={{ alignItems: 'center', gap: 6 }} activeOpacity={0.7}>
-              <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: kid.bg, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW }}>
-                <Text style={{ fontSize: scale(34) }}>{kid.emoji}</Text>
+          {kidProfiles.map((k, i) => (
+            <TouchableOpacity key={i} style={{ alignItems: 'center', gap: 6 }} activeOpacity={0.7} onPress={() => onEditKid(k)}>
+              <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: k.avatarColor, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW }}>
+                <Image source={getAvatarImage(k.avatarIdx)} style={{ width: 56, height: 56, borderRadius: 28 }} resizeMode="cover" />
               </View>
-              <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' }}>{kid.name}</Text>
-              <Text style={{ fontSize: scale(12), fontWeight: '600', color: '#6B35F0' }}>Level {kid.level}</Text>
+              <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' }}>{k.name}</Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} activeOpacity={0.7} onPress={onAddKid}>
@@ -2950,6 +3903,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, managedChores, onApp
                           <TextInput
                             style={[p.formInput, { minHeight: 44 }]}
                             placeholder="Optional note for kid..."
+                            autoCapitalize="sentences"
                             value={rejectNote}
                             onChangeText={setRejectNote}
                             multiline
@@ -3131,6 +4085,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
       icon: selectedIcon.icon,
       bg: selectedIcon.bg,
       status: existing?.status ?? 'active' as const,
+      weeklyCompletions: existing?.weeklyCompletions ?? 0,
     };
     onSave(chore);
   };
@@ -3172,6 +4127,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
             style={p.formInput}
             value={name}
             onChangeText={setName}
+            autoCapitalize="words"
             placeholder="e.g. Make your bed"
             placeholderTextColor={C.hint}
           />
@@ -3183,6 +4139,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
             style={p.formInput}
             value={description}
             onChangeText={setDescription}
+            autoCapitalize="sentences"
             placeholder="Add a short description..."
             placeholderTextColor={C.hint}
             multiline
@@ -3455,21 +4412,23 @@ function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   );
 }
 
-function ParentSettingsScreen({ onNav, baseRate, onAddKid, kids, kidApprovalSettings, setKidApprovalSettings }: {
+function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles }: {
   onNav: (s: ParentScreen) => void;
   baseRate: string;
   onAddKid?: () => void;
+  onEditKid?: (k: { name: string; avatarColor: string; avatarIdx: number }) => void;
   kids: string[];
   kidApprovalSettings: Record<string, boolean>;
   setKidApprovalSettings: (v: Record<string, boolean>) => void;
+  kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
 }) {
   const [sub, setSub] = useState<SettingsSubScreen>('main');
   const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
-  if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} />;
+  if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} kidProfiles={kidProfiles} />;
   if (sub === 'battle')   return <SettingsBattleScreen   onBack={() => setSub('main')} baseRate={baseRate} />;
   if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} />;
-  if (sub === 'approval') return <SettingsApprovalScreen onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} />;
+  if (sub === 'approval') return <SettingsApprovalScreen onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={kidProfiles} />;
 
   return (
     <CreamBg>
@@ -3483,7 +4442,7 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, kids, kidApprovalSett
         {/* Family */}
         <Text style={ps.sectionLabel}>FAMILY</Text>
         <View style={ps.group}>
-          <SettingsRow iconBg="#6B35F0" iconEmoji="👨‍👩‍👧" title="Kids" subtitle="Sam, Jordan" badge={2} onPress={() => setSub('kids')} />
+          <SettingsRow iconBg="#6B35F0" iconEmoji="👨‍👩‍👧" title="Kids" subtitle={kidProfiles.map(k => k.name).join(', ') || 'No kids yet'} badge={kidProfiles.length || undefined} onPress={() => setSub('kids')} />
         </View>
 
         {/* Chores */}
@@ -3516,11 +4475,110 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, kids, kidApprovalSett
   );
 }
 
-function SettingsKidsScreen({ onBack, onAddKid }: { onBack: () => void; onAddKid?: () => void }) {
-  const kids = [
-    { name: 'Sam',    meta: 'Age 8 · Monster Lv. 4',  emoji: '🦎', bg: '#E8F5E9' },
-    { name: 'Jordan', meta: 'Age 11 · Monster Lv. 7', emoji: '🐉', bg: '#E3F2FD' },
-  ];
+// ─── Add / Edit Kid Modal ─────────────────────────────────────────────────────
+
+const KID_AVATAR_COLORS = ['#E0D4FF', '#FFD6E4', '#C8EEFF', '#D6FFE8', '#FFF3C8', '#FFE0CC'];
+const KID_AGE_RANGES: import('./src/screens/ParentOnboarding').OnboardingChild['ageRange'][] = ['5-6', '7-9', '10-12', '13+'];
+
+function AddEditKidModal({
+  visible,
+  initial,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  initial: import('./src/screens/ParentOnboarding').OnboardingChild | null;
+  onClose: () => void;
+  onSave: (data: { name: string; avatarIdx: number; avatarColor: string; ageRange: import('./src/screens/ParentOnboarding').OnboardingChild['ageRange'] }) => void;
+}) {
+  const isEdit = initial != null;
+  const [name, setName]           = useState(initial?.name ?? '');
+  const [avatarIdx, setAvatarIdx] = useState(initial?.avatarIdx ?? 0);
+  const [ageRange, setAgeRange]   = useState<import('./src/screens/ParentOnboarding').OnboardingChild['ageRange']>(initial?.ageRange ?? '7-9');
+  const slideAnim = useRef(new Animated.Value(600)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setName(initial?.name ?? '');
+      setAvatarIdx(initial?.avatarIdx ?? 0);
+      setAgeRange(initial?.ageRange ?? '7-9');
+      slideAnim.setValue(600);
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 80, friction: 14 }).start();
+    }
+  }, [visible, initial]);
+
+  const handleSave = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const color = initial?.avatarColor ?? KID_AVATAR_COLORS[avatarIdx % KID_AVATAR_COLORS.length];
+    onSave({ name: trimmed, avatarIdx, avatarColor: color, ageRange });
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      {/* Overlay appears instantly; only the sheet slides up */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }} onPress={onClose}>
+          <Pressable onPress={e => e.stopPropagation()}>
+            <Animated.View style={{ backgroundColor: '#FAF9F5', borderTopLeftRadius: 28, borderTopRightRadius: 28, transform: [{ translateY: slideAnim }] }}>
+              <ScrollView
+                bounces={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 44 }}
+              >
+                <View style={{ width: 40, height: 4, backgroundColor: '#D0CEC8', borderRadius: 2, alignSelf: 'center', marginBottom: 20 }} />
+                <Text style={{ fontSize: scale(20), fontWeight: '800', color: '#1A1A1A', marginBottom: 24, textAlign: 'center' }}>{isEdit ? 'Edit kid' : 'Add a kid'}</Text>
+
+                {/* Avatar picker */}
+                <Text style={{ fontSize: scale(11), fontWeight: '700', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>CHOOSE AVATAR</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 4, marginBottom: 20 }}>
+                  {[0,1,2,3,4,5,6,7].map(i => (
+                    <TouchableOpacity key={i} onPress={() => setAvatarIdx(i)} activeOpacity={0.8}
+                      style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: KID_AVATAR_COLORS[i % KID_AVATAR_COLORS.length], alignItems: 'center', justifyContent: 'center', borderWidth: avatarIdx === i ? 3 : 2, borderColor: avatarIdx === i ? '#6B35F0' : '#E0DDD6' }}>
+                      <Image source={getAvatarImage(i)} style={{ width: 50, height: 50, borderRadius: 25 }} resizeMode="cover" />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {/* Name */}
+                <Text style={{ fontSize: scale(11), fontWeight: '700', color: '#ABABAB', marginBottom: 8, letterSpacing: 0.8 }}>NAME</Text>
+                <TextInput
+                  value={name}
+                  onChangeText={t => setName(t.slice(0, 12))}
+                  autoCapitalize="words"
+                  placeholder="Child's name"
+                  placeholderTextColor="#C0BDB7"
+                  style={{ backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontWeight: '600', color: '#1A1A1A', marginBottom: 20 }}
+                />
+
+                {/* Age range */}
+                <Text style={{ fontSize: scale(11), fontWeight: '700', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>AGE RANGE</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 28 }}>
+                  {KID_AGE_RANGES.map(r => (
+                    <TouchableOpacity key={r} onPress={() => setAgeRange(r)} activeOpacity={0.8}
+                      style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: ageRange === r ? '#6B35F0' : '#FFFFFF', borderWidth: 2, borderColor: ageRange === r ? '#6B35F0' : '#E0DDD6' }}>
+                      <Text style={{ fontSize: scale(14), fontWeight: '700', color: ageRange === r ? '#FFFFFF' : '#1A1A1A' }}>{r}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity onPress={handleSave} activeOpacity={0.85}
+                  style={{ backgroundColor: name.trim() ? '#6B35F0' : '#D0CEC8', borderRadius: 100, paddingVertical: 16, alignItems: 'center', borderWidth: 2, borderColor: name.trim() ? '#1A1A1A' : 'transparent' }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: scale(16), fontWeight: '800' }}>{isEdit ? 'Save changes' : 'Add kid'}</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </Animated.View>
+          </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBack: () => void; onAddKid?: () => void; onEditKid?: (k: { name: string; avatarColor: string; avatarIdx: number }) => void; kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[] }) {
   return (
     <CreamBg>
       <View style={p.screenHeader}>
@@ -3533,16 +4591,15 @@ function SettingsKidsScreen({ onBack, onAddKid }: { onBack: () => void; onAddKid
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
         <Text style={ps.sectionLabel}>PROFILES</Text>
         <View style={ps.group}>
-          {kids.map((k, i) => (
-            <View key={k.name}>
+          {kidProfiles.map((k, i) => (
+            <View key={i}>
               {i > 0 && <View style={ps.divider} />}
-              <TouchableOpacity style={ps.row} activeOpacity={0.7}>
-                <View style={[ps.kidAvatar, { backgroundColor: k.bg }]}>
-                  <Text style={{ fontSize: scale(20) }}>{k.emoji}</Text>
+              <TouchableOpacity style={ps.row} activeOpacity={0.7} onPress={() => onEditKid?.(k)}>
+                <View style={[ps.kidAvatar, { backgroundColor: k.avatarColor }]}>
+                  <Image source={getAvatarImage(k.avatarIdx)} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={ps.rowTitle}>{k.name}</Text>
-                  <Text style={ps.rowSub}>{k.meta}</Text>
                 </View>
                 <Text style={ps.chevron}>›</Text>
               </TouchableOpacity>
@@ -3696,11 +4753,12 @@ const KID_AVATARS: Record<string, { emoji: string; bg: string }> = {
   Max:   { emoji: '🐉', bg: '#E3F2FD' },
 };
 
-function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidApprovalSettings }: {
+function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles }: {
   onBack: () => void;
   kids: string[];
   kidApprovalSettings: Record<string, boolean>;
   setKidApprovalSettings: (v: Record<string, boolean>) => void;
+  kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
 }) {
   const allOn  = kids.every(k => kidApprovalSettings[k] !== false);
   const allOff = kids.every(k => kidApprovalSettings[k] === false);
@@ -3758,14 +4816,14 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
         <View style={p.sectionCard}>
           {kids.map((kid, idx) => {
             const needsApproval = kidApprovalSettings[kid] ?? true;
-            const av = KID_AVATARS[kid] ?? { emoji: '🧒', bg: '#F0F0F0' };
+            const profile = kidProfiles.find(k => k.name === kid);
             return (
               <View key={kid}>
                 {idx > 0 && <View style={{ height: 1, backgroundColor: C.border }} />}
                 <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 }}>
                   {/* Avatar */}
-                  <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: av.bg, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' }}>
-                    <Text style={{ fontSize: scale(20) }}>{av.emoji}</Text>
+                  <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: profile?.avatarColor ?? '#F0F0F0', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' }}>
+                    <Image source={getAvatarImage(profile?.avatarIdx ?? 0)} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
                   </View>
                   {/* Name + status */}
                   <View style={{ flex: 1 }}>
@@ -4051,6 +5109,7 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
             <TextInput
               style={s.gfInput}
               value={goalData.name}
+              autoCapitalize="words"
               onChangeText={v => setGoalData(prev => ({ ...prev, name: v.slice(0, 30) }))}
               placeholder="e.g. New bike"
               placeholderTextColor="#C0BEB8"
@@ -4429,7 +5488,7 @@ function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCr
 
         {/* Email */}
         <TextInput
-          style={{ width: '100%', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18, fontSize: scale(16), color: '#1A1A1A', marginBottom: 12 }}
+          style={{ width: '100%', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18, fontSize: scale(16), color: '#1A1A1A', marginBottom: 12 }}
           value={email}
           onChangeText={setEmail}
           placeholder="Email"
@@ -4440,7 +5499,7 @@ function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCr
         />
 
         {/* Password */}
-        <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18, marginBottom: 20 }}>
+        <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18, marginBottom: 20 }}>
           <TextInput
             style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
             value={password}
@@ -4614,6 +5673,8 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
     width: '100%' as const,
     backgroundColor: '#FFFFFF',
     borderRadius: 100,
+    borderWidth: 2,
+    borderColor: '#1A1A1A',
     paddingHorizontal: 24,
     paddingVertical: 18,
     fontSize: scale(16),
@@ -4689,7 +5750,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
             />
 
             {/* Password */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18 }}>
               <TextInput
                 style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
                 value={password}
@@ -4705,7 +5766,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
             </View>
 
             {/* Confirm password */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 18 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18 }}>
               <TextInput
                 style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
                 value={confirmPassword}
@@ -4834,7 +5895,7 @@ const splashStyles = StyleSheet.create({
   },
 });
 
-export default function App() {
+function AppInner() {
   const [appMode, setAppMode]       = useState<AppMode>('splash');
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [kidWelcomeName, setKidWelcomeName] = useState('there');
@@ -4855,7 +5916,7 @@ export default function App() {
   const [viewMode, setViewMode]               = useState<ViewMode>('kid');
   const [parentScreen, setParentScreen]       = useState<ParentScreen>('parentHome');
   const [prevParentScreen, setPrevParentScreen] = useState<ParentScreen>('parentHome');
-  const [parentTab, setParentTab]             = useState<ParentTab>('chores');
+  const [parentTab, setParentTab]             = useState<ParentTab>('home');
   const [managedChores, setManagedChores]     = useState<ManagedChore[]>(DEFAULT_MANAGED_CHORES);
   const [editingChore, setEditingChore]       = useState<ManagedChore | null>(null);
   const [baseRate, setBaseRate]               = useState('0.50');
@@ -4866,11 +5927,60 @@ export default function App() {
   const [weeklyCapEnabled, setWeeklyCap]      = useState(false);
   // Per-kid approval settings — true = needs parent sign-off, false = auto-approve
   const [kidApprovalSettings, setKidApprovalSettings] = useState<Record<string, boolean>>({});
-  const requireApproval = kidApprovalSettings[currentKidName] ?? true;
+  const requireApproval = kidApprovalSettings[currentKidName] ?? false;
   const [showKidProfile, setShowKidProfile]   = useState(false);
+  const [kidModalVisible, setKidModalVisible] = useState(false);
+  const [kidModalInitial, setKidModalInitial] = useState<import('./src/screens/ParentOnboarding').OnboardingChild | null>(null);
+  const [parentToast, setParentToast]         = useState<string | null>(null);
+  const parentToastTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showParentToast = (msg: string) => {
+    setParentToast(null);
+    setTimeout(() => {
+      setParentToast(msg);
+      if (parentToastTimer.current) clearTimeout(parentToastTimer.current);
+      parentToastTimer.current = setTimeout(() => setParentToast(null), 2100);
+    }, 30);
+  };
+  const openKidModal = (initial: import('./src/screens/ParentOnboarding').OnboardingChild | null) => {
+    setKidModalInitial(initial);
+    setKidModalVisible(true);
+  };
+  const handleKidModalSave = (data: { name: string; avatarIdx: number; avatarColor: string; ageRange: import('./src/screens/ParentOnboarding').OnboardingChild['ageRange'] }) => {
+    setKidModalVisible(false);
+    if (kidModalInitial) {
+      // Edit existing
+      setSetupChildren(prev => prev.map(c => c.id === kidModalInitial.id ? { ...c, ...data } : c));
+      setKids(prev => prev.map(n => n === kidModalInitial.name ? data.name : n));
+      if (kidModalInitial.name !== data.name) {
+        setCurrentKidName(cn => cn === kidModalInitial.name ? data.name : cn);
+        setKidApprovalSettings(prev => {
+          const next = { ...prev };
+          if (kidModalInitial.name in next) { next[data.name] = next[kidModalInitial.name]; delete next[kidModalInitial.name]; }
+          return next;
+        });
+      }
+      showParentToast('Profile updated ✅');
+    } else {
+      // Add new
+      const newChild: import('./src/screens/ParentOnboarding').OnboardingChild = {
+        id: Date.now().toString(),
+        name: data.name,
+        avatarIdx: data.avatarIdx,
+        avatarColor: data.avatarColor,
+        ageRange: data.ageRange,
+        difficulty: 'Easy',
+        selectedChoreIds: [],
+      };
+      setSetupChildren(prev => [...prev, newChild]);
+      setKids(prev => [...prev, data.name]);
+      setKidApprovalSettings(prev => ({ ...prev, [data.name]: true }));
+      showParentToast(`${data.name} added! 🎉`);
+    }
+  };
   const [pendingEvolution, setPendingEvolution] = useState(false);
   const [goals, setGoals] = useState<SavedGoal[]>([]);
   const [currentStreak, setCurrentStreak] = useState(0);
+  const [shards, setShards] = useState(0);
   const [lastChoreDate, setLastChoreDate] = useState<string>('');
   const [weeklyXp, setWeeklyXp]           = useState(0);
   const [kidPayoutPending, setKidPayoutPending] = useState(false);
@@ -4878,10 +5988,31 @@ export default function App() {
     amount: number; completedCount: number; battleWon: boolean | null; battleBonus: number | null;
   } | null>(null);
 
+  // ── Daily chore reset ─────────────────────────────────────────────────────
+  const [lastResetDate,  setLastResetDate]  = useState<string>('');
+  const [debugDayOffset, setDebugDayOffset] = useState(0);
+
+  useEffect(() => {
+    const today = getSimulatedToday(debugDayOffset);
+    // Use functional updater so we read latest lastResetDate without adding it to deps
+    setLastResetDate(prev => {
+      if (prev !== today) {
+        setManagedChores(chores => applyDailyReset(chores));
+        return today;
+      }
+      return prev;
+    });
+  }, [debugDayOffset]); // also fires on mount (prev will be '' !== today)
+
   // ── Global debug state (dev only) ─────────────────────────────────────────
   const [debugOpen, setDebugOpen]             = useState(false);
   const [debugMinimized, setDebugMinimized]   = useState(false);
-  const [debugTab,  setDebugTab]              = useState<'xp' | 'layout' | 'kw' | 'nav'>('xp');
+  const [debugTab,  setDebugTab]              = useState<'xp' | 'layout' | 'kw' | 'nav' | 'battle' | 'days'>('xp');
+  const [dbgBossIdx,         setDbgBossIdx]         = useState(0);
+  const [dbgCompletionPct,   setDbgCompletionPct]   = useState(80);
+  const [dbgWeaknessUnlocked,setDbgWeaknessUnlocked]= useState(false);
+  const [dbgShards,          setDbgShards]          = useState(4);
+  const [dbgBattleActive,    setDbgBattleActive]    = useState(false);
   const [dbgMonsterSize,  setDbgMonsterSize]  = useState(() => scale(287));
   const [dbgMonsterY,     setDbgMonsterY]     = useState(() => scale(68));
   const [dbgPlatformSize, setDbgPlatformSize] = useState(() => scale(484));
@@ -4932,9 +6063,10 @@ export default function App() {
     if (requireApproval) {
       setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'pending' as const, rejectionNote: undefined } : c));
     } else {
-      setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const } : c));
+      const newCompletions = (chore.weeklyCompletions ?? 0) + 1;
+      setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const, weeklyCompletions: newCompletions } : c));
       // ── XP with streak bonus ──────────────────────────────────────────────────
-      const today = new Date().toDateString();
+      const today = getSimulatedToday(debugDayOffset);
       const isNewDay = lastChoreDate !== today;
       const newStreak = isNewDay ? currentStreak + 1 : currentStreak;
       const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
@@ -4967,14 +6099,15 @@ export default function App() {
         setLastChoreDate(today);
       }
     }
-  }, [managedChores, xp, monsterIdx, baseRate, kidApprovalSettings, currentKidName, currentStreak, lastChoreDate]);
+  }, [managedChores, xp, monsterIdx, baseRate, kidApprovalSettings, currentKidName, currentStreak, lastChoreDate, debugDayOffset]);
 
   const approveManagedChore = useCallback((id: string) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore || chore.status !== 'pending') return;
-    setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const } : c));
+    const newCompletions = (chore.weeklyCompletions ?? 0) + 1;
+    setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const, weeklyCompletions: newCompletions } : c));
     // ── XP with streak bonus ──────────────────────────────────────────────────
-    const today = new Date().toDateString();
+    const today = getSimulatedToday(debugDayOffset);
     const isNewDay = lastChoreDate !== today;
     const newStreak = isNewDay ? currentStreak + 1 : currentStreak;
     const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
@@ -5010,7 +6143,7 @@ export default function App() {
       setCurrentStreak(newStreak);
       setLastChoreDate(today);
     }
-  }, [managedChores, xp, monsterIdx, baseRate, viewMode, currentStreak, lastChoreDate]);
+  }, [managedChores, xp, monsterIdx, baseRate, viewMode, currentStreak, lastChoreDate, debugDayOffset]);
 
   const rejectManagedChore = useCallback((id: string, note: string) => {
     setManagedChores(prev => prev.map(c => c.id === id ? { ...c, status: 'rejected' as const, rejectionNote: note || undefined } : c));
@@ -5036,23 +6169,20 @@ export default function App() {
     setParentScreen('parentPayout');
   }, [managedChores, monsterIdx, battleResult, coins]);
 
-  const handleBattleWin = useCallback(() => {
+  const handleBattleEnd = useCallback((result: 'win' | 'loss', shardsUsed: number) => {
     const boss = getWeeklyBoss(monsterIdx);
-    const bonus = boss.bonus;
-    setCoins(prev => prev + bonus);
-    setBonusCoins(bonus);
-    setBattleResult('win');
-    setWeeklyXp(0); // reset weekly XP after battle
-    setScreen('result');
-  }, [monsterIdx]);
-
-  const handleBattleLose = useCallback(() => {
-    const boss = getWeeklyBoss(monsterIdx);
-    const consolation = Math.round(boss.bonus * 0.2);
-    setCoins(prev => prev + consolation);
-    setBonusCoins(consolation);
-    setBattleResult('loss');
-    setWeeklyXp(0); // reset weekly XP after battle
+    if (result === 'win') {
+      setCoins(prev => prev + boss.bonus);
+      setBonusCoins(boss.bonus);
+    } else {
+      const consolation = Math.round(boss.bonus * 0.2);
+      setCoins(prev => prev + consolation);
+      setBonusCoins(consolation);
+    }
+    setBattleResult(result);
+    setWeeklyXp(0);
+    setManagedChores(prev => prev.map(c => ({ ...c, weeklyCompletions: 0, status: 'active' as const, rejectionNote: undefined })));
+    setShards(prev => Math.max(0, prev - shardsUsed));
     setScreen('result');
   }, [monsterIdx]);
 
@@ -5076,11 +6206,11 @@ export default function App() {
   };
   const navParentTab = (t: ParentTab) => {
     setParentTab(t);
-    if (t === 'kidView') { setViewMode('kid'); return; }
     // Tab bar taps are root navigations — there's no "back" from here
     setPrevParentScreen('parentHome');
+    if (t === 'home')     setParentScreen('parentHome');
     if (t === 'chores')   setParentScreen('chores');
-    if (t === 'rewards')  setParentScreen('rewards');
+    if (t === 'money')    setParentScreen('rewards');
     if (t === 'settings') setParentScreen('settings');
   };
   const goBack = () => setParentScreen(prevParentScreen);
@@ -5120,6 +6250,9 @@ export default function App() {
   const deleteGoal = useCallback((id: string) => {
     setGoals(prev => prev.filter(g => g.id !== id));
   }, []);
+
+  // Avatar index for the currently active kid (0 = fallback)
+  const currentKidAvatarIdx = setupChildren.find(c => c.name === currentKidName)?.avatarIdx ?? 0;
 
   // Switch the active kid — shows KidWelcome the first time, otherwise goes straight to kid view
   const switchToKid = (name: string) => {
@@ -5260,32 +6393,55 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-    <SafeAreaView edges={['top']} style={[s.root, (screen === 'home' || viewMode === 'parent') && { backgroundColor: viewMode === 'parent' ? '#FFFFFF' : '#C5F215' }, (viewMode === 'kid' && screen === 'wallet') && { backgroundColor: C.bg }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={viewMode === 'parent' ? '#FFFFFF' : (screen === 'home' ? '#C5F215' : viewMode === 'kid' && screen === 'wallet' ? C.bg : C.surface)} />
+    <SafeAreaView edges={['top']} style={[s.root, (screen === 'home' || screen === 'world' || viewMode === 'parent') && { backgroundColor: viewMode === 'parent' ? '#FFFFFF' : '#C5F215' }, (viewMode === 'kid' && screen === 'wallet') && { backgroundColor: C.bg }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={viewMode === 'parent' ? '#FFFFFF' : (screen === 'home' || screen === 'world' ? '#C5F215' : viewMode === 'kid' && screen === 'wallet' ? C.bg : C.surface)} />
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <HomeScreen   monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} requireApproval={requireApproval} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={setSelectedMonsterName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor }))} onSwitchToKid={switchToKid} />}
-            {screen === 'world'      && <WorldScreen monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} weeklyXp={weeklyXp} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor }))} onSwitchToKid={switchToKid} />}
+            {screen === 'home'     && <HomeScreen   key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={coins} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} requireApproval={requireApproval} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={setSelectedMonsterName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} />}
+            {screen === 'world'      && <WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={coins} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} />}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} />
             </Modal>
-            {screen === 'arena'      && <BattleArenaScreen monsterIdx={monsterIdx} monsterImg={currentMonsterImg} initialCores={Math.min(Math.max(3, Object.keys(done).length), 10)} onWin={handleBattleWin} onLose={handleBattleLose} monsterName={effectiveMonsterName} />}
+            {screen === 'arena'      && (() => {
+              if (dbgBattleActive) {
+                const totalPower = calcPowerRating(dbgCompletionPct, monsterIdx, dbgWeaknessUnlocked ? 5 : 0);
+                return <BattleArenaScreen
+                  monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} monsterId={selectedMonsterId}
+                  totalPower={totalPower} completionPct={dbgCompletionPct} shards={dbgShards} weaknessUnlocked={dbgWeaknessUnlocked}
+                  guaranteedWin={dbgCompletionPct >= 100} onBattleEnd={(r, u) => { setDbgBattleActive(false); handleBattleEnd(r, u); }}
+                  bossOverride={BOSSES[dbgBossIdx]}
+                />;
+              }
+              const totalWeeklyTarget = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
+              const totalWeeklyDone   = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
+              const completionPct = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
+              const totalPower = calcPowerRating(completionPct, monsterIdx, currentStreak);
+              const weeklyShards = calcWeeklyShards(completionPct);
+              const battleShards = shards + weeklyShards;
+              const weaknessUnlocked = completionPct >= 50 && currentStreak >= 5;
+              const guaranteedWin = completionPct >= 100;
+              return <BattleArenaScreen
+                monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} monsterId={selectedMonsterId}
+                totalPower={totalPower} completionPct={completionPct} shards={battleShards} weaknessUnlocked={weaknessUnlocked}
+                guaranteedWin={guaranteedWin} onBattleEnd={handleBattleEnd}
+              />;
+            })()}
             {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} won={battleResult === 'win'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
-            {screen === 'wallet'   && <WalletScreen coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={goals} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={currentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={() => setViewMode('parent')} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor }))} onSwitchToKid={switchToKid} />}
+            {screen === 'wallet'   && <WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={goals} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={currentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={() => setViewMode('parent')} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} />}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} onGoalCreated={addGoal} monsterName={effectiveMonsterName} />}
             {screen === 'kidPayout' && payoutSnapshot && <KidPayoutScreen amount={payoutSnapshot.amount} completedCount={payoutSnapshot.completedCount} battleWon={payoutSnapshot.battleWon} battleBonus={payoutSnapshot.battleBonus} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setPayoutSnapshot(null); setScreen('home'); setTab('home'); }} />}
             {showTabBar && <TabBar active={tab} onNav={navTab} />}
           </>
         ) : (
           <>
-            {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => setShowKidProfile(true)} managedChores={managedChores} onApprove={approveManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} kidName={currentKidName} coins={coins} />}
+            {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} kidName={currentKidName} coins={coins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} />}
             {parentScreen === 'parentPayout' && payoutSnapshot && <ParentPayoutScreen kidName={currentKidName} coins={payoutSnapshot.amount} baseCoins={payoutSnapshot.amount - (payoutSnapshot.battleBonus ?? 0)} battleBonus={payoutSnapshot.battleBonus} battleWon={payoutSnapshot.battleWon} completedChores={managedChores.filter(c => c.status === 'approved')} onConfirm={confirmPayout} onBack={goBack} />}
             {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ParentChoresScreen chores={managedChores} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} />}
             {parentScreen === 'payRates'  && <PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} weeklyCapEnabled={weeklyCapEnabled} setWeeklyCap={setWeeklyCap} />}
             {parentScreen === 'rateGuide' && <RateGuideScreen onBack={goBack} />}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'settings'  && <ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => setShowKidProfile(true)} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} />}
+            {parentScreen === 'settings'  && <ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} />}
             {parentScreen !== 'parentPayout' && (
               <ParentTabBar active={parentTab} onNav={navParentTab} />
             )}
@@ -5329,6 +6485,15 @@ export default function App() {
         />
       </SafeAreaProvider>
     </Modal>
+
+    {/* Add / Edit kid modal */}
+    <AddEditKidModal
+      visible={kidModalVisible}
+      initial={kidModalInitial}
+      onClose={() => setKidModalVisible(false)}
+      onSave={handleKidModalSave}
+    />
+    {parentToast && <Toast key={parentToast + Date.now()} message={parentToast} />}
 
     {/* Global debug overlay */}
     {debugOpen && renderDebugPanel()}
@@ -5395,10 +6560,10 @@ export default function App() {
             {!debugMinimized && <>
             {/* Tabs */}
             <View style={s.debugTabs}>
-              {(['xp', 'layout', 'kw', 'nav'] as const).map(t => (
+              {(['xp', 'layout', 'kw', 'nav', 'battle', 'days'] as const).map(t => (
                 <TouchableOpacity key={t} style={[s.debugTab, debugTab === t && s.debugTabActive]} onPress={() => setDebugTab(t)}>
                   <Text style={[s.debugTabText, debugTab === t && s.debugTabTextActive]}>
-                    {t === 'xp' ? 'XP' : t === 'layout' ? 'Layout' : t === 'kw' ? 'KW' : 'Nav'}
+                    {t === 'xp' ? 'XP' : t === 'layout' ? 'Layout' : t === 'kw' ? 'KW' : t === 'nav' ? 'Nav' : t === 'battle' ? '⚔' : '📅'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -5485,7 +6650,7 @@ export default function App() {
                   </TouchableOpacity>
                 </View>
 
-              ) : (
+              ) : debugTab === 'nav' ? (
                 <View style={{ gap: 10 }}>
                   <Text style={s.debugSectionLabel}>GO TO SCREEN</Text>
                   {([
@@ -5510,7 +6675,142 @@ export default function App() {
                     </TouchableOpacity>
                   ))}
                 </View>
-              )}
+
+              ) : debugTab === 'battle' ? (
+                /* ── Battle Simulator ── */
+                <View style={{ gap: 14 }}>
+                  <Text style={s.debugSectionLabel}>PICK BOSS</Text>
+                  <View style={s.debugGrid}>
+                    {BOSSES.map((b, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        style={[s.debugChip, dbgBossIdx === i && s.debugChipActive]}
+                        onPress={() => setDbgBossIdx(i)}
+                      >
+                        <Text style={[s.debugChipText, dbgBossIdx === i && s.debugChipTextActive]}>
+                          {b.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={s.debugSectionLabel}>COMPLETION %  <Text style={{ color: '#C5F215' }}>{dbgCompletionPct}%</Text></Text>
+                  <View style={s.debugRow}>
+                    {[0, 40, 60, 80, 100].map(v => (
+                      <TouchableOpacity key={v} style={[s.debugChip, dbgCompletionPct === v && s.debugChipActive]} onPress={() => setDbgCompletionPct(v)}>
+                        <Text style={[s.debugChipText, dbgCompletionPct === v && s.debugChipTextActive]}>{v}%</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={s.debugSectionLabel}>SHARDS  <Text style={{ color: '#C5F215' }}>{dbgShards}</Text></Text>
+                  <View style={s.debugRow}>
+                    {[0, 1, 2, 4, 6, 8].map(v => (
+                      <TouchableOpacity key={v} style={[s.debugChip, dbgShards === v && s.debugChipActive]} onPress={() => setDbgShards(v)}>
+                        <Text style={[s.debugChipText, dbgShards === v && s.debugChipTextActive]}>{v}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Text style={s.debugSectionLabel}>WEAKNESS UNLOCKED</Text>
+                    <Switch value={dbgWeaknessUnlocked} onValueChange={setDbgWeaknessUnlocked} trackColor={{ true: '#6B35F0' }} />
+                  </View>
+
+                  {/* Computed preview */}
+                  <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 10, gap: 4 }}>
+                    <Text style={{ color: '#C5F215', fontSize: scale(11), fontWeight: '700' }}>
+                      Power: {calcPowerRating(dbgCompletionPct, monsterIdx, dbgWeaknessUnlocked ? 5 : 0)}  ·  Boss HP: {BOSSES[dbgBossIdx].power}  ·  Monster HP: {Math.round(50 + calcPowerRating(dbgCompletionPct, monsterIdx, 0) * 0.5)}
+                    </Text>
+                    <Text style={{ color: '#ABABAB', fontSize: scale(11) }}>
+                      Guaranteed win: {dbgCompletionPct >= 100 ? 'YES ✅' : 'no'}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[s.debugMaxBtn, { backgroundColor: '#6B35F0' }]}
+                    onPress={() => {
+                      setDbgBattleActive(true);
+                      setScreen('arena');
+                      setDebugOpen(false);
+                    }}
+                  >
+                    <Text style={[s.debugMaxTxt, { color: '#fff' }]}>
+                      ⚔ Launch debug battle — {BOSSES[dbgBossIdx].name}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+              ) : debugTab === 'days' ? (
+                /* ── Day Simulator ── */
+                (() => {
+                  const simDay     = getSimulatedToday(debugDayOffset);
+                  const simDate    = new Date(Date.now() + debugDayOffset * 86_400_000);
+                  const dayNames   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                  const dayName    = dayNames[simDate.getDay()];
+                  const willReset  = managedChores.filter(c => {
+                    const target = frequencyToWeeklyTarget(c.frequency);
+                    return (c.weeklyCompletions ?? 0) < target && (c.status === 'approved' || c.status === 'rejected');
+                  });
+                  return (
+                    <View style={{ gap: 12 }}>
+                      {/* Current simulated date */}
+                      <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 12, alignItems: 'center' }}>
+                        <Text style={{ color: '#ABABAB', fontSize: scale(10), fontWeight: '700', letterSpacing: 1 }}>SIMULATED DATE</Text>
+                        <Text style={{ color: '#C5F215', fontSize: scale(18), fontWeight: '900', marginTop: 4 }}>{dayName} · {simDay}</Text>
+                        {debugDayOffset !== 0 && (
+                          <Text style={{ color: '#ABABAB', fontSize: scale(11), marginTop: 2 }}>
+                            {debugDayOffset > 0 ? `+${debugDayOffset}` : debugDayOffset} day{Math.abs(debugDayOffset) !== 1 ? 's' : ''} from today
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* Day navigation */}
+                      <Text style={s.debugSectionLabel}>ADVANCE / REWIND DAY</Text>
+                      <View style={[s.debugRow, { justifyContent: 'center', gap: 8 }]}>
+                        <TouchableOpacity style={[s.debugXpBtn, { flex: 1 }]} onPress={() => setDebugDayOffset(d => d - 1)}>
+                          <Text style={s.debugXpBtnTxt}>◀ −1 day</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[s.debugXpBtn, s.debugXpBtnGreen, { flex: 1 }]} onPress={() => setDebugDayOffset(d => d + 1)}>
+                          <Text style={s.debugXpBtnTxt}>+1 day ▶</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {debugDayOffset !== 0 && (
+                        <TouchableOpacity style={s.debugCloseBtn} onPress={() => setDebugDayOffset(0)}>
+                          <Text style={s.debugCloseTxt}>↩ Back to today</Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Weekly chore progress */}
+                      <Text style={s.debugSectionLabel}>WEEKLY CHORE PROGRESS</Text>
+                      {managedChores.map(c => {
+                        const target = frequencyToWeeklyTarget(c.frequency);
+                        const done   = c.weeklyCompletions ?? 0;
+                        const pct    = Math.round((done / target) * 100);
+                        return (
+                          <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: '#FFFFFF', fontSize: scale(11), fontWeight: '600' }} numberOfLines={1}>{c.name}</Text>
+                              <Text style={{ color: '#ABABAB', fontSize: scale(10) }}>{c.frequency} · {done}/{target} · {c.status}</Text>
+                            </View>
+                            <Text style={{ color: done >= target ? '#C5F215' : '#888', fontSize: scale(12), fontWeight: '900', minWidth: 36, textAlign: 'right' }}>{pct}%</Text>
+                          </View>
+                        );
+                      })}
+
+                      {/* What will reset on next day advance */}
+                      {willReset.length > 0 && (
+                        <>
+                          <Text style={s.debugSectionLabel}>RESETS NEXT DAY ADVANCE ({willReset.length})</Text>
+                          {willReset.map(c => (
+                            <Text key={c.id} style={{ color: '#F59E0B', fontSize: scale(11) }}>↺  {c.name} ({c.status})</Text>
+                          ))}
+                        </>
+                      )}
+                    </View>
+                  );
+                })()
+              ) : null}
             </ScrollView>
 
             <TouchableOpacity style={s.debugCopyBtn} onPress={copyValues} activeOpacity={0.8}>
@@ -5526,6 +6826,12 @@ export default function App() {
       </TouchableOpacity>
     );
   }
+}
+
+export default function App() {
+  const [fontsLoaded] = useFonts({ FredokaOne_400Regular });
+  if (!fontsLoaded) return null;
+  return <AppInner />;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -5632,8 +6938,8 @@ const s = StyleSheet.create({
   oddsCard:        { flex: 1, backgroundColor: C.bg, borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', ...SOLID_SHADOW },
   oddsVal:         { fontSize: scale(20), fontWeight: '900', color: C.text },
   oddsLbl:         { fontSize: scale(10), color: C.muted, fontWeight: '700', letterSpacing: 0.5, marginTop: 2 },
-  battleBtn:       { backgroundColor: C.text, borderRadius: 14, padding: 15, alignItems: 'center' },
-  battleBtnText:   { fontSize: scale(15), fontWeight: '900', color: 'white', letterSpacing: -0.3 },
+  battleBtn:       { backgroundColor: '#1A1A1A', borderRadius: 100, paddingVertical: 18, alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  battleBtnText:   { fontSize: scale(17), fontWeight: '900', color: 'white', letterSpacing: -0.3 },
   debugBtn:        { backgroundColor: C.bg, borderWidth: 0.5, borderColor: C.border, borderRadius: 10, padding: 10, alignItems: 'center' },
   debugBtnText:    { fontSize: scale(11), fontWeight: '700', color: C.muted, letterSpacing: 0.3 },
   arenaStage:      { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.surface },
@@ -5686,7 +6992,7 @@ const s = StyleSheet.create({
   gfBtnOutline:        { borderRadius: 14, padding: 16, alignItems: 'center', width: '100%', borderWidth: 1.5, borderColor: '#ECEAE4', backgroundColor: '#FFFFFF' },
   gfBtnOutlineText:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
   gfSkipLink:          { fontSize: scale(15), fontWeight: '600', color: '#ABABAB' },
-  gfSearchRow:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F3EF', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 8, marginBottom: 12 },
+  gfSearchRow:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F3EF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 12, paddingVertical: 10, gap: 8, marginBottom: 12 },
   gfSearchInput:       { flex: 1, fontSize: scale(15), color: '#1A1A1A', paddingVertical: 0 },
   gfSearchClear:       { padding: 4 },
   gfCategoryGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', marginTop: 8 },
@@ -5703,7 +7009,7 @@ const s = StyleSheet.create({
   gfLabelRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   gfFieldLabel:        { fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' },
   gfCharCount:         { fontSize: scale(12), color: '#ABABAB' },
-  gfInput:             { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 12, padding: 14, fontSize: scale(16), color: '#1A1A1A', backgroundColor: '#FFFFFF', justifyContent: 'center' },
+  gfInput:             { borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 12, padding: 14, fontSize: scale(16), color: '#1A1A1A', backgroundColor: '#FFFFFF', justifyContent: 'center' },
   gfPhotoDash:         { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 12, padding: 20, alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed', marginTop: 6, gap: 6 },
   gfPhotoText:         { fontSize: scale(14), color: '#ABABAB' },
   gfPhotoPreview:      { marginTop: 20, borderRadius: 14, overflow: 'hidden', position: 'relative' },
@@ -5823,8 +7129,8 @@ const p = StyleSheet.create({
   iconEditBadge:    { position: 'absolute', bottom: 2, right: 2, width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
   formCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
   formLabel:        { fontSize: scale(13), fontWeight: '700', color: '#ABABAB', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-  formInput:        { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 14, fontSize: scale(16), color: '#1A1A1A' },
-  formDropdownRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 14 },
+  formInput:        { borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 14, fontSize: scale(16), color: '#1A1A1A' },
+  formDropdownRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 14 },
   formDropdownValue:{ fontSize: scale(16), color: '#1A1A1A' },
   rateDollarSign:   { fontSize: scale(18), fontWeight: '600', color: '#1A1A1A' },
   // Difficulty picker
@@ -5851,12 +7157,12 @@ const p = StyleSheet.create({
   sectionCard:      { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
   sectionCardTitle: { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
   sectionCardSub:   { fontSize: scale(13), color: '#ABABAB', marginBottom: 12 },
-  dropdownRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 10, padding: 12, marginTop: 4 },
+  dropdownRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 12, marginTop: 4 },
   dropdownValue:    { fontSize: scale(15), color: '#1A1A1A' },
   settingsRow:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
   settingsRowLabel: { fontSize: scale(15), fontWeight: '600', color: '#1A1A1A', marginBottom: 2 },
   settingsRowSub:   { fontSize: scale(12), color: '#ABABAB', lineHeight: 17 },
-  rateInputPill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7F6F2', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, gap: 4, minWidth: 80 },
+  rateInputPill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7F6F2', borderRadius: 10, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 12, paddingVertical: 8, gap: 4, minWidth: 80 },
   rateInput:        { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A', minWidth: 48 },
   rateGuideLink:    { fontSize: scale(15), fontWeight: '700', color: '#6B35F0' },
 
@@ -5968,115 +7274,115 @@ const ob = StyleSheet.create({
 // ─── World Screen Styles ──────────────────────────────────────────────────────
 
 const w = StyleSheet.create({
+  // Boss card
   bossCard: {
-    height: scale(220),
-    borderRadius: scale(18),
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#111',
-    justifyContent: 'flex-end',
-  },
-  bossCardContent: {
-    padding: scale(16),
-    gap: scale(4),
+    height: 310, borderRadius: 20, overflow: 'hidden',
+    borderWidth: 2, borderColor: '#1A1A1A', justifyContent: 'space-between',
+    ...SOLID_SHADOW,
   },
   bossTagPill: {
-    alignSelf: 'center',
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
-    marginBottom: scale(4),
+    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#6B35F0', borderRadius: 100,
+    paddingHorizontal: 14, paddingVertical: 7,
+    borderWidth: 2, borderColor: '#1A1A1A',
+    margin: scale(14),
   },
   bossTagText: {
-    color: '#fff', fontFamily: 'FredokaOne_400Regular', fontSize: scale(13), letterSpacing: 0.5,
+    color: '#fff', fontWeight: '900', fontSize: scale(14), letterSpacing: 0.8,
   },
+  bossCardContent: { padding: scale(16), gap: scale(4) },
   teaserLine1: {
-    color: '#fff', fontFamily: 'FredokaOne_400Regular', fontSize: scale(22),
-    textAlign: 'center', textShadowColor: '#000', textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 0,
+    color: '#fff', fontFamily: 'FredokaOne_400Regular', fontSize: scale(28),
+    textShadowColor: '#000', textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 0,
   },
   teaserLine2: {
-    color: 'rgba(255,255,255,0.8)', fontFamily: 'FredokaOne_400Regular', fontSize: scale(13),
-    textAlign: 'center',
+    color: 'rgba(255,255,255,0.9)', fontSize: scale(16), fontWeight: '600',
   },
-  countdownBox: {
-    marginTop: scale(8), alignSelf: 'stretch',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: scale(12), paddingVertical: scale(10),
-    borderWidth: 2, borderColor: '#111',
+
+  // Countdown card
+  countdownCard: {
+    backgroundColor: '#EAE4FF', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A',
+    flexDirection: 'row', justifyContent: 'space-around', paddingVertical: scale(16), paddingHorizontal: scale(8),
+    marginTop: -70, width: '96%', alignSelf: 'center' as const,
+    ...SOLID_SHADOW,
   },
-  countdownText: {
-    color: '#111', fontFamily: 'FredokaOne_400Regular', fontSize: scale(26),
-    textAlign: 'center', letterSpacing: 2,
-  },
+  countdownSegment: { alignItems: 'center', flex: 1 },
+  countdownNum: { fontFamily: 'FredokaOne_400Regular', fontSize: scale(32), color: '#1A1A1A', letterSpacing: 0 },
+  countdownUnit: { fontSize: scale(14), fontWeight: '600', color: '#6B35F0', marginTop: 2 },
+
+  // Section header (on green bg)
+  sectionHeader: { fontSize: scale(22), fontWeight: '900', color: '#1A1A1A', marginTop: scale(4) },
 
   // Intel row
   intelRow: { flexDirection: 'row', gap: scale(10) },
   intelChip: {
-    backgroundColor: C.surface, borderRadius: scale(14), padding: scale(12),
-    borderWidth: 2, borderColor: '#111',
-    shadowColor: '#111', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4,
-    gap: scale(4),
+    backgroundColor: C.surface, borderRadius: 16, padding: scale(14),
+    borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW,
   },
-  intelLabel: {
-    fontSize: scale(10), fontWeight: '800', color: C.muted, letterSpacing: 0.8,
-  },
-  intelValue: {
-    fontSize: scale(20), fontFamily: 'FredokaOne_400Regular', color: '#111',
+  intelLabel: { fontSize: scale(10), fontWeight: '800', color: C.muted, letterSpacing: 1, marginBottom: 6 },
+  intelValue: { fontSize: scale(22), fontWeight: '900', color: '#1A1A1A' },
+  weaknessBox: {
+    width: 48, height: 48, borderRadius: 12, backgroundColor: '#FFF9E0',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
   },
   weaknessPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#FFF9E0', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4,
-    borderWidth: 1.5, borderColor: '#F0C040', alignSelf: 'flex-start',
+    backgroundColor: '#FFF9E0', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 2, borderColor: '#F0C040', alignSelf: 'flex-start',
   },
-  weaknessIcon: { fontSize: scale(14) },
-  weaknessText: {
-    fontSize: scale(12), fontWeight: '800', color: '#8B6800',
+  weaknessIcon: { fontSize: scale(16) },
+  weaknessText: { fontSize: scale(13), fontWeight: '800', color: '#8B6800' },
+  unlockArrow: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#3AB56A',
+    alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end', marginTop: 6,
   },
+  threatPill: {
+    alignSelf: 'flex-start', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 5,
+    borderWidth: 2, borderColor: '#1A1A1A',
+  },
+  threatPillText: { fontSize: scale(12), fontWeight: '800', color: '#fff' },
 
   // Section card
   sectionCard: {
-    backgroundColor: C.surface, borderRadius: scale(16), padding: scale(16), gap: scale(6),
-    borderWidth: 2, borderColor: '#111',
-    shadowColor: '#111', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 5,
+    backgroundColor: C.surface, borderRadius: 20, padding: scale(16),
+    borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW,
   },
-  sectionTitle: {
-    fontSize: scale(13), fontWeight: '800', color: '#111', marginBottom: scale(4),
-  },
+  sectionTitle: { fontSize: scale(14), fontWeight: '900', color: '#1A1A1A', letterSpacing: 0.3 },
 
   // Readiness
   readinessRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   readinessLabel: { fontSize: scale(13), color: C.muted, fontWeight: '600' },
-  readinessValue: { fontSize: scale(14), fontWeight: '800', color: '#111' },
-  trackWrap: {
-    height: scale(10), backgroundColor: '#E8E4F2', borderRadius: 99, overflow: 'hidden',
-  },
-  trackFill: {
-    height: '100%', backgroundColor: '#6B35F0', borderRadius: 99,
-  },
+  readinessValue: { fontSize: scale(15), fontWeight: '800', color: '#1A1A1A' },
+  trackWrap: { height: 14, backgroundColor: '#E8E4F2', borderRadius: 100, overflow: 'hidden' },
+  trackFill: { height: '100%', backgroundColor: '#6B35F0', borderRadius: 100 },
   forecastPill: {
-    backgroundColor: '#F0EBFF', borderRadius: scale(10), padding: scale(9),
-    borderWidth: 1, borderColor: '#C5B8E8',
+    backgroundColor: '#F0EBFF', borderRadius: 14, padding: scale(10),
+    borderWidth: 2, borderColor: '#C5B8E8',
   },
-  forecastText: {
-    fontSize: scale(12), color: '#5A2DB8', fontWeight: '600', textAlign: 'center',
-  },
+  forecastText: { fontSize: scale(13), color: '#5A2DB8', fontWeight: '700' },
 
   // What's at stake
-  stakeRow: {
-    flexDirection: 'row', justifyContent: 'space-around', paddingVertical: scale(8),
-  },
+  stakeRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: scale(8) },
   stakeItem: { alignItems: 'center', gap: scale(4) },
-  stakeIcon: { width: scale(44), height: scale(44) },
-  stakeVal: { fontSize: scale(18), fontFamily: 'FredokaOne_400Regular', color: '#111' },
+  stakeIcon: { width: scale(52), height: scale(52) },
+  stakeVal: { fontSize: scale(16), fontWeight: '900', color: '#1A1A1A' },
   stakeLbl: { fontSize: scale(11), color: C.muted, fontWeight: '600' },
   evolutionHint: {
-    backgroundColor: '#FFF4E0', borderRadius: scale(10), padding: scale(9),
-    borderWidth: 1, borderColor: '#F0C060',
+    backgroundColor: '#FFF4E0', borderRadius: 12, padding: scale(10),
+    borderWidth: 2, borderColor: '#F0C060', marginTop: 8,
   },
-  evolutionHintText: {
-    fontSize: scale(12), color: '#7A4800', fontWeight: '700', textAlign: 'center',
+  evolutionHintText: { fontSize: scale(13), color: '#7A4800', fontWeight: '700', textAlign: 'center' },
+
+  // Battle button
+  battleBtnPurple: {
+    backgroundColor: '#6B35F0', borderRadius: 100, paddingVertical: 20,
+    alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW,
   },
+  battleBtnPurpleText: { fontSize: scale(20), fontWeight: '900', color: '#fff', letterSpacing: -0.3 },
+
+  // Legacy (kept for BossIntroScreen compatibility)
+  countdownBox: { marginTop: scale(8), alignSelf: 'stretch', backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 14, paddingVertical: scale(10), borderWidth: 2, borderColor: '#1A1A1A' },
+  countdownText: { color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular', fontSize: scale(26), textAlign: 'center', letterSpacing: 2 },
 });
 
 // ─── Battle Flow Styles ───────────────────────────────────────────────────────
@@ -6115,8 +7421,9 @@ const bi = StyleSheet.create({
     fontSize: scale(13), fontWeight: '800', color: '#FFFFFF', letterSpacing: 2,
   },
   rewardsCard: {
-    backgroundColor: '#FAF9F4', borderRadius: 20,
-    borderWidth: 2.5, borderColor: '#1A1A1A',
+    backgroundColor: 'rgba(10,10,10,0.55)',
+    borderRadius: 20,
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)',
     paddingTop: 32, paddingBottom: 22, paddingHorizontal: 16,
     flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center',
     ...SOLID_SHADOW,
@@ -6166,6 +7473,20 @@ const b = StyleSheet.create({
   corePipOn:       { backgroundColor: '#6B35F0' },
   corePipOff:      { backgroundColor: C.border },
   coreCount:       { fontSize: scale(12), fontWeight: '700', color: '#6B35F0', minWidth: 20, textAlign: 'right' },
+
+  // ── Mini-game shared ──────────────────────────────────────────────────────
+  mgTitle:    { fontSize: scale(11), fontWeight: '800', color: '#ABABAB', letterSpacing: 1.5 },
+  mgInstr:    { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
+  mgMainBtn:  { backgroundColor: '#6B35F0', borderRadius: 100, paddingHorizontal: scale(40), paddingVertical: scale(18), borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  mgMainBtnText: { color: '#fff', fontWeight: '900', fontSize: scale(18) },
+  mgBigTap:   { width: scale(130), height: scale(130), borderRadius: scale(65), backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
+
+  // ── Card hand ─────────────────────────────────────────────────────────────
+  handGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  handCard:   { width: '47%', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: scale(10), paddingHorizontal: scale(10), alignItems: 'center', gap: 4, minHeight: scale(82), justifyContent: 'center', ...SOLID_SHADOW },
+  handEmoji:  { fontSize: scale(22) },
+  handLabel:  { fontSize: scale(12), fontWeight: '800', color: '#1A1A1A', textAlign: 'center', lineHeight: scale(16) },
+  handCost:   { fontSize: scale(10), fontWeight: '700', color: '#ABABAB' },
 });
 
 const auth = StyleSheet.create({
@@ -6173,7 +7494,7 @@ const auth = StyleSheet.create({
   backBtnText:   { fontSize: scale(24), color: '#1A1A1A', fontWeight: '600' },
   title:         { fontSize: scale(30), fontWeight: '900', color: '#1A1A1A', marginBottom: 6 },
   subtitle:      { fontSize: scale(15), color: '#ABABAB' },
-  inputRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1.5, borderColor: '#ECEAE4', backgroundColor: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
+  inputRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   inputIcon:     { fontSize: scale(20) },
   textInput:     { flex: 1, fontSize: scale(16), color: '#1A1A1A', padding: 0 },
   primaryBtn:    { backgroundColor: '#6B35F0', borderRadius: 14, padding: 16, alignItems: 'center' },
