@@ -1377,23 +1377,22 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
         {/* ── Boss Card + overlapping Countdown ── */}
         <View>
           <View style={w.bossCard}>
-            {boss.bgImage
-              ? <>
-                  <Image source={boss.bgImage} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                  {boss.bossImage && (
-                    <Image
-                      source={boss.bossImage}
-                      style={[StyleSheet.absoluteFill, { opacity: 1 - silhouetteOpacity }]}
-                      resizeMode="cover"
-                    />
-                  )}
-                </>
-              : <>
-                  <Video source={boss.video} style={StyleSheet.absoluteFill} resizeMode={ResizeMode.COVER} shouldPlay isLooping isMuted />
-                  <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.65)']} style={StyleSheet.absoluteFill} />
-                  {silhouetteOpacity > 0 && <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0d0820', opacity: silhouetteOpacity }]} />}
-                </>
-            }
+            {/* Video always plays as the card background */}
+            <Video source={boss.video} style={StyleSheet.absoluteFill} resizeMode={ResizeMode.COVER} shouldPlay isLooping isMuted />
+            {/* Gradient for readability */}
+            <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.65)']} style={StyleSheet.absoluteFill} />
+            {/* Boss image fades in as reveal level increases */}
+            {boss.bossImage && silhouetteOpacity < 1 && (
+              <Image
+                source={boss.bossImage}
+                style={[StyleSheet.absoluteFill, { opacity: 1 - silhouetteOpacity }]}
+                resizeMode="cover"
+              />
+            )}
+            {/* Light mystery tint when boss is still hidden */}
+            {silhouetteOpacity > 0 && (
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(13,8,32,0.35)' }]} />
+            )}
 
             {/* Top-left badge */}
             <View style={w.bossTagPill}>
@@ -1660,9 +1659,9 @@ function BossIntroScreen({ monsterIdx, onReady }: {
         isLooping
       />
 
-      {/* Gradient: strong at top, fades to subtle at bottom so the card area shows the video */}
+      {/* Gradient: strong at top and bottom, clear in the middle */}
       <LinearGradient
-        colors={['rgba(0,0,0,0.72)', 'transparent', 'rgba(0,0,0,0.28)']}
+        colors={['rgba(0,0,0,0.72)', 'transparent', 'rgba(0,0,0,0.88)']}
         locations={[0, 0.42, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -1711,7 +1710,7 @@ function BossIntroScreen({ monsterIdx, onReady }: {
             {rewards.map((r, i) => (
               <View key={i} style={{ alignItems: 'center', gap: 6 }}>
                 <Image source={r.icon} style={{ width: scale(60), height: scale(60) }} resizeMode="contain" />
-                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#FFFFFF', fontFamily: 'FredokaOne_400Regular' }}>{r.label}</Text>
+                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular' }}>{r.label}</Text>
               </View>
             ))}
           </View>
@@ -2584,7 +2583,8 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+      <Image source={require('./assets/bosses/dustbunny.png')} style={StyleSheet.absoluteFill} resizeMode="stretch" />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
       <Header title="BATTLE" showCoins={false} />
 
       {/* Flash overlay */}
@@ -7421,9 +7421,8 @@ const bi = StyleSheet.create({
     fontSize: scale(13), fontWeight: '800', color: '#FFFFFF', letterSpacing: 2,
   },
   rewardsCard: {
-    backgroundColor: 'rgba(10,10,10,0.55)',
-    borderRadius: 20,
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: '#FAF9F4', borderRadius: 20,
+    borderWidth: 2.5, borderColor: '#1A1A1A',
     paddingTop: 32, paddingBottom: 22, paddingHorizontal: 16,
     flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center',
     ...SOLID_SHADOW,
