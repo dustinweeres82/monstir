@@ -46,6 +46,7 @@ interface Boss {
   taglineHighlight?: string;
   power: number;
   bonus: number;
+  captureCoins: number;       // coins awarded on capture (win)
   weakness: string;           // what chore type counters this boss
   video: ReturnType<typeof require>;
   bgImage?: ReturnType<typeof require>;   // static BG image (replaces video when set)
@@ -113,125 +114,150 @@ const MONSTERS: Monster[] = [
 const BOSSES: Boss[] = [
   // ── Boss 1 — Tier 0 ────────────────────────────────────────────────────────
   {
-    name: 'Dust Grumble',
-    tagline: "It was just sitting there. Waiting.",
-    taglineHighlight: 'waiting',
-    power: 30, bonus: 15,
+    name: 'Lint Lurker',
+    tagline: "It hid under the couch. For years.",
+    taglineHighlight: 'years',
+    power: 28, bonus: 75, captureCoins: 75,
     weakness: 'Sweeping',
     video: require('./assets/boss-intro.mp4'),
-    bgImage: require('./assets/bosses/toothpastebossBG.png'),
-    bossImage: require('./assets/bosses/toothpasteboss.png'),
+    bossImage: require('./assets/bosses/dustbunny.png'),
     tiers: [0],
-    threat: 'Easy',   threatNote: 'A great first boss to practise on.',
-    hp: 28, attackMin: 2, attackMax: 4, zapZone: 'very-wide',
+    threat: 'Easy', threatNote: 'A perfect first boss. Knock it out fast.',
+    hp: 28, attackMin: 8, attackMax: 12, zapZone: 'very-wide',
   },
   // ── Boss 2 — Tier 0-1 ──────────────────────────────────────────────────────
   {
-    name: 'Mold Sprout',
-    tagline: "Forgotten corners bloom with rot.",
-    taglineHighlight: 'rot',
-    power: 40, bonus: 20,
+    name: 'Toothpaste Ooze',
+    tagline: "It drips. It spreads. It never dries.",
+    taglineHighlight: 'never dries',
+    power: 34, bonus: 100, captureCoins: 100,
     weakness: 'Wiping',
     video: require('./assets/boss-intro.mp4'),
+    bgImage: require('./assets/bosses/toothpastebossBG.png'),
+    bossImage: require('./assets/bosses/toothpasteboss.png'),
     tiers: [0, 1],
-    threat: 'Easy',   threatNote: "Slow and predictable. Don't get complacent.",
-    hp: 36, attackMin: 3, attackMax: 6, zapZone: 'wide',
+    threat: 'Easy', threatNote: "Slow and gooey. Don't let it spread.",
+    hp: 34, attackMin: 9, attackMax: 13, zapZone: 'very-wide',
   },
   // ── Boss 3 — Tier 1-2 ──────────────────────────────────────────────────────
+  {
+    name: 'Cracklebug',
+    tagline: "Every crumb is a throne. Every floor is its kingdom.",
+    taglineHighlight: 'kingdom',
+    power: 40, bonus: 125, captureCoins: 125,
+    weakness: 'Vacuuming',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [1, 2],
+    threat: 'Easy', threatNote: 'Vacuum thoroughly and it has nowhere to hide.',
+    hp: 40, attackMin: 10, attackMax: 14, zapZone: 'wide',
+  },
+  // ── Boss 4 — Tier 2-3 ──────────────────────────────────────────────────────
+  {
+    name: 'The Pile',
+    tagline: "You kept adding to it. Now it fights back.",
+    taglineHighlight: 'fights back',
+    power: 50, bonus: 150, captureCoins: 150,
+    weakness: 'Organizing',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [2, 3],
+    threat: 'Medium', threatNote: 'Consistent chores are your best weapon.',
+    hp: 50, attackMin: 11, attackMax: 16, zapZone: 'wide',
+  },
+  // ── Boss 5 — Tier 3-4 ──────────────────────────────────────────────────────
   {
     name: 'Junk Giant',
     tagline: "He Collects It All. You Clean It Up.",
     taglineHighlight: 'all',
-    power: 50, bonus: 25,
+    power: 62, bonus: 200, captureCoins: 200,
     weakness: 'Organizing',
     video: require('./assets/boss-junk-giant.mp4'),
-    tiers: [1, 2],
-    threat: 'Medium', threatNote: 'Many kids lose streak here.',
-    hp: 48, attackMin: 4, attackMax: 8, zapZone: 'wide',
-  },
-  // ── Boss 4 — Tier 2-3 ──────────────────────────────────────────────────────
-  {
-    name: 'Grime Crawler',
-    tagline: "It doesn't walk. It smears.",
-    taglineHighlight: 'smears',
-    power: 60, bonus: 30,
-    weakness: 'Scrubbing',
-    video: require('./assets/boss-intro.mp4'),
-    tiers: [2, 3],
-    threat: 'Medium', threatNote: 'Consistent chores are your best weapon.',
-    hp: 60, attackMin: 6, attackMax: 10, zapZone: 'normal',
-  },
-  // ── Boss 5 — Tier 3-4 ──────────────────────────────────────────────────────
-  {
-    name: 'Mire Lurker',
-    tagline: "Born from the swamp's worst nightmare.",
-    taglineHighlight: 'nightmare',
-    power: 70, bonus: 35,
-    weakness: 'Mopping',
-    video: require('./assets/boss-intro.mp4'),
     tiers: [3, 4],
-    threat: 'Medium', threatNote: 'Only kids with a full week survive.',
-    hp: 72, attackMin: 8, attackMax: 12, zapZone: 'normal',
+    threat: 'Medium', threatNote: 'Many kids lose their streak here.',
+    hp: 62, attackMin: 13, attackMax: 18, zapZone: 'normal',
   },
   // ── Boss 6 — Tier 4-5 ──────────────────────────────────────────────────────
   {
-    name: 'Clutter Colossus',
-    tagline: "Built from everything you never put away.",
-    taglineHighlight: 'never',
-    power: 80, bonus: 40,
+    name: 'The Clatter',
+    tagline: "Everything you left out. Now it's angry.",
+    taglineHighlight: 'angry',
+    power: 76, bonus: 250, captureCoins: 250,
     weakness: 'Folding',
     video: require('./assets/boss-intro.mp4'),
     tiers: [4, 5],
-    threat: 'Hard',   threatNote: 'Skipped chores will cost you here.',
-    hp: 85, attackMin: 10, attackMax: 14, zapZone: 'normal',
+    threat: 'Medium', threatNote: 'Skipped chores echo loudly here.',
+    hp: 76, attackMin: 15, attackMax: 20, zapZone: 'normal',
   },
   // ── Boss 7 — Tier 5-6 ──────────────────────────────────────────────────────
   {
-    name: 'Rust Baron',
-    tagline: "Centuries of neglect made him unstoppable.",
-    taglineHighlight: 'unstoppable',
-    power: 90, bonus: 45,
-    weakness: 'Polishing',
+    name: 'Grimelord',
+    tagline: "Filth given form. Neglect given a name.",
+    taglineHighlight: 'name',
+    power: 90, bonus: 300, captureCoins: 300,
+    weakness: 'Scrubbing',
     video: require('./assets/boss-intro.mp4'),
     tiers: [5, 6],
-    threat: 'Hard',   threatNote: "The Baron doesn't forgive lazy weeks.",
-    hp: 100, attackMin: 12, attackMax: 16, zapZone: 'narrow',
+    threat: 'Hard', threatNote: "The Grimelord rewards only full effort.",
+    hp: 90, attackMin: 17, attackMax: 22, zapZone: 'normal',
   },
   // ── Boss 8 — Tier 6-7 ──────────────────────────────────────────────────────
   {
-    name: 'Filth Wraith',
-    tagline: "It seeps through walls. It never sleeps.",
-    taglineHighlight: 'never sleeps',
-    power: 100, bonus: 50,
-    weakness: 'Vacuuming',
+    name: 'Forkfang',
+    tagline: "Left in the sink too long. Now it bites.",
+    taglineHighlight: 'bites',
+    power: 106, bonus: 350, captureCoins: 350,
+    weakness: 'Washing',
     video: require('./assets/boss-intro.mp4'),
     tiers: [6, 7],
-    threat: 'Hard',   threatNote: 'Full completion recommended before fighting.',
-    hp: 120, attackMin: 14, attackMax: 18, zapZone: 'narrow',
+    threat: 'Hard', threatNote: 'Full completion strongly recommended.',
+    hp: 106, attackMin: 19, attackMax: 25, zapZone: 'narrow',
   },
   // ── Boss 9 — Tier 7 ────────────────────────────────────────────────────────
   {
-    name: 'Chaos Engine',
-    tagline: "Order is its prey. Chaos is its nature.",
-    taglineHighlight: 'chaos',
-    power: 110, bonus: 55,
-    weakness: 'Sorting',
+    name: 'Vacuumbite',
+    tagline: "It swallowed the last clean corner. Of everything.",
+    taglineHighlight: 'everything',
+    power: 124, bonus: 400, captureCoins: 400,
+    weakness: 'Vacuuming',
     video: require('./assets/boss-intro.mp4'),
     tiers: [7],
-    threat: 'Extreme', threatNote: 'Only the most consistent kids survive.',
-    hp: 160, attackMin: 16, attackMax: 20, zapZone: 'narrow',
+    threat: 'Hard', threatNote: 'Only the most consistent kids survive.',
+    hp: 124, attackMin: 21, attackMax: 28, zapZone: 'narrow',
   },
   // ── Boss 10 — Tier 7 ───────────────────────────────────────────────────────
   {
-    name: 'Vorth Akar',
-    tagline: "Chaos incarnate. Pure destruction.",
-    taglineHighlight: 'chaos',
-    power: 120, bonus: 60,
-    weakness: 'Discipline',
+    name: 'The Overflow',
+    tagline: "The mess spilled over. There's no containing it.",
+    taglineHighlight: 'no containing it',
+    power: 145, bonus: 450, captureCoins: 450,
+    weakness: 'Mopping',
     video: require('./assets/boss-intro.mp4'),
     tiers: [7],
-    threat: 'Extreme', threatNote: 'Top performers only.',
-    hp: 240, attackMin: 18, attackMax: 24, zapZone: 'very-narrow',
+    threat: 'Extreme', threatNote: 'Extreme focus required. No missed days.',
+    hp: 145, attackMin: 23, attackMax: 32, zapZone: 'narrow',
+  },
+  // ── Boss 11 — Tier 7 ───────────────────────────────────────────────────────
+  {
+    name: 'Mildew Queen',
+    tagline: "She's been growing in the walls since last winter.",
+    taglineHighlight: 'growing',
+    power: 190, bonus: 500, captureCoins: 500,
+    weakness: 'Scrubbing',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [7],
+    threat: 'Extreme', threatNote: 'Top performers only. No shortcuts.',
+    hp: 190, attackMin: 25, attackMax: 36, zapZone: 'very-narrow',
+  },
+  // ── Boss 12 — Tier 7 ───────────────────────────────────────────────────────
+  {
+    name: 'Dishocalypse',
+    tagline: "Every dish you ignored. Every one.",
+    taglineHighlight: 'every one',
+    power: 240, bonus: 600, captureCoins: 600,
+    weakness: 'Washing',
+    video: require('./assets/boss-intro.mp4'),
+    tiers: [7],
+    threat: 'Extreme', threatNote: 'The ultimate test. 100% completion or bust.',
+    hp: 240, attackMin: 28, attackMax: 40, zapZone: 'very-narrow',
   },
 ];
 
@@ -365,7 +391,7 @@ function battleScript(monsterName: string, bossName: string, won: boolean) {
 
 // ─── Monster images ───────────────────────────────────────────────────────────
 
-type MonsterId = 'slime' | 'robot' | 'flamer';
+type MonsterId = 'slime' | 'robot' | 'flamer' | 'candy' | 'food';
 
 const SLIME_IMAGES = [
   require('./assets/monstirs/slime/slimer_1.png'),
@@ -405,6 +431,8 @@ const MONSTER_IMAGES_BY_KIND: Record<MonsterId, typeof SLIME_IMAGES> = {
   slime:  SLIME_IMAGES,
   robot:  ROBOT_IMAGES,
   flamer: FLAMER_IMAGES,
+  candy:  SLIME_IMAGES,   // placeholder until candy assets exist
+  food:   SLIME_IMAGES,   // placeholder until food assets exist
 };
 
 /** Platform image for each monster */
@@ -412,6 +440,8 @@ const PLATFORM_BY_KIND: Record<MonsterId, number> = {
   slime:  require('./assets/platforms/platformSlime.png'),
   robot:  require('./assets/platforms/platformRobot.png'),
   flamer: require('./assets/platforms/platformLava.png'),
+  candy:  require('./assets/platforms/platformSlime.png'), // placeholder
+  food:   require('./assets/platforms/platformSlime.png'), // placeholder
 };
 
 /** width / height aspect ratio for each platform image */
@@ -419,6 +449,8 @@ const PLATFORM_ASPECT_BY_KIND: Record<MonsterId, number> = {
   slime:  672 / 448,   // platformSlime.png natural dims
   robot:  340 / 230,   // platformRobot.png natural dims
   flamer: 672 / 448,   // platformLava.png — update if different
+  candy:  672 / 448,   // placeholder
+  food:   672 / 448,   // placeholder
 };
 
 // Boss SVGs — spikier and more intimidating
@@ -1504,7 +1536,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
           <View style={w.stakeRow}>
             <View style={w.stakeItem}>
               <Image source={require('./assets/icons/icon-coin.png')} style={w.stakeIcon} resizeMode="contain" />
-              <Text style={w.stakeVal}>{boss.bonus}</Text>
+              <Text style={w.stakeVal}>{boss.captureCoins}</Text>
               <Text style={w.stakeLbl}>coins</Text>
             </View>
             <View style={w.stakeItem}>
@@ -1641,7 +1673,7 @@ function BossIntroScreen({ monsterIdx, onReady }: {
   };
 
   const rewards = [
-    { icon: require('./assets/icons/icon-coin.png'),   label: `${boss.bonus}¢` },
+    { icon: require('./assets/icons/icon-coin.png'),   label: `${boss.captureCoins} coins` },
     { icon: require('./assets/icons/icon-star.png'), label: '50 xp'          },
     { icon: require('./assets/icons/icon-gem.png'),  label: '1 shard'        },
   ];
@@ -1734,21 +1766,23 @@ function BossIntroScreen({ monsterIdx, onReady }: {
 
 // ── 4. Result Screen ──────────────────────────────────────────────────────────
 
-function ResultScreen({ monsterIdx, won, bonusCoins, onDone, monsterImg }: {
-  monsterIdx: MonsterIdx; won: boolean; bonusCoins: number; onDone: () => void; monsterImg: number;
+function ResultScreen({ monsterIdx, captured, bonusCoins, onDone, monsterImg }: {
+  monsterIdx: MonsterIdx; captured: boolean; bonusCoins: number; onDone: () => void; monsterImg: number;
 }) {
   const boss = getWeeklyBoss(monsterIdx);
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20 }}>
-      {won
+      {captured
         ? <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(56), height: scale(56) }} resizeMode="contain" />
-        : <Image source={require('./assets/icons/icon-skull.png')} style={{ width: scale(56), height: scale(56) }} resizeMode="contain" />
+        : <Image source={require('./assets/icons/icon-skull.png')}  style={{ width: scale(56), height: scale(56) }} resizeMode="contain" />
       }
-      <Text style={{ fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -0.5 }}>
-        {won ? 'Victory!' : 'Defeated'}
+      <Text style={{ fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -0.5, textAlign: 'center' }}>
+        {captured ? 'CAPTURED!' : `${boss.name} got away...`}
       </Text>
-      <Text style={{ fontSize: scale(15), color: C.muted, textAlign: 'center' }}>
-        {won ? `You beat ${boss.name} and earned` : 'You earned'} {bonusCoins} coins
+      <Text style={{ fontSize: scale(15), color: C.muted, textAlign: 'center', lineHeight: scale(22) }}>
+        {captured
+          ? `It's yours! You earned ${bonusCoins} coins.`
+          : `This time.\nIt's wounded. Keep doing your chores\nand it'll be weaker next battle.`}
       </Text>
       <TouchableOpacity
         style={{ backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, ...SOLID_SHADOW }}
@@ -1772,6 +1806,8 @@ function calcPowerRating(pct: number, idx: number, streak: number): number {
   else base = Math.max(5, Math.round((pct / 40) * 15));
   return base + idx * 10 + (streak >= 5 ? 5 : 0);
 }
+
+const SHARD_CAP = 12; // max shards a player can bring into a battle
 
 function calcWeeklyShards(pct: number): number {
   if (pct >= 100) return 6;
@@ -2043,9 +2079,11 @@ function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
 
 // ── Attack name flavour text by monster type ──────────────────────────────────
 const ATTACK_NAMES: Record<MonsterId, Record<string, string>> = {
-  slime:  { 'zap-strike':'Goop Zap',     'frenzy':'Slime Frenzy',   'overcharge':'Ooze Overload',  'whack':'Glob Smack',    'block-breaker':'Slime Code',   'power-slash':'Goo Slash',    'earthquake':'Slime Quake',  'defuse':'Bubble Bomb',   'combo-chain':'Slime Chain'   },
-  flamer: { 'zap-strike':'Ember Blast',  'frenzy':'Inferno Frenzy', 'overcharge':'Magma Surge',    'whack':'Scorch Spot',   'block-breaker':'Fire Code',    'power-slash':'Flame Slash',  'earthquake':'Magma Quake',  'defuse':'Fire Bomb',     'combo-chain':'Fire Chain'    },
-  robot:  { 'zap-strike':'Shock Strike', 'frenzy':'Glitch Frenzy',  'overcharge':'Power Surge',    'whack':'Bug Zap',       'block-breaker':'Hack Attack',  'power-slash':'Blade Slash',  'earthquake':'System Crash', 'defuse':'Circuit Bomb',  'combo-chain':'Combo Protocol'},
+  slime:  { 'zap-strike':'Goop Zap',       'frenzy':'Slime Frenzy',    'overcharge':'Ooze Overload',   'whack':'Glob Smack',     'block-breaker':'Slime Code',    'power-slash':'Goo Slash',      'earthquake':'Slime Quake',    'defuse':'Bubble Bomb',    'combo-chain':'Slime Chain'    },
+  flamer: { 'zap-strike':'Ember Blast',    'frenzy':'Inferno Frenzy',  'overcharge':'Magma Surge',     'whack':'Scorch Spot',    'block-breaker':'Fire Code',     'power-slash':'Flame Slash',    'earthquake':'Magma Quake',    'defuse':'Fire Bomb',      'combo-chain':'Fire Chain'     },
+  robot:  { 'zap-strike':'Shock Strike',   'frenzy':'Glitch Frenzy',   'overcharge':'Power Surge',     'whack':'Bug Zap',        'block-breaker':'Hack Attack',   'power-slash':'Blade Slash',    'earthquake':'System Crash',   'defuse':'Circuit Bomb',   'combo-chain':'Combo Protocol' },
+  candy:  { 'zap-strike':'Sugar Rush',     'frenzy':'Candy Frenzy',    'overcharge':'Syrup Surge',     'whack':'Jawbreaker',     'block-breaker':'Sweet Code',    'power-slash':'Lollipop Slash', 'earthquake':'Candy Quake',    'defuse':'Pop Rocks Bomb', 'combo-chain':'Sweet Chain'    },
+  food:   { 'zap-strike':'Sauce Splat',    'frenzy':'Food Fight',      'overcharge':'Grease Surge',    'whack':'Splat Smack',    'block-breaker':'Crumb Code',    'power-slash':'Noodle Slash',   'earthquake':'Kitchen Crash',  'defuse':'Mess Bomb',      'combo-chain':'Leftover Chain' },
 };
 function atkName(monsterId: MonsterId, mechanic: string, fallback: string): string {
   return ATTACK_NAMES[monsterId]?.[mechanic] ?? fallback;
@@ -2399,7 +2437,7 @@ const ATTACK_POOL: Omit<AttackCard,'label'>[] = [
 function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, totalPower, completionPct, shards: initialShards, weaknessUnlocked, guaranteedWin, onBattleEnd, bossOverride }: {
   monsterIdx: MonsterIdx; monsterImg: number; monsterName: string; monsterId: MonsterId;
   totalPower: number; completionPct: number; shards: number; weaknessUnlocked: boolean;
-  guaranteedWin: boolean; onBattleEnd: (result: 'win' | 'loss', shardsUsed: number) => void;
+  guaranteedWin: boolean; onBattleEnd: (result: 'captured' | 'got-away', shardsUsed: number) => void;
   bossOverride?: Boss;
 }) {
   const boss    = bossOverride ?? getWeeklyBoss(monsterIdx);
@@ -2454,12 +2492,16 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     Animated.timing(flashAnim, { toValue: 0, duration: 600, useNativeDriver: false }).start();
   };
 
-  // Stepped power multiplier from MON-19
-  const powerMult = completionPct >= 100 ? 1.0
+  // Granular stepped power multiplier (MON-19 9-step table)
+  const powerMult = completionPct >= 100 ? 1.00
                   : completionPct >= 80  ? 0.75
-                  : completionPct >= 60  ? 0.50
-                  : completionPct >= 40  ? 0.30
-                  : 0.15;
+                  : completionPct >= 60  ? 0.55
+                  : completionPct >= 40  ? 0.35
+                  : completionPct >= 30  ? 0.28
+                  : completionPct >= 20  ? 0.24
+                  : completionPct >= 10  ? 0.18
+                  : completionPct >= 1   ? 0.12
+                  : 0.08;
 
   // Evolution damage cap — per-level, all 8 monster evolutions
   const EVO_CAP_FACTORS = [0.55, 0.62, 0.68, 0.74, 0.80, 0.88, 0.94, 1.0];
@@ -2472,10 +2514,10 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     return Math.round(withCrit * evolutionCapFactor);
   };
 
-  // Aggression multiplier: Bosses 1–3 only. Ends fights fast at very low completion
+  // Aggression multiplier: Bosses 1–4 only. Ends fights fast at very low completion
   // rather than letting them drag for 20 turns dealing no damage.
   const bossArrayIdx = BOSSES.indexOf(boss);
-  const isEarlyBoss  = bossArrayIdx >= 0 && bossArrayIdx <= 2;
+  const isEarlyBoss  = bossArrayIdx >= 0 && bossArrayIdx <= 3;
   const aggressionMult = isEarlyBoss
     ? completionPct === 0  ? 7.0
     : completionPct < 20   ? 5.0
@@ -2498,7 +2540,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     setLog(`${monsterName} used ${attackName}! Dealt ${dmg} damage!`);
     if (newEH <= 0) {
       setLive(false);
-      setTimeout(() => onBattleEnd('win', shardsUsed), 900);
+      setTimeout(() => onBattleEnd('captured', shardsUsed), 900);
       return true;
     }
     return false;
@@ -2521,7 +2563,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
       setLog(`${boss.name} used ${atk}!${shield} Dealt ${d} dmg!`);
       if (newPH <= 0) {
         setLive(false);
-        setTimeout(() => onBattleEnd('loss', shardsUsed), 900);
+        setTimeout(() => onBattleEnd('got-away', shardsUsed), 900);
         return;
       }
       setTimeout(() => {
@@ -3096,7 +3138,7 @@ function Toast({ message }: { message: string }) {
 function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx }: {
   coins: number;
   done: Partial<Record<ChoreId, boolean>>;
-  battleResult: 'win' | 'loss' | null;
+  battleResult: 'captured' | 'got-away' | null;
   monsterIdx: MonsterIdx;
   baseRate: string;
   goals: SavedGoal[];
@@ -4243,14 +4285,20 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
   );
 }
 
-function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapEnabled, setWeeklyCap }: {
+function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapEnabled, setWeeklyCap, battleCoinBonusEnabled, setBattleCoinBonusEnabled, battleCoinBonusMultiplier, setBattleCoinBonusMultiplier }: {
   onBack: () => void;
   onRateGuide: () => void;
   baseRate: string;
   setBaseRate: (v: string) => void;
   weeklyCapEnabled: boolean;
   setWeeklyCap: (v: boolean) => void;
+  battleCoinBonusEnabled: boolean;
+  setBattleCoinBonusEnabled: (v: boolean) => void;
+  battleCoinBonusMultiplier: number;
+  setBattleCoinBonusMultiplier: (v: number) => void;
 }) {
+  const MULTIPLIER_STEPS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
   return (
     <CreamBg>
       {/* Header */}
@@ -4306,6 +4354,57 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
             />
           </View>
 
+        </View>
+
+        {/* Battle capture bonus */}
+        <View style={p.sectionCard}>
+          <Text style={p.sectionCardTitle}>Battle capture bonus</Text>
+          <Text style={p.sectionCardSub}>Award coins when your kid captures a boss in battle.</Text>
+
+          <View style={[p.settingsRow, { marginTop: 12 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={p.settingsRowLabel}>Enable capture payout</Text>
+              <Text style={p.settingsRowSub}>Pay out the boss's capture value on win.</Text>
+            </View>
+            <Switch
+              value={battleCoinBonusEnabled}
+              onValueChange={setBattleCoinBonusEnabled}
+              trackColor={{ false: '#D0CEC8', true: '#C5F215' }}
+              thumbColor={battleCoinBonusEnabled ? '#1A1A1A' : '#F4F3F4'}
+            />
+          </View>
+
+          {battleCoinBonusEnabled && (
+            <View style={{ marginTop: 16, gap: 10 }}>
+              <Text style={[p.settingsRowLabel, { marginBottom: 4 }]}>
+                Multiplier: <Text style={{ color: '#6B35F0', fontWeight: '900' }}>{battleCoinBonusMultiplier}×</Text>
+              </Text>
+              <Text style={p.settingsRowSub}>Scales the coin reward. 1× = full capture value.</Text>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                {MULTIPLIER_STEPS.map(step => {
+                  const selected = battleCoinBonusMultiplier === step;
+                  return (
+                    <TouchableOpacity
+                      key={step}
+                      onPress={() => setBattleCoinBonusMultiplier(step)}
+                      activeOpacity={0.8}
+                      style={{
+                        paddingVertical: 8, paddingHorizontal: 14,
+                        borderRadius: 20,
+                        backgroundColor: selected ? '#1A1A1A' : '#F0EDE7',
+                        borderWidth: 2,
+                        borderColor: selected ? '#1A1A1A' : '#D0CEC8',
+                      }}
+                    >
+                      <Text style={{ fontSize: scale(13), fontWeight: '700', color: selected ? '#C5F215' : C.muted }}>
+                        {step}×
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
 
         {/* History row */}
@@ -5910,7 +6009,9 @@ function AppInner() {
   const [coins, setCoins]               = useState(0);
   const [done, setDone]                 = useState<Partial<Record<ChoreId, boolean>>>({});
   const [bonusCoins, setBonusCoins]     = useState(0);
-  const [battleResult, setBattleResult] = useState<'win' | 'loss' | null>(null);
+  const [battleResult, setBattleResult] = useState<'captured' | 'got-away' | null>(null);
+  const [battleCoinBonusEnabled,    setBattleCoinBonusEnabled]    = useState(false);
+  const [battleCoinBonusMultiplier, setBattleCoinBonusMultiplier] = useState(1.0);
 
   // Parent state
   const [viewMode, setViewMode]               = useState<ViewMode>('kid');
@@ -6158,33 +6259,31 @@ function AppInner() {
   const openPayout = useCallback(() => {
     const approvedChores = managedChores.filter(c => c.status === 'approved');
     const boss = getWeeklyBoss(monsterIdx);
-    const bBonus = battleResult === 'win' ? boss.bonus : null;
-    const base = Math.max(0, coins - (bBonus ?? 0));
+    const bBonus = battleResult === 'captured' ? boss.captureCoins : null;
     setPayoutSnapshot({
       amount: coins,
       completedCount: approvedChores.length,
-      battleWon: battleResult === 'win' ? true : battleResult === 'loss' ? false : null,
+      battleWon: battleResult === 'captured' ? true : battleResult === 'got-away' ? false : null,
       battleBonus: bBonus,
     });
     setParentScreen('parentPayout');
   }, [managedChores, monsterIdx, battleResult, coins]);
 
-  const handleBattleEnd = useCallback((result: 'win' | 'loss', shardsUsed: number) => {
+  const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number) => {
     const boss = getWeeklyBoss(monsterIdx);
-    if (result === 'win') {
-      setCoins(prev => prev + boss.bonus);
-      setBonusCoins(boss.bonus);
+    if (result === 'captured' && battleCoinBonusEnabled) {
+      const reward = Math.round(boss.captureCoins * battleCoinBonusMultiplier);
+      setCoins(prev => prev + reward);
+      setBonusCoins(reward);
     } else {
-      const consolation = Math.round(boss.bonus * 0.2);
-      setCoins(prev => prev + consolation);
-      setBonusCoins(consolation);
+      setBonusCoins(0);
     }
     setBattleResult(result);
     setWeeklyXp(0);
     setManagedChores(prev => prev.map(c => ({ ...c, weeklyCompletions: 0, status: 'active' as const, rejectionNote: undefined })));
     setShards(prev => Math.max(0, prev - shardsUsed));
     setScreen('result');
-  }, [monsterIdx]);
+  }, [monsterIdx, battleCoinBonusEnabled, battleCoinBonusMultiplier]);
 
   const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
 
@@ -6418,7 +6517,7 @@ function AppInner() {
               const completionPct = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
               const totalPower = calcPowerRating(completionPct, monsterIdx, currentStreak);
               const weeklyShards = calcWeeklyShards(completionPct);
-              const battleShards = shards + weeklyShards;
+              const battleShards = Math.min(SHARD_CAP, shards + weeklyShards);
               const weaknessUnlocked = completionPct >= 50 && currentStreak >= 5;
               const guaranteedWin = completionPct >= 100;
               return <BattleArenaScreen
@@ -6427,7 +6526,7 @@ function AppInner() {
                 guaranteedWin={guaranteedWin} onBattleEnd={handleBattleEnd}
               />;
             })()}
-            {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} won={battleResult === 'win'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
+            {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} captured={battleResult === 'captured'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
             {screen === 'wallet'   && <WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={goals} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={currentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={() => setViewMode('parent')} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} />}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} onGoalCreated={addGoal} monsterName={effectiveMonsterName} />}
             {screen === 'kidPayout' && payoutSnapshot && <KidPayoutScreen amount={payoutSnapshot.amount} completedCount={payoutSnapshot.completedCount} battleWon={payoutSnapshot.battleWon} battleBonus={payoutSnapshot.battleBonus} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setPayoutSnapshot(null); setScreen('home'); setTab('home'); }} />}
@@ -6438,7 +6537,7 @@ function AppInner() {
             {parentScreen === 'parentHome' && <ParentHomeScreen onNav={navParent} onSwitchToKid={() => setViewMode('kid')} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} kidName={currentKidName} coins={coins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} />}
             {parentScreen === 'parentPayout' && payoutSnapshot && <ParentPayoutScreen kidName={currentKidName} coins={payoutSnapshot.amount} baseCoins={payoutSnapshot.amount - (payoutSnapshot.battleBonus ?? 0)} battleBonus={payoutSnapshot.battleBonus} battleWon={payoutSnapshot.battleWon} completedChores={managedChores.filter(c => c.status === 'approved')} onConfirm={confirmPayout} onBack={goBack} />}
             {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ParentChoresScreen chores={managedChores} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} />}
-            {parentScreen === 'payRates'  && <PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} weeklyCapEnabled={weeklyCapEnabled} setWeeklyCap={setWeeklyCap} />}
+            {parentScreen === 'payRates'  && <PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} weeklyCapEnabled={weeklyCapEnabled} setWeeklyCap={setWeeklyCap} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} />}
             {parentScreen === 'rateGuide' && <RateGuideScreen onBack={goBack} />}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
             {parentScreen === 'settings'  && <ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} />}
@@ -6720,7 +6819,7 @@ function AppInner() {
                   {/* Computed preview */}
                   <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 10, gap: 4 }}>
                     <Text style={{ color: '#C5F215', fontSize: scale(11), fontWeight: '700' }}>
-                      Power: {calcPowerRating(dbgCompletionPct, monsterIdx, dbgWeaknessUnlocked ? 5 : 0)}  ·  Boss HP: {BOSSES[dbgBossIdx].power}  ·  Monster HP: {Math.round(50 + calcPowerRating(dbgCompletionPct, monsterIdx, 0) * 0.5)}
+                      Power: {calcPowerRating(dbgCompletionPct, monsterIdx, dbgWeaknessUnlocked ? 5 : 0)}  ·  Boss HP: {BOSSES[dbgBossIdx].hp}  ·  Monster HP: {Math.round(50 + calcPowerRating(dbgCompletionPct, monsterIdx, 0) * 0.5)}
                     </Text>
                     <Text style={{ color: '#ABABAB', fontSize: scale(11) }}>
                       Guaranteed win: {dbgCompletionPct >= 100 ? 'YES ✅' : 'no'}
