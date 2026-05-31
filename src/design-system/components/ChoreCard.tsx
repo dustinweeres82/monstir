@@ -53,7 +53,7 @@ const s = StyleSheet.create({
   },
   title: {
     fontSize: fontSize.xl,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
     color: colors.black,
     marginBottom: 3,
   },
@@ -71,7 +71,7 @@ const s = StyleSheet.create({
   },
   reward: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: colors.black,
   },
   checkbox: {

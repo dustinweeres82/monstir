@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "monstir-landing (Next.js)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/dustinweeres/monstir-landing",
+      "port": 3000
+    },
+    {
+      "name": "monstir-app (Expo)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "cwd": "/Users/dustinweeres/monstir",
+      "port": 8081
+    },
+    {
+      "name": "monstir-app web (Expo Web)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "web"],
+      "cwd": "/Users/dustinweeres/monstir",
+      "port": 19006
+    }
+  ]
+}

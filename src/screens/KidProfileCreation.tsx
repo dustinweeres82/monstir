@@ -5,7 +5,7 @@ import {
   Modal, Platform, ActionSheetIOS,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, radii, spacing } from '../design-system/tokens';
+import { colors, fontSize, fontWeight, radii, spacing, scale } from '../design-system/tokens';
 import { Button } from '../design-system/components/Button';
 import { CreamBg } from '../components/CreamBg';
 
@@ -325,7 +325,7 @@ function StepAvatar({ onNext, onBack, avatarIdx, setAvatarIdx, accentColor, setA
         <TouchableOpacity style={s.avatarLarge} onPress={openSheet} activeOpacity={0.8}>
           <Image source={AVATARS[avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
           <View style={s.avatarEditBadge}>
-            <Text style={{ fontSize: 14 }}>✏️</Text>
+            <Text style={{ fontSize: scale(14) }}>✏️</Text>
           </View>
         </TouchableOpacity>
 
@@ -548,7 +548,7 @@ function StepMonsterName({ onNext, onBack, nickname, setNickname, monsterKey }: 
         <View style={{ alignItems: 'center' }}>
           <Image source={monster.image} style={{ width: 160, height: 160 }} resizeMode="contain" />
           <View style={s.heartBubble}>
-            <Text style={{ fontSize: 20 }}>❤️</Text>
+            <Text style={{ fontSize: scale(20) }}>❤️</Text>
           </View>
         </View>
 
@@ -674,8 +674,8 @@ const s = StyleSheet.create({
     minHeight: 48,
   },
   backBtn:  { padding: 4 },
-  backArrow: { fontSize: 22, color: colors.black, fontWeight: fontWeight.semibold },
-  skipLabel: { fontSize: fontSize.base, color: colors.black, fontWeight: fontWeight.semibold },
+  backArrow: { fontSize: scale(22), color: colors.black, fontFamily: 'Inter_600SemiBold' },
+  skipLabel: { fontSize: fontSize.base, color: colors.black, fontFamily: 'Inter_600SemiBold' },
 
   content: {
     flex: 1,
@@ -692,28 +692,28 @@ const s = StyleSheet.create({
   // Typography
   welcomeHeading: {
     fontSize: fontSize.h2,
-    fontWeight: fontWeight.black,
+    fontFamily: 'Inter_900Black',
     color: colors.black,
     textAlign: 'center',
-    lineHeight: 34,
+    lineHeight: scale(34),
   },
   heading: {
-    fontSize: 22,
-    fontWeight: fontWeight.black,
+    fontSize: scale(22),
+    fontFamily: 'Inter_900Black',
     color: colors.black,
-    lineHeight: 28,
+    lineHeight: scale(28),
     textAlign: 'center',
   },
   subheading: {
     fontSize: fontSize.sm,
     color: colors.muted,
-    lineHeight: 18,
+    lineHeight: scale(18),
   },
   body: {
     fontSize: fontSize.base,
     color: colors.black,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: scale(22),
   },
 
   // Dots
@@ -739,10 +739,10 @@ const s = StyleSheet.create({
     fontSize: fontSize.lg,
     color: colors.black,
     paddingVertical: 14,
-    fontWeight: fontWeight.medium,
+    fontFamily: 'Inter_500Medium',
   },
   inputClear: { padding: 4 },
-  inputClearText: { fontSize: 14, color: colors.muted },
+  inputClearText: { fontSize: scale(14), color: colors.muted },
 
   // Age picker button
   agePickerBtn: {
@@ -753,8 +753,8 @@ const s = StyleSheet.create({
     backgroundColor: colors.surface,
     minWidth: 200, justifyContent: 'center',
   },
-  agePickerText:    { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.black },
-  agePickerChevron: { fontSize: 16, color: colors.muted },
+  agePickerText:    { fontSize: fontSize.xl, fontFamily: 'Inter_700Bold', color: colors.black },
+  agePickerChevron: { fontSize: scale(16), color: colors.muted },
 
   // Avatar large circle (step)
   avatarLarge: {
@@ -794,12 +794,12 @@ const s = StyleSheet.create({
   sheetScrim:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet:           { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: colors.black, borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   sheetHandle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  sheetTitle:      { fontSize: 12, fontWeight: fontWeight.bold, color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
+  sheetTitle:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
   sheetRow:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16 },
   sheetRowBorder:  { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
-  sheetRowLabel:   { flex: 1, fontSize: 17, fontWeight: fontWeight.semibold, color: colors.black },
+  sheetRowLabel:   { flex: 1, fontSize: scale(17), fontFamily: 'Inter_600SemiBold', color: colors.black },
   sheetRowLabelActive: { color: PURPLE },
-  sheetCheck:      { fontSize: 17, color: PURPLE, fontWeight: fontWeight.bold },
+  sheetCheck:      { fontSize: scale(17), color: PURPLE, fontFamily: 'Inter_700Bold' },
 
   // Carousel arrow buttons
   arrowBtn: {
@@ -828,15 +828,15 @@ const s = StyleSheet.create({
 
   // Choose monster screen — header
   chooseHeading: {
-    fontSize: 34,
-    fontWeight: fontWeight.black,
+    fontSize: scale(34),
+    fontFamily: 'Inter_900Black',
     color: colors.black,
-    lineHeight: 40,
+    lineHeight: scale(40),
     marginTop: 6,
   },
   chooseSubtitle: {
-    fontSize: 17,
-    fontWeight: fontWeight.semibold,
+    fontSize: scale(17),
+    fontFamily: 'Inter_600SemiBold',
     color: '#6E6D6C',
     marginTop: 2,
     marginBottom: 4,
@@ -862,8 +862,8 @@ const s = StyleSheet.create({
     height: CARD_W * 1.275,
   },
   monsterCardName: {
-    fontSize: 20,
-    fontWeight: fontWeight.bold,
+    fontSize: scale(20),
+    fontFamily: 'Inter_700Bold',
     color: colors.black,
     textAlign: 'center',
     marginTop: 4,
@@ -909,8 +909,8 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statLabel2:  { fontSize: 12, fontWeight: fontWeight.semibold, color: colors.black },
-  statDesc:    { fontSize: 10, color: colors.muted },
+  statLabel2:  { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: colors.black },
+  statDesc:    { fontSize: scale(10), color: colors.muted },
   statTrack2: {
     flex: 1,
     height: 14,
@@ -925,8 +925,8 @@ const s = StyleSheet.create({
     borderRadius: 8,
   },
   statNum: {
-    fontSize: 12,
-    fontWeight: fontWeight.semibold,
+    fontSize: scale(12),
+    fontFamily: 'Inter_600SemiBold',
     color: colors.black,
     width: 22,
     textAlign: 'right',
@@ -967,7 +967,7 @@ const s = StyleSheet.create({
   },
   confettiPiece: {
     position: 'absolute',
-    fontSize: 20,
+    fontSize: scale(20),
   },
   officialCard: {
     flexDirection: 'row',
@@ -981,10 +981,10 @@ const s = StyleSheet.create({
     marginTop: spacing.lg,
     width: '100%',
   },
-  officialName: { fontSize: fontSize.xl, fontWeight: fontWeight.black, color: colors.black },
-  officialLevel: { fontSize: fontSize.sm, color: colors.muted, fontWeight: fontWeight.medium },
+  officialName: { fontSize: fontSize.xl, fontFamily: 'Inter_900Black', color: colors.black },
+  officialLevel: { fontSize: fontSize.sm, color: colors.muted, fontFamily: 'Inter_500Medium' },
   xpRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   xpTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: '#E8E4F4', overflow: 'hidden' },
   xpFill: { width: 12, height: '100%', borderRadius: 4, backgroundColor: PURPLE },
-  xpLabel: { fontSize: fontSize.xs, color: colors.muted, fontWeight: fontWeight.medium },
+  xpLabel: { fontSize: fontSize.xs, color: colors.muted, fontFamily: 'Inter_500Medium' },
 });

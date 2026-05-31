@@ -50,11 +50,11 @@ const s = StyleSheet.create({
   },
   label: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: colors.muted,
   },
   labelActive: {
     color: colors.white,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
   },
 });

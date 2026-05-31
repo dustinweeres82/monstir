@@ -45,7 +45,7 @@ const s = StyleSheet.create({
   },
   label: {
     fontSize: fontSize.md,
-    fontWeight: fontWeight.medium,
+    fontFamily: 'Inter_500Medium',
     color: colors.black,
   },
 });

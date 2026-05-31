@@ -111,6 +111,16 @@ export const fontWeight = {
   black:    '900' as const,
 };
 
+export const interFamily = {
+  light:    'Inter_300Light',
+  regular:  'Inter_400Regular',
+  medium:   'Inter_500Medium',
+  semibold: 'Inter_600SemiBold',
+  bold:     'Inter_700Bold',
+  heavy:    'Inter_800ExtraBold',
+  black:    'Inter_900Black',
+} as const;
+
 // ─── Shadows ─────────────────────────────────────────────────────────────────
 
 export const shadows = {
@@ -154,6 +164,20 @@ export const textStyles = {
     fontSize:   scale(64),
     lineHeight: scale(66),
     color:      colors.white,
+    textAlign:  'center' as const,
+  },
+
+  /**
+   * Secondary / subtitle text.
+   * Fredoka One 24 px, dark fill, centred.
+   * Used beneath ScreenHeading on full-bleed screens (onboarding, chest
+   * reveal, result screens) wherever a supporting line of copy is needed.
+   */
+  secondaryText: {
+    fontFamily: 'FredokaOne_400Regular',
+    fontSize:   scale(24),
+    lineHeight: scale(28),
+    color:      colors.black,
     textAlign:  'center' as const,
   },
 } as const;

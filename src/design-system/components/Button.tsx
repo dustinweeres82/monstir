@@ -1,6 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ViewStyle, Platform } from 'react-native';
-import { colors, fontSize, fontWeight } from '../tokens';
+import { colors, fontSize, fontWeight, scale } from '../tokens';
 
 type Variant = 'primary' | 'secondary';
 
@@ -27,6 +27,7 @@ export function Button({ label, onPress, variant = 'primary', disabled, style }:
 
 const s = StyleSheet.create({
   base: {
+    width: '100%',
     borderRadius: 80,
     paddingVertical: 18,
     alignItems: 'center',
@@ -44,6 +45,6 @@ const s = StyleSheet.create({
 });
 
 const labelStyle = StyleSheet.create({
-  primary:   { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.white },
-  secondary: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.black },
+  primary:   { fontFamily: 'Inter_700Bold', fontSize: scale(20), color: colors.white },
+  secondary: { fontFamily: 'Inter_700Bold', fontSize: scale(20), color: colors.black },
 });

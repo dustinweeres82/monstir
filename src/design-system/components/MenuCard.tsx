@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
-import { colors, radii, fontSize, fontWeight, borders, spacing } from '../tokens';
+import { colors, radii, fontSize, fontWeight, borders, spacing, scale } from '../tokens';
 import { IconBox } from './IconBox';
 
 interface MenuCardProps {
@@ -44,7 +44,7 @@ const s = StyleSheet.create({
   },
   title: {
     fontSize: fontSize.lg,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
     color: colors.black,
     marginBottom: 3,
   },
@@ -53,8 +53,8 @@ const s = StyleSheet.create({
     color: colors.muted,
   },
   arrow: {
-    fontSize: 22,
+    fontSize: scale(22),
     color: colors.black,
-    fontWeight: fontWeight.regular,
+    fontFamily: 'Inter_400Regular',
   },
 });

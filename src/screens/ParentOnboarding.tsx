@@ -5,7 +5,7 @@ import {
   Animated, Easing, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, radii, spacing } from '../design-system/tokens';
+import { colors, fontSize, fontWeight, radii, spacing, scale } from '../design-system/tokens';
 import { Button } from '../design-system/components/Button';
 import { CreamBg } from '../components/CreamBg';
 
@@ -296,7 +296,7 @@ function Step1AddChildren({
                 />
                 {children.length > 1 && (
                   <TouchableOpacity onPress={() => removeChild(child.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Text style={{ fontSize: 18, color: colors.muted }}>🗑</Text>
+                    <Text style={{ fontSize: scale(18), color: colors.muted }}>🗑</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -418,7 +418,7 @@ function Step2AssignChores({
               return (
                 <TouchableOpacity key={chore.id} style={s.choreRow} onPress={() => toggleChore(chore.id)} activeOpacity={0.8}>
                   <View style={[s.checkbox, checked && s.checkboxChecked]}>
-                    {checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>✓</Text>}
+                    {checked && <Text style={{ color: '#fff', fontSize: scale(12), fontFamily: 'Inter_700Bold' }}>✓</Text>}
                   </View>
                   <View style={[s.choreIconBox, { backgroundColor: chore.iconBg }]}>
                     <Image source={chore.icon} style={{ width: 24, height: 24 }} resizeMode="contain" />
@@ -470,14 +470,7 @@ function Step2AssignChores({
                     returnKeyType="done"
                     onSubmitEditing={addCustomChore}
                   />
-                  <TouchableOpacity
-                    style={[s.addChoreBtn, !choreInput.trim() && s.addChoreBtnDisabled]}
-                    onPress={addCustomChore}
-                    disabled={!choreInput.trim()}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={s.addChoreBtnLabel}>Add chore</Text>
-                  </TouchableOpacity>
+                  <Button label="Add chore" onPress={addCustomChore} disabled={!choreInput.trim()} />
                 </View>
                 <View style={{ height: Platform.OS === 'ios' ? 28 : 16 }} />
               </Animated.View>
@@ -572,7 +565,7 @@ function Step4AllSet({
                 </View>
               </View>
               <View style={s.monsterWaiting}>
-                <Text style={{ fontSize: 26 }}>?</Text>
+                <Text style={{ fontSize: scale(26) }}>?</Text>
                 <Text style={s.monsterWaitingLabel}>Monstir{'\n'}waiting...</Text>
               </View>
             </View>
@@ -627,20 +620,20 @@ const s = StyleSheet.create({
   // Header
   stepCounter: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
     color: PURPLE,
     letterSpacing: 0.5,
     marginBottom: 4,
   },
   heading: {
-    fontSize: 30,
-    fontWeight: fontWeight.black,
+    fontSize: scale(30),
+    fontFamily: 'Inter_900Black',
     color: colors.black,
-    lineHeight: 36,
+    lineHeight: scale(36),
   },
   subtitle: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.medium,
+    fontFamily: 'Inter_500Medium',
     color: colors.muted,
     marginTop: 4,
     marginBottom: 8,
@@ -661,7 +654,7 @@ const s = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.08)',
   },
   avatarInitial: {
-    fontWeight: fontWeight.black,
+    fontFamily: 'Inter_900Black',
     color: '#3A2080',
   },
 
@@ -678,29 +671,26 @@ const s = StyleSheet.create({
     gap: 4,
     alignSelf: 'flex-start',
   },
-  selectPillLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.black },
-  selectChevron:   { fontSize: 12, color: colors.muted },
+  selectPillLabel: { fontSize: fontSize.sm, fontFamily: 'Inter_600SemiBold', color: colors.black },
+  selectChevron:   { fontSize: scale(12), color: colors.muted },
 
   // Bottom sheet
   sheetScrim:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet:        { backgroundColor: colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1.5, borderColor: colors.border, borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   sheetHandle:  { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  sheetHeading: { fontSize: 12, fontWeight: fontWeight.bold, color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
+  sheetHeading: { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
   sheetRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16 },
   sheetRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
-  sheetRowLabel:  { flex: 1, fontSize: 17, fontWeight: fontWeight.semibold, color: colors.black },
+  sheetRowLabel:  { flex: 1, fontSize: scale(17), fontFamily: 'Inter_600SemiBold', color: colors.black },
   sheetRowLabelActive: { color: PURPLE },
-  sheetCheck:     { fontSize: 17, color: PURPLE, fontWeight: fontWeight.bold },
+  sheetCheck:     { fontSize: scale(17), color: PURPLE, fontFamily: 'Inter_700Bold' },
 
   // Add chore sheet
   addChoreBody:        { paddingHorizontal: 16, gap: 14 },
   iconPickerRow:       { gap: 10, paddingHorizontal: 2 },
   iconPickerCell:      { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   iconPickerCellActive: { borderColor: PURPLE },
-  addChoreInput:       { borderWidth: 1.5, borderColor: colors.border, borderRadius: radii.lg, paddingHorizontal: 16, paddingVertical: 14, fontSize: fontSize.lg, fontWeight: fontWeight.medium, color: colors.black, backgroundColor: colors.white },
-  addChoreBtn:         { backgroundColor: PURPLE, borderRadius: radii.full, paddingVertical: 14, alignItems: 'center' },
-  addChoreBtnDisabled: { opacity: 0.4 },
-  addChoreBtnLabel:    { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: '#fff' },
+  addChoreInput:       { borderWidth: 1.5, borderColor: colors.border, borderRadius: radii.lg, paddingHorizontal: 16, paddingVertical: 14, fontSize: fontSize.lg, fontFamily: 'Inter_500Medium', color: colors.black, backgroundColor: colors.white },
 
   // Avatar grid in sheet
   avatarGrid:         { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
@@ -725,7 +715,7 @@ const s = StyleSheet.create({
   childNameInput: {
     flex: 1,
     fontSize: fontSize.xl,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
     color: colors.black,
     paddingVertical: 4,
   },
@@ -739,7 +729,7 @@ const s = StyleSheet.create({
   },
   fieldLabel: {
     fontSize: fontSize.xs,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: colors.muted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -756,7 +746,7 @@ const s = StyleSheet.create({
   },
   addChildLabel: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: PURPLE,
   },
 
@@ -781,7 +771,7 @@ const s = StyleSheet.create({
   },
   childTabLabel: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: colors.muted,
   },
   childTabLabelActive: {
@@ -791,7 +781,7 @@ const s = StyleSheet.create({
   // Section label
   sectionLabel: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
     color: PURPLE,
     marginBottom: 4,
   },
@@ -830,18 +820,18 @@ const s = StyleSheet.create({
   choreName: {
     flex: 1,
     fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: colors.black,
   },
   choreXp: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
     color: PURPLE,
   },
   choreRemove: {
-    fontSize: 20,
+    fontSize: scale(20),
     color: colors.muted,
-    lineHeight: 22,
+    lineHeight: scale(22),
     marginLeft: 4,
   },
 
@@ -861,8 +851,8 @@ const s = StyleSheet.create({
     backgroundColor: LAVENDER,
     ...SOLID_SHADOW,
   },
-  rewardIcon:  { fontSize: 28 },
-  rewardLabel: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.black },
+  rewardIcon:  { fontSize: scale(28) },
+  rewardLabel: { fontSize: fontSize.lg, fontFamily: 'Inter_700Bold', color: colors.black },
   rewardDesc:  { fontSize: fontSize.sm, color: colors.muted, marginTop: 2 },
   radio: {
     width: 24,
@@ -893,8 +883,8 @@ const s = StyleSheet.create({
     padding: 16,
     ...SOLID_SHADOW,
   },
-  summaryName:   { fontSize: fontSize.xl, fontWeight: fontWeight.black, color: colors.black },
-  summaryDetail: { fontSize: fontSize.sm, color: colors.muted, fontWeight: fontWeight.medium },
+  summaryName:   { fontSize: fontSize.xl, fontFamily: 'Inter_900Black', color: colors.black },
+  summaryDetail: { fontSize: fontSize.sm, color: colors.muted, fontFamily: 'Inter_500Medium' },
   monsterWaiting: {
     width: 72,
     height: 72,
@@ -907,10 +897,10 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   monsterWaitingLabel: {
-    fontSize: 9,
-    fontWeight: fontWeight.semibold,
+    fontSize: scale(9),
+    fontFamily: 'Inter_600SemiBold',
     color: PURPLE,
     textAlign: 'center',
-    lineHeight: 13,
+    lineHeight: scale(13),
   },
 });

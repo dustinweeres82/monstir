@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, Switch, StyleSheet, ViewStyle } from 'react-native';
-import { colors, fontSize, fontWeight, spacing } from '../tokens';
+import { colors, fontSize, fontWeight, spacing, scale } from '../tokens';
 
 interface SettingsRowProps {
   title: string;
@@ -58,13 +58,13 @@ const s = StyleSheet.create({
   },
   title: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: colors.black,
     marginBottom: 2,
   },
   subtitle: {
     fontSize: fontSize.sm,
     color: colors.muted,
-    lineHeight: 17,
+    lineHeight: scale(17),
   },
 });

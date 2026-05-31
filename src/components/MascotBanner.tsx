@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Image } from 'react-native';
+import { scale } from '../design-system/tokens';
 
 interface MascotBannerProps {
   message: string;
@@ -11,7 +12,7 @@ export function MascotBanner({ message, bg = '#F3E7FE' }: MascotBannerProps) {
     <View style={{ paddingTop: 15, overflow: 'visible' }}>
       <View style={{ backgroundColor: bg, borderRadius: 20, overflow: 'visible', paddingRight: 134 }}>
         <View style={{ padding: 16, justifyContent: 'center' }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', lineHeight: 20, width: 150 }}>
+          <Text style={{ fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A', lineHeight: scale(20), width: 150 }}>
             {message}
           </Text>
         </View>

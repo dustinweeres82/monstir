@@ -1,8 +1,7 @@
 /**
  * ScreenHeading
  *
- * Large Fredoka One heading with a solid 6-px black stroke + card-style
- * drop shadow.
+ * Large Fredoka One heading with a solid black stroke + card-style drop shadow.
  *
  * ## Why width:'100%' on the stroke copies
  * Absolutely-positioned Text nodes in React Native are sized to their
@@ -12,39 +11,57 @@
  * the left/top offset correctly shifts the text by exactly dx/dy pixels
  * relative to the centered fill layer.
  *
+ * ## strokeRadius
+ * Default 6px, tuned for the 64px heading size (≈9% of font size).
+ * Pass a smaller value when using a smaller fontSize — e.g. strokeRadius={3}
+ * at ~40px keeps the ring proportionate and avoids the bloated-stroke look.
+ *
  * ## Drop shadow
- * offset (5,6) has magnitude ≈7.8 px, comfortably outside the 6-px
- * stroke radius, so it peeks out on the bottom-right matching the hard
- * card shadow direction (same 3:4 ratio as the card's 3,4 offset).
+ * The shadow offset should sit outside the stroke ring so it peeks out on
+ * the bottom-right. Default (7, 10) works for the 64px / 6px-stroke combo.
+ * Scale it down alongside strokeRadius for smaller headings.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { textStyles, colors } from '../tokens';
 
-// All integer (dx, dy) with dx²+dy² ≤ 36 — fills a solid 6-px ring.
-const STROKE_OFFSETS: [number, number][] = (() => {
+function buildStrokeOffsets(radius: number): [number, number][] {
   const pts: [number, number][] = [];
-  for (let dx = -6; dx <= 6; dx++) {
-    for (let dy = -6; dy <= 6; dy++) {
-      if ((dx !== 0 || dy !== 0) && dx * dx + dy * dy <= 36) {
+  const r2 = radius * radius;
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      if ((dx !== 0 || dy !== 0) && dx * dx + dy * dy <= r2) {
         pts.push([dx, dy]);
       }
     }
   }
   return pts;
-})();
+}
 
 interface Props {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   textStyle?: TextStyle;
-  /** Hard drop shadow offset (default { x: 5, y: 6 }) */
+  /**
+   * Stroke ring radius in pixels (default 6).
+   * Rule of thumb: ~9% of fontSize.
+   *   64px text → strokeRadius 6 (default)
+   *   40px text → strokeRadius 4
+   *   32px text → strokeRadius 3
+   */
+  strokeRadius?: number;
+  /** Hard drop shadow offset. Defaults to { x: 7, y: 10 } at strokeRadius 6. */
   dropShadow?: { x: number; y: number };
+  /** Force single-line with auto-shrink. Pass 1 to keep heading on one line. */
+  numberOfLines?: number;
 }
 
-export function ScreenHeading({ children, style, textStyle, dropShadow }: Props) {
-  const shadow = dropShadow ?? { x: 7, y: 10 };
+export function ScreenHeading({ children, style, textStyle, strokeRadius = 6, dropShadow, numberOfLines }: Props) {
+  const shadow = dropShadow ?? { x: Math.round(strokeRadius * 1.2), y: Math.round(strokeRadius * 1.7) };
+
+  const offsets = useMemo(() => buildStrokeOffsets(strokeRadius), [strokeRadius]);
+
   const base: TextStyle = {
     ...textStyles.screenHeading,
     ...textStyle,
@@ -52,16 +69,13 @@ export function ScreenHeading({ children, style, textStyle, dropShadow }: Props)
 
   return (
     <View style={style} accessible accessibilityRole="header">
-      {/*
-       * Stroke copies.
-       * width:'100%' is the critical fix — it makes textAlign:'center'
-       * work on absolute nodes so they center in the same position as
-       * the fill text. left/top then shift by exactly dx/dy px.
-       */}
-      {STROKE_OFFSETS.map(([dx, dy], i) => (
+      {offsets.map(([dx, dy], i) => (
         <Text
           key={i}
           accessible={false}
+          adjustsFontSizeToFit
+          minimumFontScale={0.5}
+          numberOfLines={numberOfLines}
           style={[base, {
             position: 'absolute',
             width: '100%',
@@ -74,12 +88,10 @@ export function ScreenHeading({ children, style, textStyle, dropShadow }: Props)
         </Text>
       ))}
 
-      {/*
-       * Fill layer — normal flow, sizes the View.
-       * Drop shadow at (5,6): magnitude ≈7.8, outside the 6-px stroke
-       * so it shows as a visible hard shadow on the bottom-right.
-       */}
       <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
+        numberOfLines={numberOfLines}
         style={[
           base,
           {

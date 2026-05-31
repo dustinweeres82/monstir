@@ -20,7 +20,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts, FredokaOne_400Regular } from '@expo-google-fonts/fredoka-one';
 import { ScreenHeading } from '../design-system/components/ScreenHeading';
-import { scale, fontSize as fs, fontWeight as fw, colors } from '../design-system/tokens';
+import { Button } from '../design-system/components/Button';
+import { scale, fontSize as fs, fontWeight as fw, colors, textStyles } from '../design-system/tokens';
 
 // Disable system font scaling in this screen too
 // @ts-ignore
@@ -71,9 +72,11 @@ const BTN_SHADOW = {
 
 // ─── Monster catalogue ────────────────────────────────────────────────────────
 interface MonsterDef {
-  id:      string;
-  name:    string;
-  trait:   string;
+  id:               string;
+  name:             string;
+  /** Placeholder shown in the naming input. Defaults to `name` if omitted. */
+  namePlaceholder?: string;
+  trait:            string;
   /** Monster-only image (no platform baked in). null = placeholder. */
   scene:   ImageSourcePropType | null;
   /**
@@ -90,6 +93,7 @@ const MONSTERS: MonsterDef[] = [
   {
     id:               'slime',
     name:             'Slimey',
+    namePlaceholder:  'Tony',
     trait:            'Fast',
     scene:            require('../../assets/monstirs/slime/slimer_2.png'),
     hasBakedPlatform: false,
@@ -243,20 +247,6 @@ function Bg() {
   );
 }
 
-function PurpleButton({
-  label, onPress, disabled,
-}: { label: string; onPress: () => void; disabled?: boolean }) {
-  return (
-    <TouchableOpacity
-      style={[s.purpleBtn, disabled && { opacity: 0.45 }]}
-      onPress={onPress}
-      activeOpacity={0.8}
-      disabled={disabled}
-    >
-      <Text style={s.purpleBtnText}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
 
 // ─── Screen 1 — Hey [Name]! ───────────────────────────────────────────────────
 
@@ -289,7 +279,7 @@ function WelcomeScreen({ name, onNext, dbg }: {
             <StepPill image={require('../../assets/icons/IconStar.png')}    label={'Complete\nchores'} />
             <StepPill image={require('../../assets/icons/IconDiamond.png')} label={'Earn\nrewards'} />
           </View>
-          <PurpleButton label="Let's go!" onPress={onNext} />
+          <Button label="Let's go!" onPress={onNext} />
         </View>
       </SafeAreaView>
 
@@ -372,8 +362,8 @@ function PickMonsterScreen({
       <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
       <Bg />
       <SafeAreaView style={s.safe}>
-        <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }}>
-          {'Pick your\nMonstir'}
+        <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }} numberOfLines={2}>
+          {'Pick your Monstir'}
         </ScreenHeading>
         <Text style={[s.subtitle, { marginTop: dbg.subtitleTop }]}>Choose your buddy!</Text>
 
@@ -455,7 +445,7 @@ function PickMonsterScreen({
                 <Image source={item.scene} style={[s.monsterCardImg, { height: dbg.cardImgH }]} resizeMode="contain" />
               ) : (
                 <View style={[s.monsterCardImg, s.monsterCardPlaceholder, { height: dbg.cardImgH }]}>
-                  <Text style={{ fontSize: 28 }}>🐾</Text>
+                  <Text style={{ fontSize: scale(28) }}>🐾</Text>
                 </View>
               )}
               <Text style={[s.monsterCardName, index === selectedIdx && s.monsterCardNameActive]}>
@@ -466,7 +456,7 @@ function PickMonsterScreen({
           )}
         />
 
-        <PurpleButton label={`Select ${selected.name}`} onPress={onSelect} />
+        <Button label={`Select ${selected.name}`} onPress={onSelect} />
       </SafeAreaView>
 
     </View>
@@ -483,7 +473,7 @@ function HowItWorksScreen({ onNext, dbg }: {
       <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
       <Bg />
       <SafeAreaView style={s.safe}>
-        <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }}>{'How Monstir\nworks'}</ScreenHeading>
+        <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }} numberOfLines={2}>{'How Monstir works'}</ScreenHeading>
         <Text style={[s.subtitle, { marginTop: dbg.subtitleTop }]}>Three things. That's it.</Text>
 
         <ScrollView
@@ -512,7 +502,7 @@ function HowItWorksScreen({ onNext, dbg }: {
           </View>
         </ScrollView>
 
-        <PurpleButton label="Got it!" onPress={onNext} />
+        <Button label="Got it!" onPress={onNext} />
       </SafeAreaView>
 
     </View>
@@ -555,7 +545,7 @@ function NameMonsterScreen({
         <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
         <Bg />
         <SafeAreaView style={s.safe}>
-          <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }}>{'Great\nchoice!'}</ScreenHeading>
+          <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }} numberOfLines={2}>{'Great choice!'}</ScreenHeading>
           <Text style={[s.subtitle, { marginTop: dbg.subtitleTop }]}>One last question...</Text>
 
           {/*
@@ -583,12 +573,12 @@ function NameMonsterScreen({
               style={s.nameInput}
               value={monsterName}
               onChangeText={setMonsterName}
-              placeholder={monster.name}
+              placeholder={monster.namePlaceholder ?? monster.name}
               placeholderTextColor="#b4b4b4"
               autoCapitalize="words"
               maxLength={20}
             />
-            <PurpleButton label="That's their name!" onPress={onDone} />
+            <Button label="That's their name!" onPress={onDone} />
           </View>
         </SafeAreaView>
   
@@ -607,135 +597,201 @@ function ReadyScreen({
   monsterName: string;
   onStart:     () => void;
 }) {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const flatRef = useRef<FlatList<{ key: string }>>(null);
+  // Full width minus: outer padding (24) + arrow btn (52) + gap (8) on each side
+  const CARD_W = Dimensions.get('window').width - scale(24 + 52 + 8) * 2;
+  const CARD_STEP = CARD_W + scale(16);
+
+  const cards = [
+    { key: 'monster' },
+    { key: 'chores'  },
+    { key: 'battle'  },
+    { key: 'reward'  },
+  ];
+
+  const goTo = (idx: number) => {
+    const clamped = Math.max(0, Math.min(cards.length - 1, idx));
+    setActiveIdx(clamped);
+    flatRef.current?.scrollToOffset({ offset: clamped * CARD_STEP, animated: true });
+  };
+
   return (
     <View style={s.root}>
       <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
       <Bg />
       <SafeAreaView style={s.safe}>
         <ScreenHeading style={s.heading}>
-          {`You're ready,\n${childName}!`}
+          {"You're Ready"}
         </ScreenHeading>
-        <Text style={s.subtitle}>Here's what's waiting for you.</Text>
+        <Text style={s.subtitle}>
+          <Text style={{ color: PURPLE }}>Welcome to Monstir</Text>
+          {`, ${childName}`}
+        </Text>
 
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={rs.scroll}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* ── Monster card ── */}
+        {/* ── Carousel + arrows ── */}
+        <View style={rs.carouselRow}>
+          <TouchableOpacity
+            style={[s.arrowBtn, activeIdx === 0 && rs.arrowDisabled]}
+            onPress={() => goTo(activeIdx - 1)}
+            activeOpacity={0.75}
+            disabled={activeIdx === 0}
+          >
+            <Image
+              source={require('../../assets/arrow_icon.png')}
+              style={[s.arrowImg, { transform: [{ scaleX: -1 }] }]}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
 
-          {/* ── Monster card ── */}
-          <View style={rs.monsterCard}>
-            <View style={rs.monsterImgWrap}>
-              {monster.scene ? (
-                <Image key={monster.id} source={monster.scene} style={rs.monsterImg} resizeMode="contain" />
-              ) : (
-                <Text style={{ fontSize: scale(32) }}>🐾</Text>
-              )}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={rs.monsterName}>{monsterName} · Level 1</Text>
-              <Text style={rs.monsterXp}>0 XP · 100 XP to evolve</Text>
-              <View style={rs.xpTrack}>
-                <View style={rs.xpFill} />
+          <FlatList
+            ref={flatRef}
+            data={cards}
+            keyExtractor={c => c.key}
+            horizontal
+            pagingEnabled={false}
+            snapToInterval={CARD_STEP}
+            snapToAlignment="start"
+            decelerationRate="fast"
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={false}
+            contentContainerStyle={{ gap: scale(16), paddingVertical: scale(12) }}
+            style={{ flex: 1 }}
+            onMomentumScrollEnd={e => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / CARD_STEP);
+              setActiveIdx(idx);
+            }}
+          renderItem={({ item }) => {
+            if (item.key === 'monster') return (
+              <View style={[rs.card, { width: CARD_W }]}>
+                <View style={rs.cardImgWrap}>
+                  {monster.scene
+                    ? <Image source={monster.scene} style={rs.cardMonsterImg} resizeMode="contain" />
+                    : <Text style={{ fontSize: scale(64) }}>🐾</Text>
+                  }
+                </View>
+                <Text style={rs.cardTitle}>{monsterName}</Text>
+                <Text style={rs.cardDesc}>Level 1 · 0 XP to start</Text>
+                <View style={rs.xpTrack}><View style={rs.xpFill} /></View>
               </View>
-            </View>
-          </View>
+            );
+            if (item.key === 'chores') return (
+              <View style={[rs.card, { width: CARD_W }]}>
+                <Text style={rs.cardEmoji}>📋</Text>
+                <Text style={rs.cardTitle}>Chores</Text>
+                <Text style={rs.cardDesc}>Complete chores to earn XP and power up for battle</Text>
+              </View>
+            );
+            if (item.key === 'battle') return (
+              <View style={[rs.card, { width: CARD_W }]}>
+                <Text style={rs.cardEmoji}>⚔️</Text>
+                <Text style={rs.cardTitle}>Boss Battles</Text>
+                <Text style={rs.cardDesc}>Every Sunday your monster fights a boss. The more chores you do, the stronger you hit</Text>
+              </View>
+            );
+            // reward
+            return (
+              <View style={[rs.card, { width: CARD_W }]}>
+                <Text style={rs.cardEmoji}>🎁</Text>
+                <Text style={rs.cardTitle}>Rewards</Text>
+                <Text style={rs.cardDesc}>Win battles to unlock collectibles and earn rewards your parents set</Text>
+              </View>
+            );
+          }}
+          />
 
-          {/* ── Feature rows ── */}
-          <ReadyRow
-            icon="📋"
-            title="3 chores ready for you"
-            desc="Make bed · Brush teeth · Put toys away"
-          />
-          <ReadyRow
-            icon="⚔️"
-            title="First boss battle"
-            desc="Reach level 3 to unlock your first fight"
-          />
-          <ReadyRow
-            icon="🎁"
-            title="Reward to earn"
-            desc="30 mins screen time — set by your parents"
-          />
-        </ScrollView>
+          <TouchableOpacity
+            style={[s.arrowBtn, activeIdx === cards.length - 1 && rs.arrowDisabled]}
+            onPress={() => goTo(activeIdx + 1)}
+            activeOpacity={0.75}
+            disabled={activeIdx === cards.length - 1}
+          >
+            <Image
+              source={require('../../assets/arrow_icon.png')}
+              style={s.arrowImg}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Dot indicators ── */}
+        <View style={rs.dots}>
+          {cards.map((c, i) => (
+            <View key={c.key} style={[rs.dot, i === activeIdx && rs.dotActive]} />
+          ))}
+        </View>
 
         {/* ── CTA ── */}
         <View style={rs.footer}>
-          <PurpleButton label="Start Adventure! 🚀" onPress={onStart} />
+          <Button label="Start Adventure! 🚀" onPress={onStart} />
         </View>
       </SafeAreaView>
     </View>
   );
 }
 
-function ReadyRow({
-  icon, title, desc, descColor,
-}: {
-  icon: string; title: string; desc: string; descColor?: string;
-}) {
-  return (
-    <View style={rs.row}>
-      <Text style={rs.rowIcon}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={rs.rowTitle}>{title}</Text>
-        <Text style={[rs.rowDesc, descColor ? { color: descColor } : undefined]}>{desc}</Text>
-      </View>
-      <Text style={rs.rowChevron}>›</Text>
-    </View>
-  );
-}
 
 const rs = StyleSheet.create({
-  scroll: {
-    paddingHorizontal: scale(24),
-    paddingTop: scale(32),
-    paddingBottom: scale(16),
-    gap: scale(12),
-  },
-  // Monster card
-  monsterCard: {
+  // Carousel wrapper
+  carouselRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: CREAM,
-    borderRadius: scale(16),
-    borderWidth: 2,
-    borderColor: BLACK,
-    padding: scale(14),
-    gap: scale(12),
-    ...CARD_SHADOW,
+    paddingHorizontal: scale(12),
+    gap: scale(8),
   },
-  monsterImgWrap: {
-    width: scale(64),
-    height: scale(64),
-    borderRadius: scale(32),
-    backgroundColor: '#F0EEF8',
+  arrowDisabled: {
+    opacity: 0.3,
+  },
+
+  // Carousel card
+  card: {
+    backgroundColor: CREAM,
+    borderRadius: scale(20),
+    borderWidth: 2.5,
+    borderColor: BLACK,
+    padding: scale(24),
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
+    gap: scale(10),
+    minHeight: scale(280),
+    ...CARD_SHADOW,
   },
-  monsterImg: {
-    width: scale(56),
-    height: scale(56),
+  cardImgWrap: {
+    width: scale(140),
+    height: scale(140),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: scale(4),
   },
-  monsterName: {
+  cardMonsterImg: {
+    width: scale(140),
+    height: scale(140),
+  },
+  cardEmoji: {
+    fontSize: scale(72),
+    marginBottom: scale(4),
+  },
+  cardTitle: {
     fontFamily: FONT,
-    fontSize: fs.xl,
-    fontWeight: fw.bold,
-    color: colors.black,
-    marginBottom: scale(2),
+    fontSize: scale(26),
+    color: BLACK,
+    textAlign: 'center',
   },
-  monsterXp: {
-    fontSize: fs.base,
-    fontWeight: fw.semibold,
+  cardDesc: {
+    ...textStyles.secondaryText,
     color: colors.muted,
-    marginBottom: scale(6),
+    fontSize: scale(16),
+    lineHeight: scale(22),
   },
+
+  // XP bar (monster card)
   xpTrack: {
+    width: '100%',
     height: scale(6),
     backgroundColor: '#ECEAE4',
     borderRadius: scale(3),
     overflow: 'hidden',
+    marginTop: scale(2),
   },
   xpFill: {
     width: '0%',
@@ -744,45 +800,29 @@ const rs = StyleSheet.create({
     borderRadius: scale(3),
   },
 
-  // Feature rows
-  row: {
+  // Dot indicators
+  dots: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: CREAM,
-    borderRadius: scale(16),
-    borderWidth: 2,
-    borderColor: BLACK,
-    padding: scale(14),
-    gap: scale(12),
-    ...CARD_SHADOW,
+    justifyContent: 'center',
+    gap: scale(6),
+    paddingVertical: scale(8),
   },
-  rowIcon: {
-    fontSize: scale(28),
-    width: scale(40),
-    textAlign: 'center',
+  dot: {
+    width: scale(7),
+    height: scale(7),
+    borderRadius: scale(4),
+    backgroundColor: 'rgba(0,0,0,0.18)',
   },
-  rowTitle: {
-    fontSize: fs.xl,
-    fontWeight: fw.bold,
-    color: colors.black,
-    marginBottom: scale(2),
-  },
-  rowDesc: {
-    fontSize: fs.base,
-    fontWeight: fw.semibold,
-    color: colors.muted,
-    lineHeight: fs.base * 1.4,
-  },
-  rowChevron: {
-    fontSize: scale(22),
-    color: '#ABABAB',
+  dotActive: {
+    backgroundColor: BLACK,
+    width: scale(18),
   },
 
   // Footer
   footer: {
     paddingHorizontal: scale(24),
     paddingBottom: scale(12),
-    paddingTop: scale(8),
+    paddingTop: scale(4),
   },
 });
 
@@ -801,14 +841,12 @@ const s = StyleSheet.create({
 
   // ── Typography
   heading: {
+    width: '100%',
     marginTop: scale(28),
     marginBottom: scale(4),
   },
   subtitle: {
-    fontSize: scale(18),
-    fontWeight: '600',
-    color: BLACK,
-    textAlign: 'center',
+    ...textStyles.secondaryText,
     marginTop: scale(10),
     marginBottom: scale(6),
   },
@@ -856,26 +894,12 @@ const s = StyleSheet.create({
   },
   stepLabel: {
     fontSize: scale(12),
-    fontWeight: '700',
+    fontFamily: 'Inter_700Bold',
     color: BLACK,
     textAlign: 'center',
   },
 
   // ── Purple button
-  purpleBtn: {
-    backgroundColor: PURPLE,
-    borderRadius: 100,
-    borderWidth: 2,
-    borderColor: BLACK,
-    paddingVertical: scale(16),
-    alignItems: 'center',
-    ...BTN_SHADOW,
-  },
-  purpleBtnText: {
-    fontFamily: FONT,
-    fontSize: scale(20),
-    color: '#FFFFFF',
-  },
 
   // ── Picker hero — arrows + scene
   heroWrap: {
@@ -957,7 +981,7 @@ const s = StyleSheet.create({
   },
   monsterPlaceholderSub: {
     fontSize: scale(14),
-    fontWeight: '600',
+    fontFamily: 'Inter_600SemiBold',
     color: '#888',
   },
 
@@ -1064,7 +1088,7 @@ const s = StyleSheet.create({
     paddingVertical: scale(12),
     paddingHorizontal: scale(16),
     fontSize: scale(18),
-    fontWeight: '600',
+    fontFamily: 'Inter_600SemiBold',
     color: BLACK,
     textAlign: 'center',
     backgroundColor: '#FFFFFF',

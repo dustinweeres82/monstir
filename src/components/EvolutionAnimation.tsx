@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, {
   Defs, LinearGradient as SvgGrad, Stop, Polygon, Circle, Ellipse, Line,
 } from 'react-native-svg';
+import { scale } from '../design-system/tokens';
 
 const { width: W, height: H } = Dimensions.get('window');
 const CX        = W / 2;
@@ -395,8 +396,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bannerText: {
-    fontSize: 56,
-    fontWeight: '900',
+    fontSize: scale(56),
+    fontFamily: 'Inter_900Black',
     color: '#C5F215',
     letterSpacing: -1.5,
   },
@@ -415,8 +416,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ctaBtnText: {
-    fontSize: 16,
-    fontWeight: '900',
+    fontSize: scale(16),
+    fontFamily: 'Inter_900Black',
     color: '#1A1A1A',
   },
 });

@@ -48,17 +48,17 @@ const s = StyleSheet.create({
   },
   text: {
     fontSize: fontSize.xxl,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
   },
   levelText: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.heavy,
+    fontFamily: 'Inter_800ExtraBold',
     color: colors.purple,
   },
 });
 
 const textStyle = {
-  balance: { color: colors.black, fontSize: fontSize.xxl, fontWeight: fontWeight.bold } as const,
-  counter: { color: colors.black, fontSize: fontSize.base, fontWeight: fontWeight.bold } as const,
+  balance: { color: colors.black, fontSize: fontSize.xxl, fontFamily: 'Inter_700Bold' } as const,
+  counter: { color: colors.black, fontSize: fontSize.base, fontFamily: 'Inter_700Bold' } as const,
   level:   {} as const,
 };

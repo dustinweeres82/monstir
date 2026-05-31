@@ -4,16 +4,27 @@ import {
   StatusBar, Platform, Image, TextInput, Switch, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
 } from 'react-native';
-import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
-import Svg, { Ellipse, Circle, Path, Polygon, Line, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
+import { SafeAreaView, SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Ellipse, Circle, Path, Polygon, Line, Defs, LinearGradient as SvgLinearGradient, RadialGradient, Stop } from 'react-native-svg';
 import { EvolutionAnimation } from './src/components/EvolutionAnimation';
+import { ChestReveal, type ChestTier } from './src/components/ChestReveal';
 import { MascotBanner } from './src/components/MascotBanner';
 import { CreamBg } from './src/components/CreamBg';
 import { KidProfileCreation, getAvatarImage } from './src/screens/KidProfileCreation';
 import { ParentOnboarding } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
 import { ScreenHeading } from './src/design-system/components/ScreenHeading';
+import { Button } from './src/design-system/components/Button';
 import { useFonts, FredokaOne_400Regular } from '@expo-google-fonts/fredoka-one';
+import {
+  Inter_300Light,
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+  Inter_900Black,
+} from '@expo-google-fonts/inter';
 import { shadows, scale } from './src/design-system/tokens';
 import { Video, ResizeMode, Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,7 +34,7 @@ import * as Clipboard from 'expo-clipboard';
 // Our scale() utility handles all proportional sizing; allowing the OS to also
 // scale fonts causes double-scaling on accessibility text-size settings.
 // @ts-ignore
-Text.defaultProps = { ...(Text.defaultProps ?? {}), allowFontScaling: false };
+Text.defaultProps = { ...(Text.defaultProps ?? {}), allowFontScaling: false, adjustsFontSizeToFit: true, minimumFontScale: 0.7 };
 // @ts-ignore
 TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: false };
 
@@ -31,7 +42,7 @@ TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: 
 
 type ChoreId = 'dishes' | 'trash' | 'bed' | 'vacuum' | 'laundry' | 'sweep' | 'wipe' | 'mop' | 'plants' | 'recycling' | 'windows' | 'bathroom';
 type Tab     = 'home' | 'world' | 'wallet';
-type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' | 'kidPayout';
+type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' | 'kidPayout' | 'chestReveal';
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type ParentTab    = 'home' | 'chores' | 'money' | 'settings';
@@ -583,18 +594,18 @@ function ViewSwitcher({ selected, options, onSelect, dark = false }: {
 }
 
 const sw = StyleSheet.create({
-  trigger:         { fontSize: scale(18), fontWeight: '700', color: '#1A1A1A' },
+  trigger:         { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   triggerDark:     { color: '#1A1A1A' },
   scrim:           { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet:           { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   sheetHandle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  sheetTitle:      { fontSize: scale(12), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10 },
+  sheetTitle:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10 },
   option:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   optionBorder:    { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
   optionAvatar:    { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  optionLabel:     { flex: 1, fontSize: scale(16), fontWeight: '600', color: '#1A1A1A' },
+  optionLabel:     { flex: 1, fontSize: scale(16), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
   optionLabelActive: { color: '#6B35F0' },
-  check:           { fontSize: scale(16), color: '#6B35F0', fontWeight: '700' },
+  check:           { fontSize: scale(16), color: '#6B35F0', fontFamily: 'Inter_700Bold' },
 });
 
 
@@ -718,12 +729,12 @@ const av = StyleSheet.create({
   trigger:    { width: 50, height: 50, borderRadius: 25, overflow: 'hidden', borderWidth: 2.5, borderColor: '#1A1A1A', backgroundColor: '#fff' },
   triggerImg: { width: '100%', height: '100%' },
   // Age range trigger
-  ageLabel:   { fontSize: scale(13), fontWeight: '600', color: '#1A1A1A', opacity: 0.55 },
+  ageLabel:   { fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A', opacity: 0.55 },
   // Shared sheet chrome
   scrim:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet:      { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  title:      { fontSize: scale(12), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
+  title:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
   // Avatar grid
   grid:       { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
   cell:       { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: 14, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
@@ -732,9 +743,9 @@ const av = StyleSheet.create({
   // Age range rows
   ageRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16 },
   ageRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
-  ageRowLabel:  { flex: 1, fontSize: scale(17), fontWeight: '600', color: '#1A1A1A' },
+  ageRowLabel:  { flex: 1, fontSize: scale(17), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
   ageRowLabelActive: { color: PURPLE },
-  ageCheck:     { fontSize: scale(17), color: PURPLE, fontWeight: '700' },
+  ageCheck:     { fontSize: scale(17), color: PURPLE, fontFamily: 'Inter_700Bold' },
 });
 
 function ChoreIcon({ icon, size }: { icon: string | number; size: number }) {
@@ -1253,9 +1264,9 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', paddingBottom: 32, paddingHorizontal: 16 }}>
           <View style={{ backgroundColor: '#F7F6F2', borderRadius: 24, padding: 24, gap: 16 }}>
-            <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>Name your mascot</Text>
+            <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Name your Monstir</Text>
             <TextInput
-              style={{ backgroundColor: '#ECEAE4', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}
+              style={{ backgroundColor: '#ECEAE4', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}
               value={renameText}
               onChangeText={setRenameText}
               autoCapitalize="words"
@@ -1266,15 +1277,9 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
               returnKeyType="done"
               onSubmitEditing={() => { onRenameMonster(renameText.trim() || monsterName); setShowRename(false); showToast('Name saved!'); }}
             />
-            <TouchableOpacity
-              style={{ backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center' }}
-              onPress={() => { onRenameMonster(renameText.trim() || monsterName); setShowRename(false); showToast('Name saved!'); }}
-              activeOpacity={0.85}
-            >
-              <Text style={{ fontSize: scale(16), fontWeight: '900', color: '#FFFFFF' }}>Save name</Text>
-            </TouchableOpacity>
+            <Button label="Save name" onPress={() => { onRenameMonster(renameText.trim() || monsterName); setShowRename(false); showToast('Name saved!'); }} />
             <TouchableOpacity onPress={() => setShowRename(false)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 8 }}>
-              <Text style={{ fontSize: scale(14), color: '#ABABAB', fontWeight: '600' }}>Cancel</Text>
+              <Text style={{ fontSize: scale(14), color: '#ABABAB', fontFamily: 'Inter_600SemiBold' }}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1469,7 +1474,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
                   <Image source={require('./assets/icons/icon-starbox.png')} style={{ width: 48, height: 48 }} resizeMode="contain" />
                   <Text style={[w.intelValue, { fontSize: scale(16) }]}>???</Text>
                 </View>
-                <Text style={{ fontSize: scale(11), color: C.muted, fontWeight: '600' }}>Do more chores{'\n'}to unlock.</Text>
+                <Text style={{ fontSize: scale(11), color: C.muted, fontFamily: 'Inter_600SemiBold' }}>Do more chores{'\n'}to unlock.</Text>
                 <View style={w.unlockArrow}>
                   <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: 14, height: 14 }} resizeMode="contain" />
                 </View>
@@ -1495,7 +1500,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
             <View style={[w.threatPill, { backgroundColor: threatColors[boss.threat] }]}>
               <Text style={w.threatPillText}>{boss.threat}</Text>
             </View>
-            <Text style={{ fontSize: scale(11), color: C.muted, fontWeight: '600' }}>{boss.threatNote}</Text>
+            <Text style={{ fontSize: scale(11), color: C.muted, fontFamily: 'Inter_600SemiBold' }}>{boss.threatNote}</Text>
           </View>
         </View>
 
@@ -1776,7 +1781,7 @@ function ResultScreen({ monsterIdx, captured, bonusCoins, onDone, monsterImg }: 
         ? <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(56), height: scale(56) }} resizeMode="contain" />
         : <Image source={require('./assets/icons/icon-skull.png')}  style={{ width: scale(56), height: scale(56) }} resizeMode="contain" />
       }
-      <Text style={{ fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -0.5, textAlign: 'center' }}>
+      <Text style={{ fontSize: scale(32), fontFamily: 'Inter_900Black', color: C.text, letterSpacing: -0.5, textAlign: 'center' }}>
         {captured ? 'CAPTURED!' : `${boss.name} got away...`}
       </Text>
       <Text style={{ fontSize: scale(15), color: C.muted, textAlign: 'center', lineHeight: scale(22) }}>
@@ -1789,7 +1794,7 @@ function ResultScreen({ monsterIdx, captured, bonusCoins, onDone, monsterImg }: 
         onPress={onDone}
         activeOpacity={0.8}
       >
-        <Text style={{ fontSize: scale(16), fontWeight: '900', color: '#1A1A1A' }}>Back to Home</Text>
+        <Text style={{ fontSize: scale(16), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Back to Home</Text>
       </TouchableOpacity>
     </View>
   );
@@ -1897,7 +1902,7 @@ function ZapStrikeGame({ onScore, zapZone = 'normal' }: { onScore: (s: number) =
         {[0,1,2].map(i => (
           <View key={i} style={{ width: scale(48), height: scale(40), borderRadius: scale(10), borderWidth: 2, borderColor:'#1A1A1A',
             backgroundColor: scores[i] !== undefined ? zoneColor(scores[i]) : '#F7F6F2', alignItems:'center', justifyContent:'center' }}>
-            <Text style={{ fontWeight:'900', fontSize: scale(14), color:'#1A1A1A' }}>
+            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(14), color:'#1A1A1A' }}>
               {scores[i] !== undefined ? scores[i] : '–'}
             </Text>
           </View>
@@ -1920,74 +1925,87 @@ const FRENZY_THRESHOLDS = [
   { count: 17, color: '#C5F215' },
 ];
 
-function FrenzyGame({ onScore, onFlash }: { onScore: (s: number) => void; onFlash?: (color: string) => void }) {
-  const [count,   setCount]   = useState(0);
-  const [timeLeft,setTimeLeft]= useState(2000);
-  const [started, setStarted] = useState(false);
-  const [done,    setDone]    = useState(false);
-  const countRef    = useRef(0);
-  const startRef    = useRef(0);
+function FrenzyGame({ onScore }: { onScore: (s: number) => void; onFlash?: (color: string) => void }) {
+  const TAP_GAIN   = 0.07;
+  const DRAIN      = 0.018;
+  const DURATION   = 3000;
+  const fillRef    = useRef(0);
+  const fillAnim   = useRef(new Animated.Value(0)).current;
+  const doneRef    = useRef(false);
+  const startTime  = useRef(Date.now());
+  const [done,     setDone]     = useState(false);
+  const [timeLeft, setTimeLeft] = useState(DURATION);
 
-  const frenzyCombo = (n: number): { label: string; color: string } => {
-    if (n >= 17) return { label: 'UNSTOPPABLE!!',      color: '#C5F215' };
-    if (n >= 15) return { label: 'Out of this world!', color: '#6B35F0' };
-    if (n >= 12) return { label: 'Huge hit!',          color: '#F59E0B' };
-    if (n >= 9)  return { label: 'Nice combo!',        color: '#3B8A3A' };
-    if (n > 0)   return { label: 'Weak hit...',        color: '#ABABAB' };
-    return              { label: 'Tap as fast as you can!', color: '#ABABAB' };
+  const resolve = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setDone(true);
+    const score = fillRef.current >= 1 ? 100 : Math.round(fillRef.current * 100);
+    setTimeout(() => onScore(score), 400);
   };
 
+  // Combined drain + timer loop (50ms tick)
   useEffect(() => {
-    if (!started) return;
     const iv = setInterval(() => {
-      const elapsed = Date.now() - startRef.current;
-      const rem = Math.max(0, 2000 - elapsed);
+      if (doneRef.current) return;
+      // Drain
+      fillRef.current = Math.max(0, fillRef.current - DRAIN);
+      Animated.timing(fillAnim, { toValue: fillRef.current, duration: 50, useNativeDriver: false, easing: Easing.linear }).start();
+      // Timer
+      const rem = Math.max(0, DURATION - (Date.now() - startTime.current));
       setTimeLeft(rem);
-      if (rem <= 0) {
-        clearInterval(iv);
-        setDone(true);
-        const score = Math.min(100, Math.round((countRef.current / 17) * 100));
-        setTimeout(() => onScore(score), 600);
-      }
+      if (rem <= 0) resolve();
     }, 50);
     return () => clearInterval(iv);
-  }, [started]);
+  }, []);
 
   const handleTap = () => {
-    if (done) return;
-    if (!started) { setStarted(true); startRef.current = Date.now(); }
-    const oldCount = countRef.current;
-    countRef.current += 1;
-    setCount(countRef.current);
-    // Flash screen when crossing a tier threshold
-    for (const t of FRENZY_THRESHOLDS) {
-      if (oldCount < t.count && countRef.current >= t.count) {
-        onFlash?.(t.color);
-        break;
-      }
-    }
+    if (doneRef.current) return;
+    fillRef.current = Math.min(1, fillRef.current + TAP_GAIN);
+    Animated.spring(fillAnim, { toValue: fillRef.current, useNativeDriver: false, tension: 200, friction: 10 }).start();
+    if (fillRef.current >= 1) resolve();
   };
 
-  const info = frenzyCombo(count);
-  const timerPct = started ? (timeLeft / 2000) * 100 : 100;
-
   return (
-    <View style={{ alignItems:'center', gap: scale(14), paddingHorizontal: scale(20) }}>
-      <Text style={b.mgTitle}>FRENZY</Text>
+    <View style={{ paddingHorizontal: scale(20) }}>
+      <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(24), gap: scale(20), ...SOLID_SHADOW }}>
 
-      {/* Timer bar */}
-      <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
-        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6),
-          backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
+        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
+          Tap the button to charge energy!
+        </Text>
+
+        {/* Meter row */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(10) }}>
+          <View style={{ width: scale(44), height: scale(44), borderRadius: scale(22), backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW }}>
+            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(26), height: scale(26) }} resizeMode="contain" />
+          </View>
+          <View style={{ flex: 1, height: scale(28), borderRadius: scale(100), borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#ECECEC', overflow: 'hidden', padding: 2 }}>
+            <Animated.View style={{
+              width: fillAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) as any,
+              height: '100%',
+              borderRadius: scale(100),
+              borderWidth: 2,
+              borderColor: '#1A1A1A',
+              backgroundColor: fillAnim.interpolate({
+                inputRange: [0, 0.4, 0.7, 1],
+                outputRange: ['#F5C842', '#F5A023', '#E86020', '#D03020'],
+              }) as any,
+            }} />
+          </View>
+        </View>
+
+        {/* Charge button */}
+        <TouchableOpacity
+          onPress={handleTap}
+          disabled={done}
+          activeOpacity={0.75}
+          style={{ backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+        >
+          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(20), color: '#1A1A1A' }}>
+            {done ? '⚡ Charged!' : `Charge!  ${Math.ceil(timeLeft / 1000)}s`}
+          </Text>
+        </TouchableOpacity>
       </View>
-
-      <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(72), color:'#1A1A1A', lineHeight: scale(80) }}>{count}</Text>
-      <Text style={{ fontSize: scale(15), fontWeight:'800', color: info.color, textAlign:'center' }}>{info.label}</Text>
-
-      <TouchableOpacity onPress={handleTap} disabled={done}
-        style={[b.mgBigTap, done && { backgroundColor:'#ABABAB' }]} activeOpacity={0.7}>
-        <Text style={{ color:'#fff', fontWeight:'900', fontSize: scale(28) }}>{started ? '⚡' : 'GO!'}</Text>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -2012,9 +2030,7 @@ function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
 
   const onPressIn = () => {
     if (released) return;
-    animRef.current = Animated.timing(charge, {
-      toValue: 1, duration: 2500, useNativeDriver: false, easing: Easing.linear,
-    });
+    animRef.current = Animated.timing(charge, { toValue: 1, duration: 2500, useNativeDriver: false, easing: Easing.linear });
     animRef.current.start(({ finished }) => { if (finished) doRelease(); });
   };
 
@@ -2037,41 +2053,26 @@ function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
   const inGreen = chargeVal >= GREEN_MIN && chargeVal <= GREEN_MAX;
 
   return (
-    <View style={{ alignItems:'center', gap: scale(16), paddingHorizontal: scale(20) }}>
+    <View style={{ alignItems: 'center', gap: scale(16), paddingHorizontal: scale(20) }}>
       <Text style={b.mgTitle}>OVERCHARGE</Text>
       <Text style={b.mgInstr}>Hold and release in the green zone!</Text>
-
-      <View style={{ flexDirection:'row', alignItems:'center', gap: scale(16) }}>
-        {/* Vertical charge bar */}
-        <View style={{ width: scale(36), height: BAR_H, borderRadius: scale(10), backgroundColor:'#ECEAE4', borderWidth:2, borderColor:'#1A1A1A', overflow:'hidden', position:'relative' }}>
-          {/* green zone marker */}
-          <View style={{ position:'absolute', bottom: GREEN_MIN * BAR_H, height:(GREEN_MAX - GREEN_MIN) * BAR_H, left:0, right:0, backgroundColor:'rgba(197,242,21,0.35)' }} />
-          {/* fill */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(16) }}>
+        <View style={{ width: scale(36), height: BAR_H, borderRadius: scale(10), backgroundColor: '#ECEAE4', borderWidth: 2, borderColor: '#1A1A1A', overflow: 'hidden', position: 'relative' }}>
+          <View style={{ position: 'absolute', bottom: GREEN_MIN * BAR_H, height: (GREEN_MAX - GREEN_MIN) * BAR_H, left: 0, right: 0, backgroundColor: 'rgba(197,242,21,0.35)' }} />
           <Animated.View style={{
-            position:'absolute', bottom:0, left:0, right:0,
-            height: charge.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any,
-            backgroundColor: charge.interpolate({
-              inputRange:[0, GREEN_MIN, GREEN_MAX, 1],
-              outputRange:['#6B35F0','#C5F215','#C5F215','#FF3B55'],
-            }) as any,
+            position: 'absolute', bottom: 0, left: 0, right: 0,
+            height: charge.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) as any,
+            backgroundColor: charge.interpolate({ inputRange: [0, GREEN_MIN, GREEN_MAX, 1], outputRange: ['#6B35F0', '#C5F215', '#C5F215', '#FF3B55'] }) as any,
           }} />
         </View>
-
-        {/* Labels */}
         <View style={{ gap: scale(4) }}>
-          <Text style={{ fontSize: scale(11), fontWeight:'700', color:'#3B8A3A' }}>← GREEN ZONE</Text>
-          <Text style={{ fontSize: scale(11), fontWeight:'700', color:'#F59E0B', marginTop: scale(4) }}>← TOO MUCH</Text>
+          <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#3B8A3A' }}>← GREEN ZONE</Text>
+          <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#F59E0B', marginTop: scale(4) }}>← TOO MUCH</Text>
         </View>
       </View>
-
-      <TouchableOpacity
-        onPressIn={onPressIn} onPressOut={doRelease} disabled={released}
-        style={[b.mgMainBtn, { backgroundColor: inGreen ? '#C5F215' : released ? '#ABABAB' : '#6B35F0' }]}
-        activeOpacity={0.9}
-      >
-        <Text style={[b.mgMainBtnText, { color: inGreen ? '#1A1A1A' : '#fff' }]}>
-          {released ? '⚡' : 'HOLD'}
-        </Text>
+      <TouchableOpacity onPressIn={onPressIn} onPressOut={doRelease} disabled={released}
+        style={[b.mgMainBtn, { backgroundColor: inGreen ? '#C5F215' : released ? '#ABABAB' : '#6B35F0' }]} activeOpacity={0.9}>
+        <Text style={[b.mgMainBtnText, { color: inGreen ? '#1A1A1A' : '#fff' }]}>{released ? '⚡' : 'HOLD'}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -2079,14 +2080,360 @@ function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
 
 // ── Attack name flavour text by monster type ──────────────────────────────────
 const ATTACK_NAMES: Record<MonsterId, Record<string, string>> = {
-  slime:  { 'zap-strike':'Goop Zap',       'frenzy':'Slime Frenzy',    'overcharge':'Ooze Overload',   'whack':'Glob Smack',     'block-breaker':'Slime Code',    'power-slash':'Goo Slash',      'earthquake':'Slime Quake',    'defuse':'Bubble Bomb',    'combo-chain':'Slime Chain'    },
-  flamer: { 'zap-strike':'Ember Blast',    'frenzy':'Inferno Frenzy',  'overcharge':'Magma Surge',     'whack':'Scorch Spot',    'block-breaker':'Fire Code',     'power-slash':'Flame Slash',    'earthquake':'Magma Quake',    'defuse':'Fire Bomb',      'combo-chain':'Fire Chain'     },
-  robot:  { 'zap-strike':'Shock Strike',   'frenzy':'Glitch Frenzy',   'overcharge':'Power Surge',     'whack':'Bug Zap',        'block-breaker':'Hack Attack',   'power-slash':'Blade Slash',    'earthquake':'System Crash',   'defuse':'Circuit Bomb',   'combo-chain':'Combo Protocol' },
-  candy:  { 'zap-strike':'Sugar Rush',     'frenzy':'Candy Frenzy',    'overcharge':'Syrup Surge',     'whack':'Jawbreaker',     'block-breaker':'Sweet Code',    'power-slash':'Lollipop Slash', 'earthquake':'Candy Quake',    'defuse':'Pop Rocks Bomb', 'combo-chain':'Sweet Chain'    },
-  food:   { 'zap-strike':'Sauce Splat',    'frenzy':'Food Fight',      'overcharge':'Grease Surge',    'whack':'Splat Smack',    'block-breaker':'Crumb Code',    'power-slash':'Noodle Slash',   'earthquake':'Kitchen Crash',  'defuse':'Mess Bomb',      'combo-chain':'Leftover Chain' },
+  slime:  { 'zap-strike':'Goop Zap',       'frenzy':'Slime Frenzy',    'overcharge':'Ooze Overload',   'whack':'Glob Smack',     'block-breaker':'Slime Code',    'power-slash':'Goo Slash',      'earthquake':'Slime Quake',    'defuse':'Bubble Bomb',    'combo-chain':'Slime Chain',    'shake-potion':'Goo Brew',       'slingshot':'Goop Shot'     },
+  flamer: { 'zap-strike':'Ember Blast',    'frenzy':'Inferno Frenzy',  'overcharge':'Magma Surge',     'whack':'Scorch Spot',    'block-breaker':'Fire Code',     'power-slash':'Flame Slash',    'earthquake':'Magma Quake',    'defuse':'Fire Bomb',      'combo-chain':'Fire Chain',     'shake-potion':'Lava Brew',      'slingshot':'Ember Shot'    },
+  robot:  { 'zap-strike':'Shock Strike',   'frenzy':'Glitch Frenzy',   'overcharge':'Power Surge',     'whack':'Bug Zap',        'block-breaker':'Hack Attack',   'power-slash':'Blade Slash',    'earthquake':'System Crash',   'defuse':'Circuit Bomb',   'combo-chain':'Combo Protocol', 'shake-potion':'Circuit Brew',   'slingshot':'Rail Shot'     },
+  candy:  { 'zap-strike':'Sugar Rush',     'frenzy':'Candy Frenzy',    'overcharge':'Syrup Surge',     'whack':'Jawbreaker',     'block-breaker':'Sweet Code',    'power-slash':'Lollipop Slash', 'earthquake':'Candy Quake',    'defuse':'Pop Rocks Bomb', 'combo-chain':'Sweet Chain',    'shake-potion':'Sugar Brew',     'slingshot':'Candy Shot'    },
+  food:   { 'zap-strike':'Sauce Splat',    'frenzy':'Food Fight',      'overcharge':'Grease Surge',    'whack':'Splat Smack',    'block-breaker':'Crumb Code',    'power-slash':'Noodle Slash',   'earthquake':'Kitchen Crash',  'defuse':'Mess Bomb',      'combo-chain':'Leftover Chain', 'shake-potion':'Secret Sauce',   'slingshot':'Bread Roll'    },
 };
 function atkName(monsterId: MonsterId, mechanic: string, fallback: string): string {
   return ATTACK_NAMES[monsterId]?.[mechanic] ?? fallback;
+}
+
+// ── Mini-game: Shake the Potion ───────────────────────────────────────────────
+
+const INGREDIENTS = [
+  { key: 'cereal', src: require('./assets/battleui/Ingredient=cereal.png') },
+  { key: 'leaf',   src: require('./assets/battleui/Ingredient=leaf.png')   },
+  { key: 'meat',   src: require('./assets/battleui/Ingredient=meat.png')   },
+  { key: 'milk',   src: require('./assets/battleui/Ingredient=milk.png')   },
+  { key: 'slime',  src: require('./assets/battleui/Ingredient=slime.png')  },
+  { key: 'sock',   src: require('./assets/battleui/Ingredient=sock.png')   },
+  { key: 'tp',     src: require('./assets/battleui/Ingredient=tp.png')     },
+  { key: 'yarn',   src: require('./assets/battleui/Ingredient=yarn.png')   },
+];
+
+function ShakePotionGame({ onScore }: { onScore: (s: number) => void }) {
+  const [phase,    setPhase]    = useState<'picking' | 'shaking'>('picking');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [shown] = useState(() =>
+    [...INGREDIENTS].sort(() => Math.random() - 0.5).slice(0, 4)
+  );
+
+  if (phase === 'picking') {
+    const toggle = (key: string) => {
+      setSelected(prev =>
+        prev.includes(key) ? prev.filter(k => k !== key) : prev.length < 3 ? [...prev, key] : prev
+      );
+    };
+    return (
+      <View style={{ paddingHorizontal: scale(20) }}>
+        <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(20), gap: scale(16), alignItems: 'center', ...SOLID_SHADOW }}>
+          <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
+            Choose three ingredients!
+          </Text>
+
+          {/* Ingredient grid — 2 rows of 4 */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: scale(10) }}>
+            {shown.map(ing => {
+              const sel = selected.includes(ing.key);
+              return (
+                <TouchableOpacity
+                  key={ing.key}
+                  onPress={() => toggle(ing.key)}
+                  activeOpacity={0.75}
+                  style={{
+                    width: scale(64), height: scale(64),
+                    borderRadius: scale(32),
+                    backgroundColor: sel ? '#EAE4FF' : 'transparent',
+                    borderWidth: sel ? 2.5 : 0,
+                    borderColor: '#6B35F0',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <Image source={ing.src} style={{ width: scale(48), height: scale(48) }} resizeMode="contain" />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <TouchableOpacity
+            onPress={() => { if (selected.length === 3) setPhase('shaking'); }}
+            disabled={selected.length < 3}
+            activeOpacity={0.75}
+            style={{ width: '100%', backgroundColor: selected.length === 3 ? '#C5F215' : '#D0CEC8', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+          >
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(20), color: '#1A1A1A' }}>
+              {selected.length === 3 ? 'Create the potion!' : `Pick ${3 - selected.length} more`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return <ShakePotionShake onScore={onScore} />;
+}
+
+function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
+  const DURATION  = 3000;
+  const TARGET    = 30;   // taps for 100% score
+  const tapsRef   = useRef(0);
+  const doneRef   = useRef(false);
+  const startTime = useRef(Date.now());
+  const [taps,     setTaps]     = useState(0);
+  const [done,     setDone]     = useState(false);
+  const [timeLeft, setTimeLeft] = useState(DURATION);
+
+  // Shake animation (translateX + rotate)
+  const shakeX   = useRef(new Animated.Value(0)).current;
+  const shakeRot = useRef(new Animated.Value(0)).current;
+
+  // Liquid colour animated 0→1
+  const liquidProg = useRef(new Animated.Value(0)).current;
+
+  const resolve = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setDone(true);
+    const score = Math.min(100, Math.round((tapsRef.current / TARGET) * 100));
+    setTimeout(() => onScore(score), 400);
+  };
+
+  // Timer
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (doneRef.current) return;
+      const rem = Math.max(0, DURATION - (Date.now() - startTime.current));
+      setTimeLeft(rem);
+      if (rem <= 0) resolve();
+    }, 50);
+    return () => clearInterval(iv);
+  }, []);
+
+  const triggerShake = () => {
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(shakeX,   { toValue: -12, duration: 40, useNativeDriver: true }),
+        Animated.timing(shakeRot, { toValue: -8,  duration: 40, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(shakeX,   { toValue: 12,  duration: 40, useNativeDriver: true }),
+        Animated.timing(shakeRot, { toValue: 8,   duration: 40, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(shakeX,   { toValue: -8,  duration: 35, useNativeDriver: true }),
+        Animated.timing(shakeRot, { toValue: -5,  duration: 35, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(shakeX,   { toValue: 0,   duration: 35, useNativeDriver: true }),
+        Animated.timing(shakeRot, { toValue: 0,   duration: 35, useNativeDriver: true }),
+      ]),
+    ]).start();
+  };
+
+  const handleTap = () => {
+    if (doneRef.current) return;
+    const next = tapsRef.current + 1;
+    tapsRef.current = next;
+    setTaps(next);
+    triggerShake();
+    // Liquid colour progress
+    Animated.timing(liquidProg, {
+      toValue: Math.min(1, next / TARGET),
+      duration: 150,
+      useNativeDriver: false,
+    }).start();
+    if (next >= TARGET) resolve();
+  };
+
+  const rotateDeg = shakeRot.interpolate({ inputRange: [-360, 360], outputRange: ['-360deg', '360deg'] });
+
+  // Liquid colour: purple → blue → teal → lime
+  const liquidColor = liquidProg.interpolate({
+    inputRange:  [0,         0.33,       0.66,       1        ],
+    outputRange: ['#7C3AED', '#2563EB',  '#0891B2',  '#65A30D'],
+  });
+
+  return (
+    <View style={{ paddingHorizontal: scale(20) }}>
+      <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(24), gap: scale(20), alignItems: 'center', ...SOLID_SHADOW }}>
+
+        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
+          Shake the potion!
+        </Text>
+
+        {/* Potion with animated liquid colour overlay */}
+        <Animated.View style={{ transform: [{ translateX: shakeX }, { rotate: rotateDeg }] }}>
+          <View style={{ width: scale(120), height: scale(140), alignItems: 'center', justifyContent: 'center' }}>
+            {/* Base potion image */}
+            <Image
+              source={require('./assets/battleui/potionicon.png')}
+              style={{ width: scale(120), height: scale(140) }}
+              resizeMode="contain"
+            />
+            {/* Colour overlay — sits on top, blend mode shifts liquid hue */}
+            <Animated.View style={{
+              position: 'absolute',
+              width: scale(120),
+              height: scale(140),
+              backgroundColor: liquidColor,
+              mixBlendMode: 'color',
+              opacity: 0.75,
+            } as any} />
+          </View>
+        </Animated.View>
+
+        {/* Shake button */}
+        <TouchableOpacity
+          onPress={handleTap}
+          disabled={done}
+          activeOpacity={0.7}
+          style={{ width: '100%', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+        >
+          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(20), color: '#1A1A1A' }}>
+            {done ? '✨ Done!' : `Shake!  ${Math.ceil(timeLeft / 1000)}s`}
+          </Text>
+        </TouchableOpacity>
+
+      </View>
+    </View>
+  );
+}
+
+// ── Mini-game: Slingshot ─────────────────────────────────────────────────────
+function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
+  const { width: SW, height: SH } = Dimensions.get('window');
+  const SHOTS    = 3;
+  const HANDLE_W = scale(200);
+  const HANDLE_H = scale(200);
+  const SLING_L  = scale(30);   // handle left edge on screen
+  const SLING_B  = scale(20);   // handle bottom offset
+
+  // Prong tip offsets within the handle image
+  const TIP_LX = HANDLE_W * 0.18;
+  const TIP_LY = HANDLE_H * 0.17;
+  const TIP_RX = HANDLE_W * 0.82;
+  const TIP_RY = HANDLE_H * 0.17;
+  // Rock rest position — midpoint between prong tips
+  const REST_X = (TIP_LX + TIP_RX) / 2;
+
+  // Rock offset from rest (0,0 = at rest in fork)
+  // Rock offset animated values (0,0 = at rest in fork)
+  const rockDX = useRef(new Animated.Value(0)).current;
+  const rockDY = useRef(new Animated.Value(0)).current;
+  const [pull, setPull] = useState({ dx: 0, dy: 0 });
+
+  const shotsRef    = useRef(SHOTS);
+  const [shotsLeft, setShotsLeft] = useState(SHOTS);
+  const [firing,    setFiring]    = useState(false);
+  const [done,      setDone]      = useState(false);
+  const [hit,       setHit]       = useState(false);
+  const totalScore                = useRef(0);
+  const [containerH, setContainerH] = useState(SH * 0.5);
+
+  // Rock rest position in container coordinates
+  const restX = SLING_L + REST_X;
+  const restY = containerH - SLING_B - HANDLE_H + (TIP_LY + scale(6));
+
+  // Prong tips in container coordinates (for SVG bands)
+  const tipLX = SLING_L + TIP_LX;
+  const tipRX = SLING_L + TIP_RX;
+  const tipY  = containerH - SLING_B - HANDLE_H + TIP_LY;
+
+  // Bare-bones PanResponder — just track g.dx/g.dy, no clamping
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder:  () => true,
+    onPanResponderMove: (_, g) => {
+      rockDX.setValue(g.dx);
+      rockDY.setValue(g.dy);
+      setPull({ dx: g.dx, dy: g.dy });
+    },
+    onPanResponderRelease: (_, g) => {
+      const dist = Math.sqrt(g.dx * g.dx + g.dy * g.dy);
+      if (dist < 10) {
+        rockDX.setValue(0); rockDY.setValue(0);
+        setPull({ dx: 0, dy: 0 });
+        return;
+      }
+      const power = Math.min(1, dist / 200); // 200px = full power
+      totalScore.current += Math.round(power * 100);
+      setFiring(true);
+      setPull({ dx: 0, dy: 0 });
+
+      // Fly opposite to pull direction
+      Animated.parallel([
+        Animated.timing(rockDX, { toValue: -g.dx * 4, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
+        Animated.timing(rockDY, { toValue: -g.dy * 4, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
+      ]).start(() => {
+        setHit(true);
+        setTimeout(() => {
+          setHit(false);
+          const next = shotsRef.current - 1;
+          shotsRef.current = next;
+          setShotsLeft(next);
+          if (next <= 0) {
+            setDone(true);
+            setTimeout(() => onScore(Math.min(100, Math.round(totalScore.current / SHOTS))), 300);
+          } else {
+            rockDX.setValue(0); rockDY.setValue(0);
+            setPull({ dx: 0, dy: 0 });
+            setFiring(false);
+          }
+        }, 350);
+      });
+    },
+  })).current;
+
+  // Trajectory dots
+  const dots = (() => {
+    const { dx, dy } = pull;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 10) return [];
+    const power = Math.min(1, dist / 200);
+    const vx = -(dx / dist) * power * 20;
+    const vy = -(dy / dist) * power * 20;
+    return Array.from({ length: 10 }, (_, i) => {
+      const t = (i + 1) * 3;
+      return { x: restX + dx + vx * t, y: restY + dy + vy * t + 0.15 * t * t, op: 0.8 - i * 0.07 };
+    });
+  })();
+
+  return (
+    <View style={{ flex: 1 }} onLayout={e => setContainerH(e.nativeEvent.layout.height)}>
+
+      {/* SVG: trajectory dots + elastic bands */}
+      <Svg width={SW} height={containerH} style={StyleSheet.absoluteFill} pointerEvents="none">
+        {dots.map((d, i) => <Circle key={i} cx={d.x} cy={d.y} r={scale(5)} fill="white" opacity={d.op} />)}
+        {!firing && <>
+          <Line x1={tipLX} y1={tipY} x2={restX + pull.dx} y2={restY + pull.dy} stroke="#4C1D95" strokeWidth={scale(8)} strokeLinecap="round" />
+          <Line x1={tipRX} y1={tipY} x2={restX + pull.dx} y2={restY + pull.dy} stroke="#4C1D95" strokeWidth={scale(8)} strokeLinecap="round" />
+        </>}
+      </Svg>
+
+      {/* Rock — floats freely over the whole container */}
+      <Animated.Image
+        source={require('./assets/battleui/slingshotrock.png')}
+        style={{ position: 'absolute', width: scale(58), height: scale(54), left: restX - scale(29), top: restY - scale(27), transform: [{ translateX: rockDX }, { translateY: rockDY }] }}
+        resizeMode="contain"
+      />
+
+      {/* Slingshot handle — full area is the touch target */}
+      <View
+        style={{ position: 'absolute', bottom: SLING_B, left: SLING_L, width: HANDLE_W, height: HANDLE_H }}
+        {...panResponder.panHandlers}
+      >
+        <Image source={require('./assets/battleui/slingshothandle.png')} style={{ width: HANDLE_W, height: HANDLE_H }} resizeMode="contain" />
+      </View>
+
+      {/* HIT */}
+      {hit && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
+        <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(52), color: '#C5F215' }}>💥 HIT!</Text>
+      </View>}
+
+      {/* Ammo */}
+      <View style={{ position: 'absolute', top: scale(16), right: scale(20), flexDirection: 'row', gap: scale(8) }}>
+        {Array.from({ length: SHOTS }).map((_, i) => (
+          <Image key={i} source={require('./assets/battleui/slingshotrock.png')} style={{ width: scale(32), height: scale(30), opacity: i < shotsLeft ? 1 : 0.2 }} resizeMode="contain" />
+        ))}
+      </View>
+
+      {!firing && !done && <View style={{ position: 'absolute', bottom: HANDLE_H + scale(40), left: 0, right: 0, alignItems: 'center' }}>
+        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(15), color: 'rgba(255,255,255,0.85)' }}>Pull back and release!</Text>
+      </View>}
+    </View>
+  );
 }
 
 // ── Mini-game: Whack the Weak Spot ────────────────────────────────────────────
@@ -2209,7 +2556,7 @@ function SequenceGame({ onScore, fast = false }: { onScore: (s: number) => void;
               borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center',
               transform:[{ scale: activeShow === i ? 1.2 : 1 }],
             }}>
-              {(lit || showSequence) && <Text style={{ fontSize: scale(18), fontWeight:'900', color:'#1A1A1A' }}>{BB_LABELS[ci]}</Text>}
+              {(lit || showSequence) && <Text style={{ fontSize: scale(18), fontFamily: 'Inter_900Black', color:'#1A1A1A' }}>{BB_LABELS[ci]}</Text>}
             </View>
           );
         })}
@@ -2220,7 +2567,7 @@ function SequenceGame({ onScore, fast = false }: { onScore: (s: number) => void;
             style={{ width: scale(62), height: scale(62), borderRadius: scale(14),
               backgroundColor: gPhase === 'input' ? color : '#ECEAE4',
               borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center' }}>
-            <Text style={{ fontSize: scale(22), fontWeight:'900', color:'#1A1A1A' }}>{BB_LABELS[i]}</Text>
+            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color:'#1A1A1A' }}>{BB_LABELS[i]}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -2293,14 +2640,14 @@ function PowerSlashGame({ onScore }: { onScore: (s: number) => void }) {
         ))}
         {/* Start */}
         <View style={{ position:'absolute', width: scale(32), height: scale(32), borderRadius: scale(16), backgroundColor:'#6B35F0', borderWidth:2, borderColor:'#1A1A1A', left: START.x-scale(16), top: START.y-scale(16), justifyContent:'center', alignItems:'center' }}>
-          <Text style={{ color:'#fff', fontWeight:'900', fontSize: scale(14) }}>●</Text>
+          <Text style={{ color:'#fff', fontFamily: 'Inter_900Black', fontSize: scale(14) }}>●</Text>
         </View>
         {/* End */}
         <View style={{ position:'absolute', width: scale(28), height: scale(28), borderRadius: scale(14), backgroundColor:'#C5F215', borderWidth:2, borderColor:'#1A1A1A', left: END.x-scale(14), top: END.y-scale(14), justifyContent:'center', alignItems:'center' }}>
           <Text style={{ fontSize: scale(14) }}>★</Text>
         </View>
       </View>
-      {done && <Text style={{ fontSize: scale(14), fontWeight:'700', color:'#6B35F0' }}>Slash scored!</Text>}
+      {done && <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color:'#6B35F0' }}>Slash scored!</Text>}
     </View>
   );
 }
@@ -2352,7 +2699,7 @@ function EarthquakeGame({ onScore }: { onScore: (s: number) => void }) {
             style={{ width: scale(118), height: scale(76), borderRadius: scale(16),
               backgroundColor: done ? '#ABABAB' : side === 'left' ? '#6B35F0' : '#FF3B55',
               borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center' }}>
-            <Text style={{ color:'#fff', fontWeight:'900', fontSize: scale(30) }}>{side === 'left' ? '←' : '→'}</Text>
+            <Text style={{ color:'#fff', fontFamily: 'Inter_900Black', fontSize: scale(30) }}>{side === 'left' ? '←' : '→'}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -2407,7 +2754,7 @@ function DefuseGame({ onScore }: { onScore: (s: number) => void }) {
           <TouchableOpacity key={w.id} onPress={() => handleCut(w.id)} disabled={done} activeOpacity={0.8}
             style={{ height: scale(52), borderRadius: scale(14), backgroundColor: done ? '#ECEAE4' : w.bg,
               borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center', opacity: done ? 0.5 : 1 }}>
-            <Text style={{ color: w.text, fontWeight:'900', fontSize: scale(16) }}>✂ CUT {w.label} WIRE</Text>
+            <Text style={{ color: w.text, fontFamily: 'Inter_900Black', fontSize: scale(16) }}>✂ CUT {w.label} WIRE</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -2417,21 +2764,23 @@ function DefuseGame({ onScore }: { onScore: (s: number) => void }) {
 
 // ── 5. Interactive Battle Arena ───────────────────────────────────────────────
 
-type BattlePhase = 'choosing' | 'zap-strike' | 'frenzy' | 'overcharge' | 'whack' | 'block-breaker' | 'power-slash' | 'earthquake' | 'defuse' | 'combo-chain' | 'combo-reveal' | 'boss-turn';
+type BattlePhase = 'choosing' | 'zap-strike' | 'frenzy' | 'overcharge' | 'whack' | 'block-breaker' | 'power-slash' | 'earthquake' | 'defuse' | 'combo-chain' | 'shake-potion' | 'slingshot' | 'combo-reveal' | 'boss-turn';
 
-type AttackCardId = 'zap-strike'|'frenzy'|'overcharge'|'whack'|'block-breaker'|'power-slash'|'earthquake'|'defuse'|'combo-chain'|'weakness'|'defend';
-interface AttackCard { id: AttackCardId; mechanic: BattlePhase|'weakness'|'defend'; label: string; baseDmg: number; shardCost: number; emoji: string; cardBg: string; }
+type AttackCardId = 'zap-strike'|'frenzy'|'overcharge'|'whack'|'block-breaker'|'power-slash'|'earthquake'|'defuse'|'combo-chain'|'shake-potion'|'slingshot'|'weakness'|'defend';
+interface AttackCard { id: AttackCardId; mechanic: BattlePhase|'weakness'|'defend'; label: string; baseDmg: number; shardCost: number; emoji: string; cardBg: string; icon: ReturnType<typeof require>; }
 
 const ATTACK_POOL: Omit<AttackCard,'label'>[] = [
-  { id:'zap-strike',    mechanic:'zap-strike',    baseDmg:24, shardCost:0, emoji:'⚡', cardBg:'#EAF3FB' },
-  { id:'frenzy',        mechanic:'frenzy',        baseDmg:32, shardCost:0, emoji:'👊', cardBg:'#F0F7F0' },
-  { id:'overcharge',    mechanic:'overcharge',    baseDmg:42, shardCost:2, emoji:'🔋', cardBg:'#EAE4FF' },
-  { id:'whack',         mechanic:'whack',         baseDmg:28, shardCost:0, emoji:'💥', cardBg:'#FFF0EE' },
-  { id:'block-breaker', mechanic:'block-breaker', baseDmg:36, shardCost:0, emoji:'🧩', cardBg:'#FFF9E0' },
-  { id:'power-slash',   mechanic:'power-slash',   baseDmg:30, shardCost:0, emoji:'⚔', cardBg:'#F0EDFF' },
-  { id:'earthquake',    mechanic:'earthquake',    baseDmg:32, shardCost:0, emoji:'🌍', cardBg:'#FFF0E0' },
-  { id:'defuse',        mechanic:'defuse',        baseDmg:38, shardCost:1, emoji:'💣', cardBg:'#FFF0EE' },
-  { id:'combo-chain',   mechanic:'combo-chain',   baseDmg:34, shardCost:0, emoji:'🔗', cardBg:'#F0F7F0' },
+  { id:'zap-strike',    mechanic:'zap-strike',    baseDmg:24, shardCost:0, emoji:'⚡', cardBg:'#EAF3FB', icon: require('./assets/icons/icon-lightning.png') },
+  { id:'frenzy',        mechanic:'frenzy',        baseDmg:32, shardCost:0, emoji:'👊', cardBg:'#F0F7F0', icon: require('./assets/icons/icon-streak.png') },
+  { id:'overcharge',    mechanic:'overcharge',    baseDmg:42, shardCost:2, emoji:'🔋', cardBg:'#EAE4FF', icon: require('./assets/icons/icon-star.png') },
+  { id:'whack',         mechanic:'whack',         baseDmg:28, shardCost:0, emoji:'💥', cardBg:'#FFF0EE', icon: require('./assets/icons/icon-skull.png') },
+  { id:'block-breaker', mechanic:'block-breaker', baseDmg:36, shardCost:0, emoji:'🧩', cardBg:'#FFF9E0', icon: require('./assets/icons/icon-completed.png') },
+  { id:'power-slash',   mechanic:'power-slash',   baseDmg:30, shardCost:0, emoji:'⚔', cardBg:'#F0EDFF', icon: require('./assets/icons/icon-trophy.png') },
+  { id:'earthquake',    mechanic:'earthquake',    baseDmg:32, shardCost:0, emoji:'🌍', cardBg:'#FFF0E0', icon: require('./assets/icons/icon-timer.png') },
+  { id:'defuse',        mechanic:'defuse',        baseDmg:38, shardCost:1, emoji:'💣', cardBg:'#FFF0EE', icon: require('./assets/icons/icon-gem.png') },
+  { id:'combo-chain',   mechanic:'combo-chain',   baseDmg:34, shardCost:0, emoji:'🔗', cardBg:'#F0F7F0', icon: require('./assets/icons/icon-graph.png') },
+  { id:'shake-potion',  mechanic:'shake-potion',  baseDmg:36, shardCost:0, emoji:'🧪', cardBg:'#F0EDFF', icon: require('./assets/battleui/potionicon.png') },
+  { id:'slingshot',     mechanic:'slingshot',     baseDmg:38, shardCost:0, emoji:'🪃', cardBg:'#FFF9E0', icon: require('./assets/battleui/slingshotrock.png') },
 ];
 
 function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, totalPower, completionPct, shards: initialShards, weaknessUnlocked, guaranteedWin, onBattleEnd, bossOverride }: {
@@ -2442,6 +2791,54 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
 }) {
   const boss    = bossOverride ?? getWeeklyBoss(monsterIdx);
   const BossSvg = BOSS_SVGS[monsterIdx % BOSS_SVGS.length];
+
+  const INTRO_QUIPS = [
+    'Clean your CLOCK!',
+    'You dare\nchallenge ME?!',
+    'This ends NOW! 😤',
+    'Nobody beats\nthis boss!',
+    'Prepare yourself!',
+  ];
+  const HIT_QUIPS = [
+    'OW! That tickled.',
+    'Not the good stuff!',
+    'My bristles!! 😤',
+    'Powers... fading...',
+    'You got lucky!',
+    "That'll leave\na mark!",
+    'Toothpaste\nEVERYWHERE!',
+    'I taste defeat...',
+    'Unacceptable!! 😤',
+    "I'm warning you!",
+    'My dentist will\nhear about this!',
+    'Ow ow ow OW!',
+  ];
+
+  const [quip, setQuip]         = useState('');
+  const bubbleAnim              = useRef(new Animated.Value(0)).current;
+  const bubbleTimer             = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const MAX_LINE = 18;
+  const clampQuip = (text: string) =>
+    text.split('\n').map(line => line.length > MAX_LINE ? line.slice(0, MAX_LINE - 1) + '…' : line).slice(0, 2).join('\n');
+
+  const showBubble = useCallback((text: string, duration = 2200) => {
+    if (bubbleTimer.current) clearTimeout(bubbleTimer.current);
+    setQuip(clampQuip(text));
+    bubbleAnim.setValue(0);
+    Animated.spring(bubbleAnim, { toValue: 1, useNativeDriver: true, tension: 180, friction: 10 }).start();
+    bubbleTimer.current = setTimeout(() => {
+      Animated.timing(bubbleAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
+    }, duration);
+  }, [bubbleAnim]);
+
+  // Intro quip on mount
+  useEffect(() => {
+    const t = setTimeout(() => {
+      showBubble(INTRO_QUIPS[Math.floor(Math.random() * INTRO_QUIPS.length)], 2500);
+    }, 400);
+    return () => clearTimeout(t);
+  }, []);
 
   const PLAYER_MAX = Math.round(50 + totalPower * 0.5);
   const ENEMY_MAX  = boss.hp;
@@ -2464,6 +2861,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
   const bobPlayer    = useBob(0,   7, 3000);
   const bobEnemy     = useBob(800, 7, 3000);
   const flashAnim    = useRef(new Animated.Value(0)).current;
+  const whiteFlash   = useRef(new Animated.Value(0)).current;
 
   const playerHpRef = useRef(PLAYER_MAX);
   const enemyHpRef  = useRef(ENEMY_MAX);
@@ -2480,12 +2878,17 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     const shuffled = [...eligible].sort(() => Math.random() - 0.5);
     let picks: AttackCard[] = shuffled.slice(0, 3);
     if (weaknessUnlocked && !weaknessUsed) {
-      const wCard: AttackCard = { id:'weakness', mechanic:'weakness', label:'Weakness Attack', baseDmg:45, shardCost:0, emoji:'⭐', cardBg:'#FFF9E0' };
+      const wCard: AttackCard = { id:'weakness', mechanic:'weakness', label:'Weakness Attack', baseDmg:45, shardCost:0, emoji:'⭐', cardBg:'#FFF9E0', icon: require('./assets/icons/icon-starbox.png') };
       picks = [wCard, ...picks.slice(0, 2)];
     }
-    const dCard: AttackCard = { id:'defend', mechanic:'defend', label:'Defend', baseDmg:0, shardCost:0, emoji:'🛡', cardBg:'#FFF0F0' };
+    const dCard: AttackCard = { id:'defend', mechanic:'defend', label:'Defend', baseDmg:0, shardCost:0, emoji:'🛡', cardBg:'#FFF0F0', icon: require('./assets/icons/icon-skulldisabled.png') };
     setHand([...picks, dCard]);
   }, [phase, live]);
+
+  const triggerWhiteFlash = () => {
+    whiteFlash.setValue(1);
+    Animated.timing(whiteFlash, { toValue: 0, duration: 350, useNativeDriver: true, easing: Easing.out(Easing.quad) }).start();
+  };
 
   const flashScreen = (color: string) => {
     flashAnim.setValue(1);
@@ -2537,6 +2940,8 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     enemyHpRef.current = newEH;
     setEnemyHp(newEH);
     animHp(enemyHpAnim, newEH / ENEMY_MAX);
+    triggerWhiteFlash();
+    showBubble(HIT_QUIPS[Math.floor(Math.random() * HIT_QUIPS.length)], 1800);
     setLog(`${monsterName} used ${attackName}! Dealt ${dmg} damage!`);
     if (newEH <= 0) {
       setLive(false);
@@ -2560,6 +2965,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
       playerHpRef.current = newPH;
       setPlayerHp(newPH);
       animHp(playerHpAnim, newPH / PLAYER_MAX);
+      triggerWhiteFlash();
       setLog(`${boss.name} used ${atk}!${shield} Dealt ${d} dmg!`);
       if (newPH <= 0) {
         setLive(false);
@@ -2623,13 +3029,19 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     setPhase(card.mechanic as BattlePhase);
   };
 
-  return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <Image source={require('./assets/bosses/dustbunny.png')} style={StyleSheet.absoluteFill} resizeMode="stretch" />
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <Header title="BATTLE" showCoins={false} />
+  const { top: safeTop } = useSafeAreaInsets();
 
-      {/* Flash overlay */}
+  return (
+    <View style={{ flex: 1, backgroundColor: '#2D0E6B' }}>
+      <Image
+        source={require('./assets/battleui/battlebg.png')}
+        style={{ position: 'absolute', top: -safeTop, left: 0, width: Dimensions.get('window').width, height: Dimensions.get('window').height + safeTop }}
+        resizeMode="stretch"
+      />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+
+      {/* Combo colour flash */}
       {combo && (
         <Animated.View pointerEvents="none" style={{
           ...StyleSheet.absoluteFillObject, zIndex: 99,
@@ -2637,63 +3049,82 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
         }} />
       )}
 
-      {/* HP bars */}
-      <View style={b.hpRow}>
-        <View style={b.hpCard}>
-          <View style={b.hpAvatarWell}>
-            <Image source={monsterImg} style={{ width: 34, height: 34 }} resizeMode="contain" />
+      {/* HP bars — no cards, no avatars, straight on the bg */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, paddingHorizontal: 16, paddingTop: 40, paddingBottom: 8, flexDirection: 'row', gap: 12 }}>
+        {/* Player */}
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(13), color: '#FFFFFF' }}>{monsterName}</Text>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(11), color: 'rgba(255,255,255,0.7)' }}>{playerHp}/{PLAYER_MAX}</Text>
           </View>
-          <View style={{ flex:1 }}>
-            <View style={{ flexDirection:'row', justifyContent:'space-between' }}>
-              <Text style={b.hpName}>{monsterName}</Text>
-              <Text style={b.hpVal}>{playerHp}/{PLAYER_MAX}</Text>
-            </View>
-            <View style={b.hpTrack}>
-              <Animated.View style={[b.hpFill, { backgroundColor:'#6B35F0', width: playerHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
-            </View>
+          <View style={b.hpTrack}>
+            <Animated.View style={[b.hpFill, { backgroundColor: '#C5F215', width: playerHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
           </View>
         </View>
-        <Text style={b.hpVs}>VS</Text>
-        <View style={b.hpCard}>
-          <View style={[b.hpAvatarWell, { backgroundColor:'#FFF0EE' }]}>
-            <BossSvg size={30} />
+
+        <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(11), color: 'rgba(255,255,255,0.5)', alignSelf: 'center', marginTop: -6 }}>VS</Text>
+
+        {/* Boss */}
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(13), color: '#FFFFFF' }}>{boss.name}</Text>
+            <Text style={[{ fontFamily: 'Inter_600SemiBold', fontSize: scale(11), color: 'rgba(255,255,255,0.7)' }, enemyHp < ENEMY_MAX * 0.25 && { color: '#FF6B6B' }]}>{enemyHp}/{ENEMY_MAX}</Text>
           </View>
-          <View style={{ flex:1 }}>
-            <View style={{ flexDirection:'row', justifyContent:'space-between' }}>
-              <Text style={b.hpName}>{boss.name}</Text>
-              <Text style={[b.hpVal, enemyHp < ENEMY_MAX * 0.25 && { color:'#CC3322' }]}>{enemyHp}/{ENEMY_MAX}</Text>
-            </View>
-            <View style={b.hpTrack}>
-              <Animated.View style={[b.hpFill, { backgroundColor:'#FF3B55', width: enemyHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
-            </View>
+          <View style={b.hpTrack}>
+            <Animated.View style={[b.hpFill, { backgroundColor: '#F59E0B', width: enemyHpAnim.interpolate({ inputRange:[0,1], outputRange:['0%','100%'] }) as any }]} />
           </View>
         </View>
       </View>
 
-      {/* Stage */}
-      <View style={b.stage}>
-        <View style={b.stageFighter}>
-          <Animated.View style={[b.stageArtP, { transform:[{ translateY: bobPlayer }] }]}>
-            <Image source={monsterImg} style={{ width:90, height:90 }} resizeMode="contain" />
-          </Animated.View>
-          <Text style={b.stageTag}>{monsterName}</Text>
-        </View>
-        <View style={b.stageFighter}>
-          <Animated.View style={[b.stageArtE, { transform:[{ translateY: bobEnemy }] }]}>
-            <BossSvg size={90} />
-          </Animated.View>
-          <Text style={[b.stageTag, enemyHp < ENEMY_MAX * 0.25 && { color:'#CC3322', fontWeight:'700' }]}>
-            {enemyHp < ENEMY_MAX * 0.25 ? '⚠ WEAKENED' : boss.name}
-          </Text>
-        </View>
+      {/* Boss — large, centered, hovering */}
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
+        {/* Radial gradient glow behind boss */}
+        <Svg width={500} height={500} style={{ position: 'absolute', marginTop: 300, mixBlendMode: 'overlay' } as any}>
+          <Defs>
+            <RadialGradient id="bossGlow" cx="50%" cy="50%" r="50%">
+              <Stop offset="0%"   stopColor="#D6D6D6" stopOpacity="0.9" />
+              <Stop offset="40%"  stopColor="#D6D6D6" stopOpacity="0.5" />
+              <Stop offset="75%"  stopColor="#D6D6D6" stopOpacity="0.15" />
+              <Stop offset="100%" stopColor="#D6D6D6" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          <Circle cx="250" cy="250" r="250" fill="url(#bossGlow)" />
+        </Svg>
+        <Animated.Image
+          source={require('./assets/bosses/toothpasteboss.png')}
+          style={{ width: scale(410), height: scale(468), marginTop: 350, transform: [{ translateY: bobEnemy }] }}
+          resizeMode="contain"
+        />
+
+        {/* Speech bubble — upper right of boss */}
+        <Animated.View style={{
+          position: 'absolute',
+          top: 136,
+          right: -20,
+          width: 200,
+          height: 160,
+          opacity: bubbleAnim,
+          transform: [{ scale: bubbleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <Image
+            source={require('./assets/battleui/speechbubble.png')}
+            style={{ position: 'absolute', width: 200, height: 160 }}
+            resizeMode="stretch"
+          />
+          <Text style={{
+            fontFamily: 'FredokaOne_400Regular',
+            fontSize: scale(20),
+            color: '#1A1A1A',
+            textAlign: 'center',
+            paddingHorizontal: 18,
+            paddingBottom: 20,
+            lineHeight: scale(24),
+          }}>{quip}</Text>
+        </Animated.View>
       </View>
 
-      {/* Battle log */}
-      <View style={{ paddingHorizontal:14, paddingBottom:8 }}>
-        <View style={s.arenaLog}>
-          <Text style={s.arenaLogText}>{log}</Text>
-        </View>
-      </View>
 
       {/* ── Action area ── */}
       <View style={{ flex:1 }}>
@@ -2702,14 +3133,14 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
         {phase === 'combo-reveal' && combo && (
           <View style={{ flex:1, alignItems:'center', justifyContent:'center', gap: scale(8) }}>
             <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(42), color: combo.color, textAlign:'center' }}>{combo.label}</Text>
-            <Text style={{ fontSize: scale(22), fontWeight:'900', color:'#1A1A1A' }}>{combo.score} pts</Text>
+            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color:'#FFFFFF' }}>{combo.score} pts</Text>
           </View>
         )}
 
         {/* Boss turn */}
         {phase === 'boss-turn' && (
           <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}>
-            <Text style={{ fontSize: scale(32), fontWeight:'900', color:'#CC3322' }}>⚔ Boss Attack!</Text>
+            <Text style={{ fontSize: scale(32), fontFamily: 'Inter_900Black', color:'#FF6B6B' }}>⚔ Boss Attack!</Text>
           </View>
         )}
 
@@ -2723,6 +3154,8 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
         {phase === 'earthquake'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><EarthquakeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
         {phase === 'defuse'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><DefuseGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
         {phase === 'combo-chain'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={true} /></View>}
+        {phase === 'shake-potion'  && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ShakePotionGame  onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
+        {phase === 'slingshot'     && activeCard && <SlingshotGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} />}
 
         {/* ── Card hand (choosing phase) ── */}
         {phase === 'choosing' && (
@@ -2735,17 +3168,11 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
                   onPress={() => handleCardPlay(card)}
                   activeOpacity={0.82}
                 >
-                  <Text style={b.handEmoji}>{card.emoji}</Text>
+                  <Image source={card.icon} style={{ width: 44, height: 44 }} resizeMode="contain" />
                   <Text style={b.handLabel} numberOfLines={2}>{card.label}</Text>
-                  {card.shardCost > 0 && (
-                    <Text style={b.handCost}>💎 {card.shardCost}</Text>
-                  )}
-                  {card.id === 'defend' && (
-                    <Text style={b.handCost}>Skip turn</Text>
-                  )}
-                  {card.id === 'weakness' && (
-                    <Text style={b.handCost}>One use</Text>
-                  )}
+                  <Text style={b.handCost}>
+                    {card.shardCost > 0 ? `💎 ${card.shardCost}` : card.id === 'defend' ? 'Skip turn' : card.id === 'weakness' ? 'One use' : `${card.baseDmg} dmg`}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -2793,6 +3220,7 @@ function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monst
   onDismiss: () => void;
 }) {
   const { width: W, height: H } = Dimensions.get('window');
+  const insets = useSafeAreaInsets();
   const bgColor = battleWon === true ? '#C5F215' : '#FFF9E6';
 
   // Confetti animated values — use ref to avoid recreating on re-render
@@ -2842,7 +3270,8 @@ function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monst
 
   return (
     <View style={{ flex: 1, backgroundColor: bgColor }}>
-      {/* Confetti layer */}
+      <StatusBar barStyle="dark-content" backgroundColor={bgColor} translucent />
+      {/* Confetti layer — starts above the status bar */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         {confettiAnims.map((anim, i) => {
           const translateY = anim.interpolate({
@@ -2867,7 +3296,7 @@ function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monst
         })}
       </View>
 
-      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 40, gap: 16 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24, gap: 16 }} showsVerticalScrollIndicator={false}>
         {/* Monster */}
         <Animated.Image
           source={monsterImg}
@@ -2881,22 +3310,22 @@ function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monst
             <Text style={{ fontSize: scale(72), fontWeight: '900', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular', letterSpacing: -2 }}>
               ${(amount / 100).toFixed(2)}
             </Text>
-            <Text style={{ fontSize: scale(22), fontWeight: '700', color: '#1A1A1A' }}>earned this week!</Text>
+            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>earned this week!</Text>
           </>
         ) : (
-          <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', textAlign: 'center' }}>Great work this week! 🎉</Text>
+          <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center' }}>Great work this week! 🎉</Text>
         )}
 
         {/* Breakdown pill */}
         <View style={{ backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 4, ...SOLID_SHADOW }}>
-          <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' }}>{breakdownBase}{breakdownSuffix}</Text>
+          <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{breakdownBase}{breakdownSuffix}</Text>
           {battleWon === true && <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />}
         </View>
 
         {/* Bank counter */}
         {amount > 0 && (
           <View style={{ backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 12 }}>
-            <Text style={{ fontSize: scale(15), fontWeight: '700', color: '#1A1A1A', textAlign: 'center' }}>
+            <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A', textAlign: 'center' }}>
               Bank balance: {fmtCoins(displayAmount)}
             </Text>
           </View>
@@ -2908,7 +3337,7 @@ function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monst
           onPress={onDismiss}
           activeOpacity={0.8}
         >
-          <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>Collect!</Text>
+          <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Collect!</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -2974,10 +3403,10 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
     return (
       <View style={{ flex: 1, backgroundColor: bg, borderRadius: 16, borderWidth: 2, borderColor: border, padding: 16, gap: 4, ...SOLID_SHADOW }}>
         {icon}
-        <Text style={{ fontSize: scale(22), fontWeight: '900', color: valCol, letterSpacing: -0.5, marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit>
+        <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color: valCol, letterSpacing: -0.5, marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit>
           {value}
         </Text>
-        <Text style={{ fontSize: scale(12), color: '#ABABAB', fontWeight: '600', lineHeight: 17 }}>
+        <Text style={{ fontSize: scale(12), color: '#ABABAB', fontFamily: 'Inter_600SemiBold', lineHeight: scale(17) }}>
           {label}
         </Text>
       </View>
@@ -3063,7 +3492,7 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
           <Image source={require('./assets/icons/icon-pencil.png')} style={{ width: scale(24), height: scale(24) }} resizeMode="contain" />
         </TouchableOpacity>
         <TouchableOpacity onPress={onBack} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-          <Text style={{ fontSize: scale(18), fontWeight: '700', color: '#1A1A1A', lineHeight: scale(20) }}>✕</Text>
+          <Text style={{ fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A', lineHeight: scale(20) }}>✕</Text>
         </TouchableOpacity>
       </View>
 
@@ -3077,7 +3506,7 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
         </View>
 
         {/* ── Name ── */}
-        <Text style={{ fontSize: scale(30), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', letterSpacing: -0.5 }}>
+        <Text style={{ fontSize: scale(30), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', letterSpacing: -0.5 }}>
           {goal.name}
         </Text>
 
@@ -3085,14 +3514,14 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
         <View style={{ gap: 10 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(22), height: scale(22) }} resizeMode="contain" />
-            <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>{fmtD(goal.savedCents)}</Text>
-            <Text style={{ fontSize: scale(16), color: '#ABABAB', fontWeight: '600' }}>/ {fmtD(targetCents)}</Text>
+            <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{fmtD(goal.savedCents)}</Text>
+            <Text style={{ fontSize: scale(16), color: '#ABABAB', fontFamily: 'Inter_600SemiBold' }}>/ {fmtD(targetCents)}</Text>
           </View>
           <View style={{ height: 14, backgroundColor: '#ECEAE4', borderRadius: 7, overflow: 'hidden' }}>
             <View style={{ width: `${pct * 100}%` as any, height: '100%', backgroundColor: heroBg, borderRadius: 7 }} />
           </View>
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-            <Text style={{ fontSize: scale(13), fontWeight: '700', color: heroBg }}>
+            <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: heroBg }}>
               {leftCents > 0 ? `${fmtD(leftCents)} left!` : '🎉 Goal reached!'}
             </Text>
           </View>
@@ -3100,7 +3529,7 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
 
         {/* ── Stage label pill ── */}
         <View style={{ alignSelf: 'flex-start', backgroundColor: pct >= 1 ? '#E6F7EC' : '#EAE4FF', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1.5, borderColor: stageLabelColor }}>
-          <Text style={{ fontSize: scale(12), fontWeight: '800', color: stageLabelColor, letterSpacing: 0.3 }}>{stageLabel}</Text>
+          <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: stageLabelColor, letterSpacing: 0.3 }}>{stageLabel}</Text>
         </View>
 
         {/* ── Stat cards (1 row at 0–24%, 2 rows otherwise) ── */}
@@ -3129,7 +3558,7 @@ function Toast({ message }: { message: string }) {
   return (
     <Animated.View style={{ position: 'absolute', top: 60, left: 24, right: 24, opacity, alignItems: 'center', pointerEvents: 'none' }}>
       <View style={{ backgroundColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 20, paddingVertical: 12 }}>
-        <Text style={{ color: '#FFFFFF', fontSize: scale(14), fontWeight: '700' }}>{message}</Text>
+        <Text style={{ color: '#FFFFFF', fontSize: scale(14), fontFamily: 'Inter_700Bold' }}>{message}</Text>
       </View>
     </Animated.View>
   );
@@ -3220,16 +3649,16 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
           <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW }}>
             <Image source={require('./assets/icons/icon-streak.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
             <View>
-              <Text style={{ fontSize: scale(24), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{currentStreak}</Text>
-              <Text style={{ fontSize: scale(12), color: '#ABABAB', fontWeight: '600' }}>Day Streak</Text>
+              <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -1 }}>{currentStreak}</Text>
+              <Text style={{ fontSize: scale(12), color: '#ABABAB', fontFamily: 'Inter_600SemiBold' }}>Day Streak</Text>
             </View>
           </View>
           {/* Coins */}
           <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW }}>
             <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
             <View>
-              <Text style={{ fontSize: scale(24), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{coins.toLocaleString()}</Text>
-              <Text style={{ fontSize: scale(12), color: '#ABABAB', fontWeight: '600' }}>Coins</Text>
+              <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -1 }}>{coins.toLocaleString()}</Text>
+              <Text style={{ fontSize: scale(12), color: '#ABABAB', fontFamily: 'Inter_600SemiBold' }}>Coins</Text>
             </View>
           </View>
         </View>
@@ -3239,7 +3668,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
           {/* Header label */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
             <Image source={require('./assets/icons/icon-goals.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
-            <Text style={{ fontSize: scale(12), fontWeight: '900', color: '#1A1A1A', letterSpacing: 1.5 }}>CURRENT GOAL</Text>
+            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: 1.5 }}>CURRENT GOAL</Text>
           </View>
 
           {currentGoal ? (
@@ -3252,14 +3681,14 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
               </View>
 
               {/* Name */}
-              <Text style={{ fontSize: scale(22), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 12 }}>
+              <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', marginBottom: 12 }}>
                 {currentGoal.name}
               </Text>
 
               {/* Amount row */}
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginBottom: 10 }}>
-                <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' }}>{fmtCoins(savedCents)}</Text>
-                <Text style={{ fontSize: scale(14), color: '#ABABAB', fontWeight: '600' }}>/ ${currentGoal.amount}</Text>
+                <Text style={{ fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{fmtCoins(savedCents)}</Text>
+                <Text style={{ fontSize: scale(14), color: '#ABABAB', fontFamily: 'Inter_600SemiBold' }}>/ ${currentGoal.amount}</Text>
               </View>
 
               {/* Progress bar + left label */}
@@ -3267,7 +3696,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
                 <View style={{ width: `${pct * 100}%` as any, height: '100%', backgroundColor: '#6B35F0', borderRadius: 7 }} />
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-                <Text style={{ fontSize: scale(13), fontWeight: '700', color: '#6B35F0' }}>
+                <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#6B35F0' }}>
                   {leftCents > 0 ? `${fmtCoins(leftCents)} left!` : '🎉 Goal reached!'}
                 </Text>
               </View>
@@ -3282,10 +3711,10 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
               <View style={{ width: scale(100), height: scale(100), borderRadius: scale(50), backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center' }}>
                 <Image source={require('./assets/icons/icon-goals.png')} style={{ width: scale(52), height: scale(52) }} resizeMode="contain" />
               </View>
-              <Text style={{ fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' }}>No goal set yet</Text>
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>No goal set yet</Text>
               <Text style={{ fontSize: scale(13), color: '#ABABAB', textAlign: 'center' }}>What are you saving up for?</Text>
               <View style={{ backgroundColor: '#6B35F0', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 20, paddingVertical: 10, marginTop: 4, ...SOLID_SHADOW }}>
-                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#FFFFFF' }}>+ Set a goal</Text>
+                <Text style={{ fontSize: scale(14), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>+ Set a goal</Text>
               </View>
             </TouchableOpacity>
           )}
@@ -3293,29 +3722,29 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
 
         {/* ── This week ─────────────────────────────── */}
         <View>
-          <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A', marginBottom: 12 }}>This week</Text>
+          <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginBottom: 12 }}>This week</Text>
           <View style={{ backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, flexDirection: 'row', ...SOLID_SHADOW }}>
             {/* Chores Done */}
             <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
               <Image source={require('./assets/icons/icon-completed.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
-              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{completedChoresCount}</Text>
-              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontWeight: '600', textAlign: 'center' }}>Chores Done</Text>
+              <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -1 }}>{completedChoresCount}</Text>
+              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontFamily: 'Inter_600SemiBold', textAlign: 'center' }}>Chores Done</Text>
             </View>
             {/* Divider */}
             <View style={{ width: 1, backgroundColor: '#ECEAE4', marginVertical: 4 }} />
             {/* Coins Earned */}
             <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
               <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
-              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{coins.toLocaleString()}</Text>
-              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontWeight: '600', textAlign: 'center' }}>Coins Earned</Text>
+              <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -1 }}>{coins.toLocaleString()}</Text>
+              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontFamily: 'Inter_600SemiBold', textAlign: 'center' }}>Coins Earned</Text>
             </View>
             {/* Divider */}
             <View style={{ width: 1, backgroundColor: '#ECEAE4', marginVertical: 4 }} />
             {/* XP Earned */}
             <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
               <Image source={require('./assets/icons/icon-star.png')} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
-              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', letterSpacing: -1 }}>{weeklyXp.toLocaleString()}</Text>
-              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontWeight: '600', textAlign: 'center' }}>XP earned</Text>
+              <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -1 }}>{weeklyXp.toLocaleString()}</Text>
+              <Text style={{ fontSize: scale(11), color: '#ABABAB', fontFamily: 'Inter_600SemiBold', textAlign: 'center' }}>XP earned</Text>
             </View>
           </View>
         </View>
@@ -3324,13 +3753,13 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
         {goals.length > 1 && (
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <Text style={{ fontSize: scale(20), fontWeight: '900', color: '#1A1A1A' }}>Other goals</Text>
+              <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Other goals</Text>
               <TouchableOpacity
                 style={{ backgroundColor: '#C5F215', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 14, paddingVertical: 6, ...SOLID_SHADOW }}
                 onPress={() => { setEditingGoal(null); setShowGoalModal(true); }}
                 activeOpacity={0.8}
               >
-                <Text style={{ fontSize: scale(13), fontWeight: '800', color: '#1A1A1A' }}>+ Add</Text>
+                <Text style={{ fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>+ Add</Text>
               </TouchableOpacity>
             </View>
             <View style={{ gap: 10 }}>
@@ -3347,10 +3776,10 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                       <Image source={goal.icon} style={{ width: scale(40), height: scale(40) }} resizeMode="contain" />
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}>{goal.name}</Text>
+                        <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{goal.name}</Text>
                         <Text style={{ fontSize: scale(13), color: '#ABABAB', marginTop: 2 }}>{fmtCoins(goal.savedCents)} saved of ${goal.amount}</Text>
                       </View>
-                      <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#6B35F0' }}>{Math.round(p * 100)}%</Text>
+                      <Text style={{ fontSize: scale(14), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>{Math.round(p * 100)}%</Text>
                     </View>
                     <View style={{ height: 8, backgroundColor: '#ECEAE4', borderRadius: 4, overflow: 'hidden' }}>
                       <View style={{ width: `${p * 100}%` as any, height: 8, backgroundColor: '#6B35F0', borderRadius: 4 }} />
@@ -3698,7 +4127,7 @@ function EvolveScreen({ fromIdx, onDone, monsterId }: { fromIdx: MonsterIdx; onD
       {/* EVOLVED! banner */}
       {v.bannerOpacity > 0.01 && (
         <View style={{ position: 'absolute', bottom: 200, left: 0, right: 0, alignItems: 'center', opacity: v.bannerOpacity }}>
-          <Text style={{ fontSize: scale(52), fontWeight: '900', color: '#C5F215', letterSpacing: -1 }}>EVOLVED!</Text>
+          <Text style={{ fontSize: scale(52), fontFamily: 'Inter_900Black', color: '#C5F215', letterSpacing: -1 }}>EVOLVED!</Text>
           <Text style={{ fontSize: scale(15), color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>{toM.name} · Level {toM.level}</Text>
         </View>
       )}
@@ -3745,7 +4174,7 @@ function ParentPayoutScreen({ kidName, coins, baseCoins, battleBonus, battleWon,
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
         {/* Intro line */}
-        <Text style={{ fontSize: scale(16), color: '#1A1A1A', fontWeight: '600' }}>
+        <Text style={{ fontSize: scale(16), color: '#1A1A1A', fontFamily: 'Inter_600SemiBold' }}>
           Here's what {kidName} earned this week.
         </Text>
 
@@ -3864,34 +4293,34 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
               <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: k.avatarColor, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW }}>
                 <Image source={getAvatarImage(k.avatarIdx)} style={{ width: 56, height: 56, borderRadius: 28 }} resizeMode="cover" />
               </View>
-              <Text style={{ fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' }}>{k.name}</Text>
+              <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{k.name}</Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} activeOpacity={0.7} onPress={onAddKid}>
             <View style={{ width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: '#D0CEC8', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: scale(28), color: '#ABABAB' }}>+</Text>
             </View>
-            <Text style={{ fontSize: scale(14), fontWeight: '600', color: '#ABABAB' }}>Add kid</Text>
+            <Text style={{ fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#ABABAB' }}>Add kid</Text>
           </TouchableOpacity>
         </ScrollView>
 
         {/* This week's overview */}
         <View style={[p.sectionCard, { marginHorizontal: 16, marginBottom: 12 }]}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <Text style={{ fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' }}>This week's overview</Text>
-            <TouchableOpacity activeOpacity={0.7}><Text style={{ fontSize: scale(14), fontWeight: '600', color: '#6B35F0' }}>View report ›</Text></TouchableOpacity>
+            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>This week's overview</Text>
+            <TouchableOpacity activeOpacity={0.7}><Text style={{ fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#6B35F0' }}>View report ›</Text></TouchableOpacity>
           </View>
           <View style={{ flexDirection: 'row', gap: 16 }}>
             <View style={{ flex: 1, gap: 8 }}>
-              <Text style={{ fontSize: scale(12), fontWeight: '600', color: '#ABABAB' }}>Tasks completed</Text>
-              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A' }}>{tasksCompleted} <Text style={{ fontSize: scale(18), color: '#ABABAB' }}>/ {tasksTotal}</Text></Text>
+              <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#ABABAB' }}>Tasks completed</Text>
+              <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{tasksCompleted} <Text style={{ fontSize: scale(18), color: '#ABABAB' }}>/ {tasksTotal}</Text></Text>
               <View style={{ height: 8, backgroundColor: '#ECEAE4', borderRadius: 4 }}>
                 <View style={{ width: `${progress * 100}%` as any, height: 8, backgroundColor: '#3B8A3A', borderRadius: 4 }} />
               </View>
             </View>
             <View style={{ flex: 1, gap: 8 }}>
-              <Text style={{ fontSize: scale(12), fontWeight: '600', color: '#ABABAB' }}>XP earned</Text>
-              <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A' }}>{xpEarned.toLocaleString()} <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>XP</Text></Text>
+              <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#ABABAB' }}>XP earned</Text>
+              <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{xpEarned.toLocaleString()} <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>XP</Text></Text>
               <Text style={{ fontSize: scale(22) }}>⭐</Text>
             </View>
           </View>
@@ -3908,7 +4337,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
           return (
             <View style={{ paddingHorizontal: 16 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <Text style={{ fontSize: scale(17), fontWeight: '800', color: '#1A1A1A' }}>Needs your attention</Text>
+                <Text style={{ fontSize: scale(17), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Needs your attention</Text>
                 {pending.length > 0 && (
                   <View style={p.pendingTabBadge}>
                     <Text style={p.pendingTabBadgeText}>{pending.length}</Text>
@@ -3916,7 +4345,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                 )}
               </View>
               {pending.length === 0 && coins === 0 ? (
-                <Text style={{ fontSize: scale(14), color: '#ABABAB', fontWeight: '500', paddingVertical: 8 }}>
+                <Text style={{ fontSize: scale(14), color: '#ABABAB', fontFamily: 'Inter_500Medium', paddingVertical: 8 }}>
                   You're all clear — nothing needs your attention right now.
                 </Text>
               ) : pending.length === 0 ? null : (
@@ -3994,7 +4423,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
             activeOpacity={0.8}
           >
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' }}>Pay {kidName} 💸</Text>
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Pay {kidName} 💸</Text>
               <Text style={{ fontSize: scale(13), color: '#1A1A1A', opacity: 0.7, marginTop: 2 }}>
                 {coins > 0 ? `${fmtCoins(coins)} ready to pay out` : "It's payout day — review this week's earnings"}
               </Text>
@@ -4377,7 +4806,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
           {battleCoinBonusEnabled && (
             <View style={{ marginTop: 16, gap: 10 }}>
               <Text style={[p.settingsRowLabel, { marginBottom: 4 }]}>
-                Multiplier: <Text style={{ color: '#6B35F0', fontWeight: '900' }}>{battleCoinBonusMultiplier}×</Text>
+                Multiplier: <Text style={{ color: '#6B35F0', fontFamily: 'Inter_900Black' }}>{battleCoinBonusMultiplier}×</Text>
               </Text>
               <Text style={p.settingsRowSub}>Scales the coin reward. 1× = full capture value.</Text>
               <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
@@ -4396,7 +4825,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
                         borderColor: selected ? '#1A1A1A' : '#D0CEC8',
                       }}
                     >
-                      <Text style={{ fontSize: scale(13), fontWeight: '700', color: selected ? '#C5F215' : C.muted }}>
+                      <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: selected ? '#C5F215' : C.muted }}>
                         {step}×
                       </Text>
                     </TouchableOpacity>
@@ -4629,10 +5058,10 @@ function AddEditKidModal({
                 contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 44 }}
               >
                 <View style={{ width: 40, height: 4, backgroundColor: '#D0CEC8', borderRadius: 2, alignSelf: 'center', marginBottom: 20 }} />
-                <Text style={{ fontSize: scale(20), fontWeight: '800', color: '#1A1A1A', marginBottom: 24, textAlign: 'center' }}>{isEdit ? 'Edit kid' : 'Add a kid'}</Text>
+                <Text style={{ fontSize: scale(20), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginBottom: 24, textAlign: 'center' }}>{isEdit ? 'Edit kid' : 'Add a kid'}</Text>
 
                 {/* Avatar picker */}
-                <Text style={{ fontSize: scale(11), fontWeight: '700', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>CHOOSE AVATAR</Text>
+                <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>CHOOSE AVATAR</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 4, marginBottom: 20 }}>
                   {[0,1,2,3,4,5,6,7].map(i => (
                     <TouchableOpacity key={i} onPress={() => setAvatarIdx(i)} activeOpacity={0.8}
@@ -4643,31 +5072,28 @@ function AddEditKidModal({
                 </ScrollView>
 
                 {/* Name */}
-                <Text style={{ fontSize: scale(11), fontWeight: '700', color: '#ABABAB', marginBottom: 8, letterSpacing: 0.8 }}>NAME</Text>
+                <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', marginBottom: 8, letterSpacing: 0.8 }}>NAME</Text>
                 <TextInput
                   value={name}
                   onChangeText={t => setName(t.slice(0, 12))}
                   autoCapitalize="words"
                   placeholder="Child's name"
                   placeholderTextColor="#C0BDB7"
-                  style={{ backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontWeight: '600', color: '#1A1A1A', marginBottom: 20 }}
+                  style={{ backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 14, fontSize: scale(16), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A', marginBottom: 20 }}
                 />
 
                 {/* Age range */}
-                <Text style={{ fontSize: scale(11), fontWeight: '700', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>AGE RANGE</Text>
+                <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>AGE RANGE</Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 28 }}>
                   {KID_AGE_RANGES.map(r => (
                     <TouchableOpacity key={r} onPress={() => setAgeRange(r)} activeOpacity={0.8}
                       style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: ageRange === r ? '#6B35F0' : '#FFFFFF', borderWidth: 2, borderColor: ageRange === r ? '#6B35F0' : '#E0DDD6' }}>
-                      <Text style={{ fontSize: scale(14), fontWeight: '700', color: ageRange === r ? '#FFFFFF' : '#1A1A1A' }}>{r}</Text>
+                      <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: ageRange === r ? '#FFFFFF' : '#1A1A1A' }}>{r}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
 
-                <TouchableOpacity onPress={handleSave} activeOpacity={0.85}
-                  style={{ backgroundColor: name.trim() ? '#6B35F0' : '#D0CEC8', borderRadius: 100, paddingVertical: 16, alignItems: 'center', borderWidth: 2, borderColor: name.trim() ? '#1A1A1A' : 'transparent' }}>
-                  <Text style={{ color: '#FFFFFF', fontSize: scale(16), fontWeight: '800' }}>{isEdit ? 'Save changes' : 'Add kid'}</Text>
-                </TouchableOpacity>
+                <Button label={isEdit ? 'Save changes' : 'Add kid'} onPress={handleSave} disabled={!name.trim()} />
               </ScrollView>
             </Animated.View>
           </Pressable>
@@ -4705,9 +5131,7 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBa
             </View>
           ))}
         </View>
-        <TouchableOpacity style={ps.addKidBtn} activeOpacity={0.85} onPress={onAddKid}>
-          <Text style={ps.addKidText}>+ Add kid</Text>
-        </TouchableOpacity>
+        {onAddKid && <Button label="+ Add kid" onPress={onAddKid} style={{ margin: 16 }} />}
       </ScrollView>
     </CreamBg>
   );
@@ -4748,7 +5172,7 @@ function BonusSlider({ value, onChange, onDragging }: { value: number; onChange:
       <View style={[ps.sliderThumb, { left: `${value}%` as any }]} />
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
         {[0, 25, 50, 75, 100].map(v => (
-          <Text key={v} style={[ps.sliderTickLabel, value === v && { color: '#6B35F0', fontWeight: '700' }]}>{v}%</Text>
+          <Text key={v} style={[ps.sliderTickLabel, value === v && { color: '#6B35F0', fontFamily: 'Inter_700Bold' }]}>{v}%</Text>
         ))}
       </View>
     </View>
@@ -4898,7 +5322,7 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
             disabled={allOn}
           >
             <Text style={{ fontSize: scale(20), marginBottom: 4 }}>🔒</Text>
-            <Text style={{ fontSize: scale(12), fontWeight: '700', color: C.text }}>Require all</Text>
+            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.text }}>Require all</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[p.sectionCard, { flex: 1, alignItems: 'center', paddingVertical: 14, opacity: allOff ? 0.45 : 1 }]}
@@ -4907,7 +5331,7 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
             disabled={allOff}
           >
             <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(22), height: scale(22), marginBottom: 4 }} resizeMode="contain" />
-            <Text style={{ fontSize: scale(12), fontWeight: '700', color: C.text }}>Auto-approve all</Text>
+            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.text }}>Auto-approve all</Text>
           </TouchableOpacity>
         </View>
 
@@ -4926,8 +5350,8 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
                   </View>
                   {/* Name + status */}
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: scale(15), fontWeight: '700', color: C.text }}>{kid}</Text>
-                    <Text style={{ fontSize: scale(12), color: needsApproval ? '#2A7A2A' : '#F59E0B', fontWeight: '600', marginTop: 1 }}>
+                    <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: C.text }}>{kid}</Text>
+                    <Text style={{ fontSize: scale(12), color: needsApproval ? '#2A7A2A' : '#F59E0B', fontFamily: 'Inter_600SemiBold', marginTop: 1 }}>
                       {needsApproval ? 'Needs your approval' : 'Auto-approves'}
                     </Text>
                   </View>
@@ -5170,13 +5594,7 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
                 <View style={{ alignItems: 'center', paddingVertical: 32 }}>
                   <Text style={{ fontSize: scale(40) }}>🤔</Text>
                   <Text style={{ fontSize: scale(14), color: '#ABABAB', marginTop: 8 }}>No results for "{search}"</Text>
-                  <TouchableOpacity
-                    style={[s.gfBtnPrimary, { marginTop: 16, paddingHorizontal: 24, width: 'auto' }]}
-                    onPress={() => handleGoalOptionSelect(GOAL_OPTIONS.length - 1)}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={s.gfBtnPrimaryText}>Create custom goal</Text>
-                  </TouchableOpacity>
+                  <Button label="Create custom goal" onPress={() => handleGoalOptionSelect(GOAL_OPTIONS.length - 1)} style={{ marginTop: 16, width: 'auto', paddingHorizontal: 24, alignSelf: 'center' }} />
                 </View>
               )}
             </View>
@@ -5220,7 +5638,7 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
           <View style={{ marginTop: 16 }}>
             <Text style={s.gfFieldLabel}>Target amount</Text>
             <View style={[s.gfInput, { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 0, height: 52 }]}>
-              <Text style={{ fontSize: scale(16), color: '#1A1A1A', fontWeight: '700' }}>$</Text>
+              <Text style={{ fontSize: scale(16), color: '#1A1A1A', fontFamily: 'Inter_700Bold' }}>$</Text>
               <TextInput
                 style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A', paddingVertical: 0 }}
                 value={amountText}
@@ -5274,24 +5692,21 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
 
           <View style={{ height: 32 }} />
           {/* Primary action button — "Save Changes" when editing, "Next" when creating */}
-          <TouchableOpacity
-            style={[s.gfBtnPrimary, !canProceed && { opacity: 0.4 }]}
+          <Button
+            label={initialData ? 'Save Changes' : 'Next'}
+            disabled={!canProceed}
             onPress={() => {
               if (!canProceed) return;
               const committed = { ...goalData, amount: parseFloat(amountText).toFixed(2) };
               setGoalData(committed);
               if (initialData) {
-                // Edit mode: save immediately, no preview step
                 onGoalCreated?.(committed);
                 onDone();
               } else {
                 go(3);
               }
             }}
-            activeOpacity={0.85}
-          >
-            <Text style={s.gfBtnPrimaryText}>{initialData ? 'Save Changes' : 'Next'}</Text>
-          </TouchableOpacity>
+          />
 
           {/* Delete button — only shown when editing */}
           {initialData && (
@@ -5312,15 +5727,15 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
         {showDeleteConfirm && (
           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', paddingBottom: 32, paddingHorizontal: 16 }}>
             <View style={{ backgroundColor: '#F7F6F2', borderRadius: 24, padding: 24, gap: 12 }}>
-              <Text style={{ fontSize: scale(22), fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.3 }}>
+              <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -0.3 }}>
                 Delete this goal?
               </Text>
               {(savedCents ?? 0) > 0 ? (
-                <Text style={{ fontSize: scale(15), color: '#6B6B6B', lineHeight: 22 }}>
+                <Text style={{ fontSize: scale(15), color: '#6B6B6B', lineHeight: scale(22) }}>
                   {`Your progress ($${((savedCents ?? 0) / 100).toFixed(2)} saved) will stay in your balance. This can't be undone.`}
                 </Text>
               ) : (
-                <Text style={{ fontSize: scale(15), color: '#6B6B6B', lineHeight: 22 }}>
+                <Text style={{ fontSize: scale(15), color: '#6B6B6B', lineHeight: scale(22) }}>
                   {"This can't be undone."}
                 </Text>
               )}
@@ -5376,17 +5791,14 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
           <MascotBanner message={mascotMsg} />
 
           <View style={{ height: 24 }} />
-          <TouchableOpacity
-            style={s.gfBtnPrimary}
+          <Button
+            label="Create goal"
             onPress={() => {
               const finalData: GoalData = { ...goalData, amount: goalData.amount || parseFloat(amountText).toFixed(2) };
               onGoalCreated?.(finalData);
               onDone();
             }}
-            activeOpacity={0.85}
-          >
-            <Text style={s.gfBtnPrimaryText}>Create goal</Text>
-          </TouchableOpacity>
+          />
         </ScrollView>
       </View>
     );
@@ -5455,9 +5867,7 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
           <Text style={ob.slideSubtitle}>
             Finish tasks around the house to earn XP and coins.
           </Text>
-          <TouchableOpacity style={ob.nextBtn} onPress={() => setStep(1)} activeOpacity={0.85}>
-            <Text style={ob.nextBtnText}>Next →</Text>
-          </TouchableOpacity>
+          <Button label="Next →" onPress={() => setStep(1)} />
         </View>
       </CreamBg>
     );
@@ -5482,7 +5892,7 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
             {/* Level up badge */}
             <View style={[ob.xpBadge, { borderColor: '#6B35F0' }]}>
               <Text style={{ fontSize: scale(14) }}>👑</Text>
-              <Text style={[ob.xpBadgeText, { color: '#6B35F0', fontWeight: '800' }]}>LEVEL UP!</Text>
+              <Text style={[ob.xpBadgeText, { color: '#6B35F0', fontFamily: 'Inter_800ExtraBold' }]}>LEVEL UP!</Text>
             </View>
           </View>
         </View>
@@ -5498,9 +5908,7 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
           <Text style={ob.slideSubtitle}>
             The more you do, the stronger your Monstir becomes!
           </Text>
-          <TouchableOpacity style={ob.nextBtn} onPress={() => setStep(2)} activeOpacity={0.85}>
-            <Text style={ob.nextBtnText}>Next →</Text>
-          </TouchableOpacity>
+          <Button label="Next →" onPress={() => setStep(2)} />
         </View>
       </View>
     );
@@ -5543,9 +5951,7 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
           <Text style={ob.slideSubtitle}>
             Unlock cool items, accessories, and new evolutions!
           </Text>
-          <TouchableOpacity style={ob.nextBtn} onPress={onReady} activeOpacity={0.85}>
-            <Text style={ob.nextBtnText}>Next →</Text>
-          </TouchableOpacity>
+          <Button label="Next →" onPress={onReady} />
         </View>
       </CreamBg>
     );
@@ -5570,11 +5976,11 @@ function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCr
       />
 
       {/* ── Sparkle decorations ── */}
-      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: 28, color: '#1A1A1A', fontWeight: '900' }}>✦</Text>
-      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: 24, color: '#6B35F0'             }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: scale(28), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: scale(24), color: '#6B35F0'             }}>✦</Text>
       <View style={{ position: 'absolute', top: 198, right: 28, width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
       <View style={{ position: 'absolute', top: 172, left: 118, width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF6B2B' }} />
-      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: 22, color: '#F5C518'          }}>✦</Text>
+      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: scale(22), color: '#F5C518'          }}>✦</Text>
       <View style={{ position: 'absolute', bottom: 210, right: 76, width: 5, height: 5, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
 
       {/* ── Main content ── */}
@@ -5582,7 +5988,7 @@ function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCr
 
         <Image source={require('./assets/monstirLogo.png')} style={{ width: 280, height: 103, marginBottom: 36 }} resizeMode="contain" />
 
-        <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>Welcome back!</Text>
+        <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>Welcome back!</Text>
         <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>Log in to your Monstir account.</Text>
 
         {/* Email */}
@@ -5615,22 +6021,10 @@ function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCr
         </View>
 
         {/* Log in */}
-        <TouchableOpacity
-          style={{ width: '100%', backgroundColor: '#6B35F0', borderRadius: 100, paddingVertical: 18, alignItems: 'center', marginBottom: 14, borderWidth: 2.5, borderColor: '#1A1A1A' }}
-          onPress={onLogin}
-          activeOpacity={0.85}
-        >
-          <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#FFFFFF' }}>Log in</Text>
-        </TouchableOpacity>
+        <Button label="Log in" onPress={onLogin} style={{ marginBottom: 14 }} />
 
         {/* Create an account */}
-        <TouchableOpacity
-          style={{ width: '100%', backgroundColor: '#FFFFFF', borderRadius: 100, paddingVertical: 18, alignItems: 'center', borderWidth: 2.5, borderColor: '#1A1A1A', shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 0, elevation: 3 }}
-          onPress={onCreateAccount}
-          activeOpacity={0.85}
-        >
-          <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' }}>Create an account</Text>
-        </TouchableOpacity>
+        <Button label="Create an account" onPress={onCreateAccount} variant="secondary" />
 
       </View>
     </View>
@@ -5701,13 +6095,11 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
 
           {/* Forgot password */}
           <TouchableOpacity style={{ alignSelf: 'flex-end' }} activeOpacity={0.7}>
-            <Text style={{ fontSize: scale(14), color: '#6B35F0', fontWeight: '600' }}>Forgot password?</Text>
+            <Text style={{ fontSize: scale(14), color: '#6B35F0', fontFamily: 'Inter_600SemiBold' }}>Forgot password?</Text>
           </TouchableOpacity>
 
           {/* Log in button */}
-          <TouchableOpacity style={auth.primaryBtn} onPress={onSuccess} activeOpacity={0.85}>
-            <Text style={auth.primaryBtnText}>Log in</Text>
-          </TouchableOpacity>
+          <Button label="Log in" onPress={onSuccess} />
 
           {/* Divider */}
           <View style={auth.dividerRow}>
@@ -5718,7 +6110,7 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
 
           {/* Google button */}
           <TouchableOpacity style={auth.googleBtn} activeOpacity={0.85}>
-            <Text style={{ color: '#4285F4', fontWeight: '900', fontSize: scale(18) }}>G</Text>
+            <Text style={{ color: '#4285F4', fontFamily: 'Inter_900Black', fontSize: scale(18) }}>G</Text>
             <Text style={auth.googleBtnText}>Continue with Google</Text>
           </TouchableOpacity>
 
@@ -5726,7 +6118,7 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 4 }}>
             <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>Don't have an account?</Text>
             <TouchableOpacity onPress={onSignUp} activeOpacity={0.7}>
-              <Text style={{ fontSize: scale(14), color: '#6B35F0', fontWeight: '700' }}>Sign up</Text>
+              <Text style={{ fontSize: scale(14), color: '#6B35F0', fontFamily: 'Inter_700Bold' }}>Sign up</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -5791,11 +6183,11 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
       />
 
       {/* ── Sparkle decorations ── */}
-      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: 28, color: '#1A1A1A', fontWeight: '900' }}>✦</Text>
-      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: 24, color: '#6B35F0'             }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: scale(28), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: scale(24), color: '#6B35F0'             }}>✦</Text>
       <View style={{ position: 'absolute', top: 198, right: 28, width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
       <View style={{ position: 'absolute', top: 172, left: 118, width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF6B2B' }} />
-      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: 22, color: '#F5C518'          }}>✦</Text>
+      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: scale(22), color: '#F5C518'          }}>✦</Text>
       <View style={{ position: 'absolute', bottom: 210, right: 76, width: 5, height: 5, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
@@ -5806,7 +6198,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
         >
           {/* Back button */}
           <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ marginBottom: 16, alignSelf: 'flex-start' }}>
-            <Text style={{ fontSize: scale(24), color: '#1A1A1A', fontWeight: '900' }}>←</Text>
+            <Text style={{ fontSize: scale(24), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>←</Text>
           </TouchableOpacity>
 
           {/* Logo */}
@@ -5817,7 +6209,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
           />
 
           {/* Heading */}
-          <Text style={{ fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>
+          <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>
             Create account
           </Text>
           <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>
@@ -5883,7 +6275,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
 
             {/* Validation error */}
             {!!error && (
-              <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontWeight: '600', marginTop: -4 }}>
+              <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontFamily: 'Inter_600SemiBold', marginTop: -4 }}>
                 {error}
               </Text>
             )}
@@ -5902,7 +6294,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
               onPress={handleSubmit}
               activeOpacity={0.85}
             >
-              <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#FFFFFF' }}>Create an account</Text>
+              <Text style={{ fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#FFFFFF' }}>Create an account</Text>
             </TouchableOpacity>
 
             {/* Log in link */}
@@ -5923,7 +6315,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
               onPress={onLogin}
               activeOpacity={0.85}
             >
-              <Text style={{ fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' }}>Log in</Text>
+              <Text style={{ fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Log in</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -6010,6 +6402,8 @@ function AppInner() {
   const [done, setDone]                 = useState<Partial<Record<ChoreId, boolean>>>({});
   const [bonusCoins, setBonusCoins]     = useState(0);
   const [battleResult, setBattleResult] = useState<'captured' | 'got-away' | null>(null);
+  const [chestTier, setChestTier]           = useState<ChestTier>('Common');
+  const [chorePctAtBattle, setChorePctAtBattle] = useState(0);
   const [battleCoinBonusEnabled,    setBattleCoinBonusEnabled]    = useState(false);
   const [battleCoinBonusMultiplier, setBattleCoinBonusMultiplier] = useState(1.0);
 
@@ -6269,7 +6663,14 @@ function AppInner() {
     setParentScreen('parentPayout');
   }, [managedChores, monsterIdx, battleResult, coins]);
 
-  const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number) => {
+  const tierFromPct = (pct: number): ChestTier => {
+    if (pct >= 90) return 'Legendary';
+    if (pct >= 75) return 'Epic';
+    if (pct >= 50) return 'Rare';
+    return 'Common';
+  };
+
+  const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number, completionPctOverride?: number) => {
     const boss = getWeeklyBoss(monsterIdx);
     if (result === 'captured' && battleCoinBonusEnabled) {
       const reward = Math.round(boss.captureCoins * battleCoinBonusMultiplier);
@@ -6282,8 +6683,23 @@ function AppInner() {
     setWeeklyXp(0);
     setManagedChores(prev => prev.map(c => ({ ...c, weeklyCompletions: 0, status: 'active' as const, rejectionNote: undefined })));
     setShards(prev => Math.max(0, prev - shardsUsed));
-    setScreen('result');
-  }, [monsterIdx, battleCoinBonusEnabled, battleCoinBonusMultiplier]);
+
+    if (result === 'captured') {
+      let pct: number;
+      if (completionPctOverride !== undefined) {
+        pct = completionPctOverride;
+      } else {
+        const totalTarget = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
+        const totalDone   = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
+        pct = Math.min(100, Math.round((totalDone / totalTarget) * 100));
+      }
+      setChorePctAtBattle(pct);
+      setChestTier(tierFromPct(pct));
+      setScreen('chestReveal');
+    } else {
+      setScreen('result');
+    }
+  }, [monsterIdx, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores]);
 
   const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
 
@@ -6508,7 +6924,7 @@ function AppInner() {
                 return <BattleArenaScreen
                   monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} monsterId={selectedMonsterId}
                   totalPower={totalPower} completionPct={dbgCompletionPct} shards={dbgShards} weaknessUnlocked={dbgWeaknessUnlocked}
-                  guaranteedWin={dbgCompletionPct >= 100} onBattleEnd={(r, u) => { setDbgBattleActive(false); handleBattleEnd(r, u); }}
+                  guaranteedWin={dbgCompletionPct >= 100} onBattleEnd={(r, u) => { setDbgBattleActive(false); handleBattleEnd(r, u, dbgCompletionPct); }}
                   bossOverride={BOSSES[dbgBossIdx]}
                 />;
               }
@@ -6527,6 +6943,20 @@ function AppInner() {
               />;
             })()}
             {screen === 'result'   && <ResultScreen monsterIdx={monsterIdx} captured={battleResult === 'captured'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} />}
+            {screen === 'chestReveal' && (
+              <ChestReveal
+                tier={chestTier}
+                completionPct={chorePctAtBattle}
+                collectible={{
+                  key:    'raregem',
+                  name:   'Rare Gem',
+                  rarity: chestTier,
+                  image:  require('./assets/battleui/trophyitems/raregem.png'),
+                }}
+                weekLabel={new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                onDone={() => { setTab('home'); setScreen('home'); }}
+              />
+            )}
             {screen === 'wallet'   && <WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={coins} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={goals} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={currentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={() => setViewMode('parent')} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} />}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} onGoalCreated={addGoal} monsterName={effectiveMonsterName} />}
             {screen === 'kidPayout' && payoutSnapshot && <KidPayoutScreen amount={payoutSnapshot.amount} completedCount={payoutSnapshot.completedCount} battleWon={payoutSnapshot.battleWon} battleBonus={payoutSnapshot.battleBonus} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setPayoutSnapshot(null); setScreen('home'); setTab('home'); }} />}
@@ -6773,6 +7203,18 @@ function AppInner() {
                       <Text style={s.debugResetTxt}>{label}</Text>
                     </TouchableOpacity>
                   ))}
+                  <TouchableOpacity
+                    style={s.debugResetBtn}
+                    onPress={() => {
+                      setChorePctAtBattle(dbgCompletionPct);
+                      setChestTier(tierFromPct(dbgCompletionPct));
+                      setScreen('chestReveal');
+                      setDebugOpen(false);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.debugResetTxt}>🎁  Win Reveal (chest) — {dbgCompletionPct}% → {tierFromPct(dbgCompletionPct)}</Text>
+                  </TouchableOpacity>
                 </View>
 
               ) : debugTab === 'battle' ? (
@@ -6818,7 +7260,7 @@ function AppInner() {
 
                   {/* Computed preview */}
                   <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 10, gap: 4 }}>
-                    <Text style={{ color: '#C5F215', fontSize: scale(11), fontWeight: '700' }}>
+                    <Text style={{ color: '#C5F215', fontSize: scale(11), fontFamily: 'Inter_700Bold' }}>
                       Power: {calcPowerRating(dbgCompletionPct, monsterIdx, dbgWeaknessUnlocked ? 5 : 0)}  ·  Boss HP: {BOSSES[dbgBossIdx].hp}  ·  Monster HP: {Math.round(50 + calcPowerRating(dbgCompletionPct, monsterIdx, 0) * 0.5)}
                     </Text>
                     <Text style={{ color: '#ABABAB', fontSize: scale(11) }}>
@@ -6855,8 +7297,8 @@ function AppInner() {
                     <View style={{ gap: 12 }}>
                       {/* Current simulated date */}
                       <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 12, alignItems: 'center' }}>
-                        <Text style={{ color: '#ABABAB', fontSize: scale(10), fontWeight: '700', letterSpacing: 1 }}>SIMULATED DATE</Text>
-                        <Text style={{ color: '#C5F215', fontSize: scale(18), fontWeight: '900', marginTop: 4 }}>{dayName} · {simDay}</Text>
+                        <Text style={{ color: '#ABABAB', fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1 }}>SIMULATED DATE</Text>
+                        <Text style={{ color: '#C5F215', fontSize: scale(18), fontFamily: 'Inter_900Black', marginTop: 4 }}>{dayName} · {simDay}</Text>
                         {debugDayOffset !== 0 && (
                           <Text style={{ color: '#ABABAB', fontSize: scale(11), marginTop: 2 }}>
                             {debugDayOffset > 0 ? `+${debugDayOffset}` : debugDayOffset} day{Math.abs(debugDayOffset) !== 1 ? 's' : ''} from today
@@ -6889,10 +7331,10 @@ function AppInner() {
                         return (
                           <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <View style={{ flex: 1 }}>
-                              <Text style={{ color: '#FFFFFF', fontSize: scale(11), fontWeight: '600' }} numberOfLines={1}>{c.name}</Text>
+                              <Text style={{ color: '#FFFFFF', fontSize: scale(11), fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>{c.name}</Text>
                               <Text style={{ color: '#ABABAB', fontSize: scale(10) }}>{c.frequency} · {done}/{target} · {c.status}</Text>
                             </View>
-                            <Text style={{ color: done >= target ? '#C5F215' : '#888', fontSize: scale(12), fontWeight: '900', minWidth: 36, textAlign: 'right' }}>{pct}%</Text>
+                            <Text style={{ color: done >= target ? '#C5F215' : '#888', fontSize: scale(12), fontFamily: 'Inter_900Black', minWidth: 36, textAlign: 'right' }}>{pct}%</Text>
                           </View>
                         );
                       })}
@@ -6928,7 +7370,16 @@ function AppInner() {
 }
 
 export default function App() {
-  const [fontsLoaded] = useFonts({ FredokaOne_400Regular });
+  const [fontsLoaded] = useFonts({
+    FredokaOne_400Regular,
+    Inter_300Light,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+    Inter_900Black,
+  });
   if (!fontsLoaded) return null;
   return <AppInner />;
 }
@@ -6940,27 +7391,27 @@ const SOLID_SHADOW = shadows.solid;
 const s = StyleSheet.create({
   root:            { flex: 1, backgroundColor: C.surface },
   header:          { backgroundColor: C.surface, paddingHorizontal: 20, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 0.5, borderBottomColor: C.border },
-  wordmark:        { fontSize: scale(17), fontWeight: '900', color: C.text, letterSpacing: -0.4 },
+  wordmark:        { fontSize: scale(17), fontFamily: 'Inter_900Black', color: C.text, letterSpacing: -0.4 },
   coinPill:        { backgroundColor: C.goldLight, borderWidth: 1, borderColor: C.goldBorder, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  coinText:        { fontSize: scale(12), fontWeight: '700', color: C.gold },
+  coinText:        { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.gold },
   hero:            { backgroundColor: C.surface, padding: 20, paddingBottom: 16, alignItems: 'center', borderBottomWidth: 0.5, borderBottomColor: C.border },
-  lvChip:          { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
-  monsterName:     { fontSize: scale(22), fontWeight: '900', color: C.text, letterSpacing: -0.5, marginBottom: 14 },
+  lvChip:          { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
+  monsterName:     { fontSize: scale(22), fontFamily: 'Inter_900Black', color: C.text, letterSpacing: -0.5, marginBottom: 14 },
   monsterBubble:   { width: 100, height: 100, backgroundColor: C.bg, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   xpRow:           { width: '100%', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  xpLabel:         { fontSize: scale(11), fontWeight: '700', color: C.hint },
+  xpLabel:         { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.hint },
   xpTrack:         { width: '100%', height: 5, backgroundColor: C.border, borderRadius: 5, overflow: 'hidden' },
   xpFill:          { height: '100%', backgroundColor: C.accent, borderRadius: 5 },
-  sectionLabel:    { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.hint, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8, backgroundColor: C.bg },
+  sectionLabel:    { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.8, color: C.hint, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8, backgroundColor: C.bg },
   choreList:       { gap: 6, paddingHorizontal: 12 },
   choreRow:        { backgroundColor: C.surface, borderWidth: 0.5, borderColor: C.border, borderRadius: 14, padding: 11, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 11 },
   choreRowDone:    { backgroundColor: C.bg },
   choreIcon:       { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   choreInfo:       { flex: 1 },
-  choreName:       { fontSize: scale(13), fontWeight: '700', color: C.text },
+  choreName:       { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: C.text },
   choreNameDone:   { color: C.hint, textDecorationLine: 'line-through' },
   choreSub:        { fontSize: scale(11), color: C.hint, marginTop: 1 },
-  choreGold:       { color: C.gold, fontWeight: '700' },
+  choreGold:       { color: C.gold, fontFamily: 'Inter_700Bold' },
   choreCheck:      { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: '#DDDBD5', alignItems: 'center', justifyContent: 'center' },
   choreCheckDone:  { backgroundColor: C.accent, borderColor: C.accent },
   checkDot:        { width: 7, height: 7, borderRadius: 4, backgroundColor: 'white' },
@@ -6970,143 +7421,143 @@ const s = StyleSheet.create({
   tabIconWrap:     { width: 98, borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 2 },
   tabIconWrapActive: { backgroundColor: '#EAE4FF' },
   tabIcon:         { width: 44, height: 44 },
-  tabLabel:        { fontSize: scale(10), fontWeight: '600', color: '#ABABAB', letterSpacing: 0.1 },
+  tabLabel:        { fontSize: scale(10), fontFamily: 'Inter_600SemiBold', color: '#ABABAB', letterSpacing: 0.1 },
   tabLabelActive:  { color: '#6B35F0' },
   // home screen
   homeRoot:           { flex: 1, backgroundColor: 'transparent' },
   homeHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
   homeHeaderLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  homeKidView:        { fontSize: scale(18), fontWeight: '700', color: '#1A1A1A' },
+  homeKidView:        { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
-  homeBalanceText:    { fontSize: scale(18), fontWeight: '700', color: '#1A1A1A' },
+  homeBalanceText:    { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 },
   homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW },
   homeCharImage:      { height: 340, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: 'visible' },
   homeCharInfo:       { padding: 14 },
   homeCharNameRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  homeCharName:       { fontSize: scale(30), fontWeight: '900', color: '#1A1A1A' },
-  homeCharLevel:      { fontSize: scale(15), fontWeight: '800', color: '#6B35F0' },
+  homeCharName:       { fontSize: scale(30), fontFamily: 'Inter_900Black', color: '#1A1A1A' },
+  homeCharLevel:      { fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' },
   homeXpTrack:        { height: 16, backgroundColor: '#E0DCDC', borderRadius: 100, marginBottom: 5, overflow: 'hidden' },
   homeXpFill:         { height: '100%', backgroundColor: '#6B35F0', borderRadius: 100 },
-  homeXpText:         { fontSize: scale(13), fontWeight: '500', color: '#1A1A1A' },
+  homeXpText:         { fontSize: scale(13), fontFamily: 'Inter_500Medium', color: '#1A1A1A' },
   homeXpPopLayer:     { position: 'absolute', bottom: 200, left: 0, right: 0, alignItems: 'center', pointerEvents: 'none' } as any,
   homeXpPopPill:      { backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: '#2D006E', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 5 },
-  homeXpPop:          { fontSize: scale(18), fontWeight: '900', color: '#2D006E', letterSpacing: 0.2 },
+  homeXpPop:          { fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#2D006E', letterSpacing: 0.2 },
   homeCoinPopPill:    { backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: '#1A6600', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 5 },
-  homeCoinPop:        { fontSize: scale(18), fontWeight: '900', color: '#1A6600', letterSpacing: 0.2 },
+  homeCoinPop:        { fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A6600', letterSpacing: 0.2 },
   homeQuestsHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  homeQuestsTitle:    { fontSize: scale(22), fontWeight: '800', color: '#1A1A1A' },
+  homeQuestsTitle:    { fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
   homeLeftPill:       { backgroundColor: '#ADE9DF', borderRadius: 100, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 2, borderColor: '#1A1A1A' },
-  homeLeftText:       { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A' },
+  homeLeftText:       { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   homeQuestCard:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FAF9F4', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, marginBottom: 10, gap: 12, ...SOLID_SHADOW },
   homeQuestSweep:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#E8FFA0', borderRadius: 14 },
   homeQuestCardDone:  { opacity: 0.5 },
   homeQuestIcon:      { width: 58, height: 58, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   homeQuestInfo:      { flex: 1 },
-  homeQuestTitle:     { fontSize: scale(17), fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
+  homeQuestTitle:     { fontSize: scale(17), fontFamily: 'Inter_700Bold', color: '#1A1A1A', marginBottom: 3 },
   homeQuestTitleDone: { textDecorationLine: 'line-through', color: '#ABABAB' },
-  homeQuestReward:    { fontSize: scale(15), fontWeight: '600', color: '#1A1A1A' },
+  homeQuestReward:    { fontSize: scale(15), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
   homeQuestCheck:     { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#1A1A1A' },
   homeQuestCheckDone: { backgroundColor: '#6B35F0', borderColor: '#6B35F0', alignItems: 'center', justifyContent: 'center' },
   homeQuestCheckDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: 'white' },
   homeQuestCardPending: { borderColor: '#E6A817', backgroundColor: '#FFFBF0' },
   homeQuestSweepPending: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFF3C4', borderRadius: 14 },
-  pendingLabel: { fontSize: scale(13), fontWeight: '600' as const, color: '#C47F00' },
+  pendingLabel: { fontSize: scale(13), fontFamily: 'Inter_600SemiBold' as const, color: '#C47F00' },
   pendingBadge: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FFF3C4', borderWidth: 2, borderColor: '#E6A817', alignItems: 'center' as const, justifyContent: 'center' as const },
   homeQuestCardRejected: { borderColor: '#E84040', backgroundColor: '#FFF5F5' },
   rejectionBubble: { marginTop: 4, backgroundColor: '#FFE5E5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   rejectionNote: { fontSize: scale(12), color: '#C00', fontStyle: 'italic' as const },
-  retryLabel: { fontSize: scale(12), fontWeight: '700' as const, color: '#E84040', marginTop: 2 },
+  retryLabel: { fontSize: scale(12), fontFamily: 'Inter_700Bold' as const, color: '#E84040', marginTop: 2 },
   allDoneCard:        { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', padding: 32, alignItems: 'center' as const, gap: 8, ...SOLID_SHADOW },
-  allDoneEmoji:       { fontSize: 48, marginBottom: 4 },
-  allDoneTitle:       { fontSize: scale(20), fontWeight: '800' as const, color: '#1A1A1A', textAlign: 'center' as const },
-  allDoneSub:         { fontSize: scale(15), fontWeight: '500' as const, color: '#ABABAB', textAlign: 'center' as const },
+  allDoneEmoji:       { fontSize: scale(48), marginBottom: 4 },
+  allDoneTitle:       { fontSize: scale(20), fontFamily: 'Inter_800ExtraBold' as const, color: '#1A1A1A', textAlign: 'center' as const },
+  allDoneSub:         { fontSize: scale(15), fontFamily: 'Inter_500Medium' as const, color: '#ABABAB', textAlign: 'center' as const },
   battleCard:      { backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 14, paddingHorizontal: 16, ...SOLID_SHADOW },
-  battleCardLabel: { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
-  battlePower:     { fontSize: scale(32), fontWeight: '900', color: C.text, letterSpacing: -1, lineHeight: 36 },
+  battleCardLabel: { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
+  battlePower:     { fontSize: scale(32), fontFamily: 'Inter_900Black', color: C.text, letterSpacing: -1, lineHeight: scale(36) },
   battleCardSub:   { fontSize: scale(11), color: C.muted, marginTop: 3 },
   pctRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   pctTrack:        { flex: 1, height: 6, backgroundColor: C.border, borderRadius: 6, overflow: 'hidden' },
   pctFill:         { height: '100%', borderRadius: 6, backgroundColor: C.accent },
-  pctLbl:          { fontSize: scale(11), fontWeight: '700', color: C.accent, minWidth: 30, textAlign: 'right' },
+  pctLbl:          { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.accent, minWidth: 30, textAlign: 'right' },
   bossCard:        { backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 12, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
-  bossName:        { fontSize: scale(14), fontWeight: '900', color: C.text },
+  bossName:        { fontSize: scale(14), fontFamily: 'Inter_900Black', color: C.text },
   bossSub:         { fontSize: scale(11), color: C.muted, marginTop: 1 },
-  bossPow:         { fontSize: scale(13), fontWeight: '700', color: C.text },
+  bossPow:         { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: C.text },
   oddsRow:         { flexDirection: 'row', gap: 8 },
   oddsCard:        { flex: 1, backgroundColor: C.bg, borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', ...SOLID_SHADOW },
-  oddsVal:         { fontSize: scale(20), fontWeight: '900', color: C.text },
-  oddsLbl:         { fontSize: scale(10), color: C.muted, fontWeight: '700', letterSpacing: 0.5, marginTop: 2 },
+  oddsVal:         { fontSize: scale(20), fontFamily: 'Inter_900Black', color: C.text },
+  oddsLbl:         { fontSize: scale(10), color: C.muted, fontFamily: 'Inter_700Bold', letterSpacing: 0.5, marginTop: 2 },
   battleBtn:       { backgroundColor: '#1A1A1A', borderRadius: 100, paddingVertical: 18, alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
-  battleBtnText:   { fontSize: scale(17), fontWeight: '900', color: 'white', letterSpacing: -0.3 },
+  battleBtnText:   { fontSize: scale(17), fontFamily: 'Inter_900Black', color: 'white', letterSpacing: -0.3 },
   debugBtn:        { backgroundColor: C.bg, borderWidth: 0.5, borderColor: C.border, borderRadius: 10, padding: 10, alignItems: 'center' },
-  debugBtnText:    { fontSize: scale(11), fontWeight: '700', color: C.muted, letterSpacing: 0.3 },
+  debugBtnText:    { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.muted, letterSpacing: 0.3 },
   arenaStage:      { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.surface },
   arenaVs:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, width: '100%' },
   arenaFighter:    { alignItems: 'center', gap: 8 },
-  arenaName:       { fontSize: scale(11), fontWeight: '700', color: C.muted, letterSpacing: 0.5 },
-  arenaVsLabel:    { fontSize: scale(22), fontWeight: '900', color: C.border },
+  arenaName:       { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.muted, letterSpacing: 0.5 },
+  arenaVsLabel:    { fontSize: scale(22), fontFamily: 'Inter_900Black', color: C.border },
   arenaLog:        { width: '100%', backgroundColor: C.bg, borderRadius: 12, padding: 14, minHeight: 72, marginTop: 20 },
-  arenaLogText:    { fontSize: scale(13), color: C.text, lineHeight: 20 },
-  arenaLogBold:    { fontWeight: '700' },
+  arenaLogText:    { fontSize: scale(13), color: C.text, lineHeight: scale(20) },
+  arenaLogBold:    { fontFamily: 'Inter_700Bold' },
   resultScreen:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.surface, gap: 6 },
-  resultChip:      { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted },
-  resultH:         { fontSize: scale(28), fontWeight: '900', color: C.text, letterSpacing: -0.5 },
+  resultChip:      { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.8, color: C.muted },
+  resultH:         { fontSize: scale(28), fontFamily: 'Inter_900Black', color: C.text, letterSpacing: -0.5 },
   resultSub:       { fontSize: scale(13), color: C.muted, marginBottom: 6 },
-  resultCoins:     { fontSize: scale(22), fontWeight: '900', color: C.gold },
+  resultCoins:     { fontSize: scale(22), fontFamily: 'Inter_900Black', color: C.gold },
   resultCoinsLbl:  { fontSize: scale(12), color: C.muted, marginBottom: 20 },
   evCta:              { backgroundColor: '#C5F215', borderRadius: 14, paddingHorizontal: 36, paddingVertical: 15, borderWidth: 2, borderColor: '#1A1A1A', width: '100%', alignItems: 'center' },
-  evCtaText:          { fontSize: scale(16), fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.3 },
+  evCtaText:          { fontSize: scale(16), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -0.3 },
   evolveScreen:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
   evolveOverlayBg:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#1A0A2E' },
   evolveRingContainer:{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   evolveRing:         { position: 'absolute', width: 200, height: 200, borderRadius: 100, borderWidth: 2, borderColor: '#6B35F0', opacity: 0 },
-  evolveBanner:       { fontSize: scale(42), fontWeight: '900', color: '#C5F215', letterSpacing: -1, textAlign: 'center' },
+  evolveBanner:       { fontSize: scale(42), fontFamily: 'Inter_900Black', color: '#C5F215', letterSpacing: -1, textAlign: 'center' },
   evolveSide:         { alignItems: 'center', gap: 6 },
-  evolveName:         { fontSize: scale(14), fontWeight: '900', color: C.text },
-  evolveLvl:          { fontSize: scale(11), fontWeight: '700', color: C.muted },
+  evolveName:         { fontSize: scale(14), fontFamily: 'Inter_900Black', color: C.text },
+  evolveLvl:          { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.muted },
   evolveSub:          { fontSize: scale(14), color: 'rgba(255,255,255,0.6)', textAlign: 'center', marginTop: 8 },
   walletTotal:     { backgroundColor: C.surface, borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, paddingBottom: 12, ...SOLID_SHADOW },
-  walletLabel:     { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
-  walletAmount:    { fontSize: scale(34), fontWeight: '900', color: C.text, letterSpacing: -1 },
+  walletLabel:     { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
+  walletAmount:    { fontSize: scale(34), fontFamily: 'Inter_900Black', color: C.text, letterSpacing: -1 },
   walletSub:       { fontSize: scale(11), color: C.muted, marginTop: 2 },
   walletRow:       { backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 12, padding: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10, ...SOLID_SHADOW },
-  walletRowName:   { flex: 1, fontSize: scale(12), fontWeight: '700', color: C.text },
-  walletRowCoins:  { fontSize: scale(13), fontWeight: '900', color: C.gold },
+  walletRowName:   { flex: 1, fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.text },
+  walletRowCoins:  { fontSize: scale(13), fontFamily: 'Inter_900Black', color: C.gold },
   // ── Goal flow ──
   gfRoot:              { flex: 1, backgroundColor: '#FFFFFF' },
   gfBackRow:           { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 4 },
   gfBackBtn:           { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  gfBackText:          { fontSize: scale(24), color: '#1A1A1A', fontWeight: '600' },
+  gfBackText:          { fontSize: scale(24), color: '#1A1A1A', fontFamily: 'Inter_600SemiBold' },
   gfScrollCenter:      { flexGrow: 1, alignItems: 'center', paddingHorizontal: 24, paddingBottom: 40, justifyContent: 'center' },
   gfScrollTop:         { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 40, paddingTop: 8 },
   gfRobotCircle:       { width: 160, height: 160, borderRadius: 80, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
-  gfBigTitle:          { fontSize: scale(34), fontWeight: '900', color: '#1A1A1A', textAlign: 'center', lineHeight: 40, marginBottom: 8 },
-  gfCreatedTitle:      { fontSize: scale(34), fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginBottom: 8 },
+  gfBigTitle:          { fontSize: scale(34), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', lineHeight: scale(40), marginBottom: 8 },
+  gfCreatedTitle:      { fontSize: scale(34), fontFamily: 'Inter_900Black', color: '#6B35F0', textAlign: 'center', marginBottom: 8 },
   gfSubtitle:          { fontSize: scale(16), color: '#ABABAB', textAlign: 'center', marginBottom: 8 },
-  gfScreenTitle:       { fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', marginBottom: 6 },
+  gfScreenTitle:       { fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginBottom: 6 },
   gfScreenSub:         { fontSize: scale(15), color: '#ABABAB', marginBottom: 16 },
   gfBtnPrimary:        { backgroundColor: '#6B35F0', borderRadius: 14, padding: 16, alignItems: 'center', width: '100%' },
-  gfBtnPrimaryText:    { fontSize: scale(16), fontWeight: '800', color: '#FFFFFF' },
+  gfBtnPrimaryText:    { fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' },
   gfBtnOutline:        { borderRadius: 14, padding: 16, alignItems: 'center', width: '100%', borderWidth: 1.5, borderColor: '#ECEAE4', backgroundColor: '#FFFFFF' },
-  gfBtnOutlineText:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
-  gfSkipLink:          { fontSize: scale(15), fontWeight: '600', color: '#ABABAB' },
+  gfBtnOutlineText:    { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
+  gfSkipLink:          { fontSize: scale(15), fontFamily: 'Inter_600SemiBold', color: '#ABABAB' },
   gfSearchRow:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F3EF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 12, paddingVertical: 10, gap: 8, marginBottom: 12 },
   gfSearchInput:       { flex: 1, fontSize: scale(15), color: '#1A1A1A', paddingVertical: 0 },
   gfSearchClear:       { padding: 4 },
   gfCategoryGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', marginTop: 8 },
   gfCategoryCard:      { width: '31%', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 8, ...SOLID_SHADOW },
-  gfCategoryLabel:     { fontSize: scale(13), fontWeight: '600', color: '#1A1A1A', marginTop: 6, textAlign: 'center' },
+  gfCategoryLabel:     { fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A', marginTop: 6, textAlign: 'center' },
   gfGoalRow:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, gap: 12, ...SOLID_SHADOW },
   gfGoalRowSelected:   { borderColor: '#6B35F0', borderWidth: 2 },
   gfGoalIconCircle:    { width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
-  gfGoalName:          { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
+  gfGoalName:          { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   gfGoalPrice:         { fontSize: scale(13), color: '#ABABAB', marginTop: 2 },
   gfGoalCheck:         { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
   gfGoalCheckSelected: { backgroundColor: '#6B35F0', borderColor: '#6B35F0' },
   gfGoalCheckDot:      { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
   gfLabelRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  gfFieldLabel:        { fontSize: scale(14), fontWeight: '700', color: '#1A1A1A' },
+  gfFieldLabel:        { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   gfCharCount:         { fontSize: scale(12), color: '#ABABAB' },
   gfInput:             { borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 12, padding: 14, fontSize: scale(16), color: '#1A1A1A', backgroundColor: '#FFFFFF', justifyContent: 'center' },
   gfPhotoDash:         { borderWidth: 1.5, borderColor: '#D0CEC8', borderRadius: 12, padding: 20, alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed', marginTop: 6, gap: 6 },
@@ -7114,28 +7565,28 @@ const s = StyleSheet.create({
   gfPhotoPreview:      { marginTop: 20, borderRadius: 14, overflow: 'hidden', position: 'relative' },
   gfPhotoPlaceholder:  { height: 180, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
   gfPhotoRemove:       { position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
-  gfPhotoRemoveText:   { color: '#FFFFFF', fontSize: scale(14), fontWeight: '700' },
-  gfAmountDisplay:     { fontSize: scale(52), fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginVertical: 16 },
+  gfPhotoRemoveText:   { color: '#FFFFFF', fontSize: scale(14), fontFamily: 'Inter_700Bold' },
+  gfAmountDisplay:     { fontSize: scale(52), fontFamily: 'Inter_900Black', color: '#6B35F0', textAlign: 'center', marginVertical: 16 },
   gfAmountHint:        { fontSize: scale(13), color: '#ABABAB', textAlign: 'center', marginBottom: 24 },
   gfNumpad:            { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
   gfNumKey:            { width: '30%', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 18, alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
-  gfNumKeyText:        { fontSize: scale(22), fontWeight: '700', color: '#1A1A1A' },
+  gfNumKeyText:        { fontSize: scale(22), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   gfColorGrid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 14, justifyContent: 'center', marginTop: 16 },
   gfColorSwatch:       { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
   gfColorSwatchSelected: { borderWidth: 3, borderColor: '#1A1A1A' },
-  gfColorCheck:        { fontSize: scale(22), color: '#FFFFFF', fontWeight: '900' },
+  gfColorCheck:        { fontSize: scale(22), color: '#FFFFFF', fontFamily: 'Inter_900Black' },
   gfPreviewCard:       { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, width: '100%', marginTop: 16, ...SOLID_SHADOW },
-  gfPreviewName:       { fontSize: scale(22), fontWeight: '800', color: '#1A1A1A', textAlign: 'center', marginBottom: 4 },
+  gfPreviewName:       { fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', textAlign: 'center', marginBottom: 4 },
   gfPreviewAmount:     { fontSize: scale(16), color: '#ABABAB', textAlign: 'center', marginBottom: 12 },
   gfProgressTrack:     { height: 8, backgroundColor: '#ECEAE4', borderRadius: 4, overflow: 'hidden', marginBottom: 4 },
   gfProgressFill:      { height: '100%', borderRadius: 4 },
   gfProgressPct:       { fontSize: scale(12), color: '#ABABAB', textAlign: 'right' },
   gfRobotRow:          { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16, width: '100%' },
   gfSpeechBubble:      { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, ...SOLID_SHADOW },
-  gfSpeechText:        { fontSize: scale(14), color: '#1A1A1A', lineHeight: 20 },
+  gfSpeechText:        { fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20) },
   gfConfettiDot:       { position: 'absolute', width: 10, height: 10, borderRadius: 5 },
   gfAllowanceLabel:    { fontSize: scale(14), color: '#ABABAB', textAlign: 'center', marginBottom: 4 },
-  gfAllowanceDate:     { fontSize: scale(28), fontWeight: '900', color: '#6B35F0', textAlign: 'center', marginBottom: 4 },
+  gfAllowanceDate:     { fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#6B35F0', textAlign: 'center', marginBottom: 4 },
   gfAllowanceDays:     { fontSize: scale(15), color: '#ABABAB', textAlign: 'center' },
   // debug overlay
   debugScrim:        { position: 'absolute', top: 0, left: 0, right: 0, bottom: 120, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' } as any,
@@ -7143,28 +7594,28 @@ const s = StyleSheet.create({
   debugTabs:         { flexDirection: 'row', backgroundColor: '#2A2A2A', borderRadius: 10, padding: 3, gap: 3 },
   debugTab:          { flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center' },
   debugTabActive:    { backgroundColor: '#3A3A3A' },
-  debugTabText:      { fontSize: scale(12), fontWeight: '600', color: '#666' },
+  debugTabText:      { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#666' },
   debugTabTextActive:{ color: '#FFFFFF' },
   debugResetBtn:     { backgroundColor: '#2A2A2A', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 16 },
-  debugResetTxt:     { fontSize: scale(14), fontWeight: '600', color: '#FFFFFF' },
-  debugTitle:        { fontSize: scale(16), fontWeight: '800', color: '#fff' },
+  debugResetTxt:     { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#FFFFFF' },
+  debugTitle:        { fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#fff' },
   debugSub:          { fontSize: scale(12), color: '#888', marginTop: -6 },
-  debugSectionLabel: { fontSize: scale(10), fontWeight: '700', color: '#FFFFFF', letterSpacing: 1.5, marginTop: 4 },
+  debugSectionLabel: { fontSize: scale(10), fontFamily: 'Inter_700Bold', color: '#FFFFFF', letterSpacing: 1.5, marginTop: 4 },
   debugGrid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   debugChip:         { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#2E2E2E' },
   debugChipActive:   { backgroundColor: '#C5F215' },
-  debugChipText:     { fontSize: scale(12), fontWeight: '600', color: '#aaa' },
+  debugChipText:     { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#aaa' },
   debugChipTextActive: { color: '#1A1A1A' },
   debugRow:          { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   debugXpBtn:        { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#2E2E2E' },
   debugXpBtnGreen:   { backgroundColor: '#2A4A1A' },
-  debugXpBtnTxt:     { fontSize: scale(13), fontWeight: '700', color: '#fff' },
+  debugXpBtnTxt:     { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#fff' },
   debugMaxBtn:       { backgroundColor: '#6B35F0', borderRadius: 12, padding: 14, alignItems: 'center' },
-  debugMaxTxt:       { fontSize: scale(14), fontWeight: '700', color: '#fff' },
+  debugMaxTxt:       { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#fff' },
   debugCopyBtn:      { backgroundColor: '#6B35F0', borderRadius: 12, padding: 12, alignItems: 'center' },
-  debugCopyTxt:      { fontSize: scale(14), fontWeight: '700', color: '#fff' },
+  debugCopyTxt:      { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#fff' },
   debugCloseBtn:     { backgroundColor: '#2E2E2E', borderRadius: 12, padding: 12, alignItems: 'center' },
-  debugCloseTxt:     { fontSize: scale(14), fontWeight: '600', color: '#888' },
+  debugCloseTxt:     { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#888' },
 });
 
 // ─── Parent Styles ────────────────────────────────────────────────────────────
@@ -7176,147 +7627,145 @@ const p = StyleSheet.create({
   tabItem:          { flex: 1, alignItems: 'center' },
   tabPill:          { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   tabPillActive:    { backgroundColor: '#EAE4FF' },
-  tabLabel:         { fontSize: scale(12), fontWeight: '600', color: C.muted },
-  tabLabelActive:   { color: '#6B35F0', fontWeight: '700' },
+  tabLabel:         { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: C.muted },
+  tabLabelActive:   { color: '#6B35F0', fontFamily: 'Inter_700Bold' },
 
   // Screen header
   screenHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#ECEAE4', backgroundColor: '#FFFFFF' },
-  screenTitle:      { fontSize: scale(18), fontWeight: '800', color: '#1A1A1A', flex: 1, textAlign: 'center' },
+  screenTitle:      { fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', flex: 1, textAlign: 'center' },
   backBtn:          { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backBtnText:      { fontSize: scale(22), color: '#1A1A1A', fontWeight: '600' },
+  backBtnText:      { fontSize: scale(22), color: '#1A1A1A', fontFamily: 'Inter_600SemiBold' },
   addBtn:           { width: 40, height: 40, borderRadius: 10, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
-  addBtnText:       { fontSize: scale(22), color: '#1A1A1A', fontWeight: '700', lineHeight: 26 },
+  addBtnText:       { fontSize: scale(22), color: '#1A1A1A', fontFamily: 'Inter_700Bold', lineHeight: scale(26) },
 
   // Parent home
   homeHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16, backgroundColor: '#F7F6F2' },
   homeHeaderLeft:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
   homeAvatar:       { width: 48, height: 48, borderRadius: 24, backgroundColor: '#fff', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
-  homeParentView:   { fontSize: scale(17), fontWeight: '700', color: '#1A1A1A' },
+  homeParentView:   { fontSize: scale(17), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   homeBell:         { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 
   // Hero card
   heroCard:         { marginHorizontal: 16, marginTop: 8, borderRadius: 20, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   heroContent:     { flexDirection: 'row', alignItems: 'center', padding: 20, paddingBottom: 0 },
-  heroTitle:        { fontSize: scale(32), fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.5, marginBottom: 6 },
-  heroSub:          { fontSize: scale(14), color: '#1A1A1A', lineHeight: 20, opacity: 0.8 },
+  heroTitle:        { fontSize: scale(32), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -0.5, marginBottom: 6 },
+  heroSub:          { fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20), opacity: 0.8 },
   heroCurve:        { height: 24, backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, marginTop: 12 },
 
   // Menu cards
   menuCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, ...SOLID_SHADOW },
   menuCardIcon:     { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  menuCardTitle:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
+  menuCardTitle:    { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A', marginBottom: 3 },
   menuCardSub:      { fontSize: scale(13), color: '#ABABAB' },
-  menuCardArrow:    { fontSize: scale(22), color: '#1A1A1A', fontWeight: '300' },
+  menuCardArrow:    { fontSize: scale(22), color: '#1A1A1A', fontFamily: 'Inter_300Light' },
 
   // Chore manage rows
   choreManageRow:   { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
   choreManageIcon:  { width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  choreManageName:  { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A', marginBottom: 2 },
+  choreManageName:  { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A', marginBottom: 2 },
   choreManageFreq:  { fontSize: scale(13), color: '#ABABAB' },
-  choreManageRate:  { fontSize: scale(16), fontWeight: '700', color: '#3B8A3A' },
+  choreManageRate:  { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#3B8A3A' },
   choreManageDrag:  { fontSize: scale(20), color: '#C0BEB8', marginLeft: 8 },
 
   // Toggle pills
   toggleRow:        { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   togglePill:       { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F0EEE8' },
   togglePillActive: { backgroundColor: '#6B35F0' },
-  toggleText:       { fontSize: scale(14), fontWeight: '600', color: '#ABABAB' },
+  toggleText:       { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#ABABAB' },
   toggleTextActive: { color: '#FFFFFF' },
 
   // Add/Edit chore form
   iconDisplay:      { width: 96, height: 96, borderRadius: 20, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   iconEditBadge:    { position: 'absolute', bottom: 2, right: 2, width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
   formCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
-  formLabel:        { fontSize: scale(13), fontWeight: '700', color: '#ABABAB', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  formLabel:        { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#ABABAB', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   formInput:        { borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 14, fontSize: scale(16), color: '#1A1A1A' },
   formDropdownRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 14 },
   formDropdownValue:{ fontSize: scale(16), color: '#1A1A1A' },
-  rateDollarSign:   { fontSize: scale(18), fontWeight: '600', color: '#1A1A1A' },
+  rateDollarSign:   { fontSize: scale(18), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
   // Difficulty picker
   difficultyBtn:        { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 12, borderWidth: 2, borderColor: '#ECEAE4', padding: 10, alignItems: 'center' as const, gap: 4 },
   difficultyBtnActive:  { backgroundColor: '#EAE4FF', borderColor: '#6B35F0' },
   difficultyStars:      { fontSize: scale(14) },
-  difficultyLabel:      { fontSize: scale(12), fontWeight: '700' as const, color: '#ABABAB' },
+  difficultyLabel:      { fontSize: scale(12), fontFamily: 'Inter_700Bold' as const, color: '#ABABAB' },
   difficultyLabelActive:{ color: '#6B35F0' },
-  difficultyPay:        { fontSize: scale(13), fontWeight: '700' as const, color: '#ABABAB' },
+  difficultyPay:        { fontSize: scale(13), fontFamily: 'Inter_700Bold' as const, color: '#ABABAB' },
   difficultyPayActive:  { color: '#3B8A3A' },
   // Kid assignment pills
   kidPill:          { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100, borderWidth: 2, borderColor: '#ECEAE4', backgroundColor: '#F7F6F2' },
   kidPillActive:    { backgroundColor: '#C5F215', borderColor: '#1A1A1A' },
-  kidPillText:      { fontSize: scale(14), fontWeight: '600' as const, color: '#ABABAB' },
+  kidPillText:      { fontSize: scale(14), fontFamily: 'Inter_600SemiBold' as const, color: '#ABABAB' },
   kidPillTextActive:{ color: '#1A1A1A' },
   iconPickerItem:   { width: 56, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   iconPickerSelected: { borderColor: '#6B35F0', backgroundColor: '#EAE4FF' },
   saveBtn:          { backgroundColor: '#C5F215', borderRadius: 14, borderWidth: 1.5, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  saveBtnText:      { fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' },
+  saveBtnText:      { fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
   cancelBtn:        { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1.5, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  cancelBtnText:    { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
+  cancelBtnText:    { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
 
   // Pay rates
   sectionCard:      { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
-  sectionCardTitle: { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
+  sectionCardTitle: { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A', marginBottom: 4 },
   sectionCardSub:   { fontSize: scale(13), color: '#ABABAB', marginBottom: 12 },
   dropdownRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 12, marginTop: 4 },
   dropdownValue:    { fontSize: scale(15), color: '#1A1A1A' },
   settingsRow:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  settingsRowLabel: { fontSize: scale(15), fontWeight: '600', color: '#1A1A1A', marginBottom: 2 },
-  settingsRowSub:   { fontSize: scale(12), color: '#ABABAB', lineHeight: 17 },
+  settingsRowLabel: { fontSize: scale(15), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A', marginBottom: 2 },
+  settingsRowSub:   { fontSize: scale(12), color: '#ABABAB', lineHeight: scale(17) },
   rateInputPill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7F6F2', borderRadius: 10, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 12, paddingVertical: 8, gap: 4, minWidth: 80 },
-  rateInput:        { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A', minWidth: 48 },
-  rateGuideLink:    { fontSize: scale(15), fontWeight: '700', color: '#6B35F0' },
+  rateInput:        { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A', minWidth: 48 },
+  rateGuideLink:    { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#6B35F0' },
 
   // Rate guide
   rateInfoCard:     { backgroundColor: '#FEF9EC', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
-  rateInfoText:     { fontSize: scale(14), color: '#1A1A1A', lineHeight: 20, marginBottom: 10 },
+  rateInfoText:     { fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20), marginBottom: 10 },
   learnMoreBtn:     { backgroundColor: '#6B35F0', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, alignSelf: 'flex-start' },
-  learnMoreText:    { fontSize: scale(13), fontWeight: '700', color: '#FFFFFF' },
+  learnMoreText:    { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#FFFFFF' },
   rateTableRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  rateTableHeader:  { fontSize: scale(13), fontWeight: '800', color: '#1A1A1A' },
+  rateTableHeader:  { fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
   rateTableCell:    { fontSize: scale(13), color: '#1A1A1A' },
   rateDot:          { width: 8, height: 8, borderRadius: 4 },
   noteCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 4, ...SOLID_SHADOW },
-  noteText:         { flex: 1, fontSize: scale(14), color: '#1A1A1A', lineHeight: 20 },
+  noteText:         { flex: 1, fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20) },
 
   // Pending approval styles
   approveBtn:           { flex: 1, backgroundColor: '#C5F215', borderRadius: 10, borderWidth: 2, borderColor: '#1A1A1A', padding: 10, alignItems: 'center' as const },
-  approveBtnText:       { fontSize: scale(14), fontWeight: '800' as const, color: '#1A1A1A' },
+  approveBtnText:       { fontSize: scale(14), fontFamily: 'Inter_800ExtraBold' as const, color: '#1A1A1A' },
   rejectBtn:            { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 2, borderColor: '#1A1A1A', padding: 10, alignItems: 'center' as const },
-  rejectBtnText:        { fontSize: scale(14), fontWeight: '700' as const, color: '#E84040' },
+  rejectBtnText:        { fontSize: scale(14), fontFamily: 'Inter_700Bold' as const, color: '#E84040' },
   rejectConfirmBtn:     { flex: 1, backgroundColor: '#E84040', borderRadius: 10, padding: 10, alignItems: 'center' as const },
-  rejectConfirmBtnText: { fontSize: scale(14), fontWeight: '800' as const, color: '#FFFFFF' },
+  rejectConfirmBtnText: { fontSize: scale(14), fontFamily: 'Inter_800ExtraBold' as const, color: '#FFFFFF' },
   pendingReviewCard:    { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#E6A817', padding: 14, ...SOLID_SHADOW },
   pendingTabBadge:      { backgroundColor: '#E6A817', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center' as const, justifyContent: 'center' as const, paddingHorizontal: 5 },
-  pendingTabBadgeText:  { fontSize: scale(11), fontWeight: '800' as const, color: '#FFFFFF' },
+  pendingTabBadgeText:  { fontSize: scale(11), fontFamily: 'Inter_800ExtraBold' as const, color: '#FFFFFF' },
 
   // Payout screen styles
   payoutBreakdownRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#ECEAE4' },
-  payoutBreakdownLabel: { fontSize: scale(15), color: '#1A1A1A', fontWeight: '600' as const },
-  payoutBreakdownValue: { fontSize: scale(15), color: '#1A1A1A', fontWeight: '700' as const },
-  payoutTotalLabel: { fontSize: scale(17), fontWeight: '800' as const, color: '#1A1A1A' },
-  payoutTotalValue: { fontSize: scale(17), fontWeight: '900' as const, color: '#3B8A3A' },
+  payoutBreakdownLabel: { fontSize: scale(15), color: '#1A1A1A', fontFamily: 'Inter_600SemiBold' as const },
+  payoutBreakdownValue: { fontSize: scale(15), color: '#1A1A1A', fontFamily: 'Inter_700Bold' as const },
+  payoutTotalLabel: { fontSize: scale(17), fontFamily: 'Inter_800ExtraBold' as const, color: '#1A1A1A' },
+  payoutTotalValue: { fontSize: scale(17), fontFamily: 'Inter_900Black' as const, color: '#3B8A3A' },
   payoutCta: { backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 18, alignItems: 'center' as const, ...SOLID_SHADOW },
-  payoutCtaText: { fontSize: scale(17), fontWeight: '900' as const, color: '#1A1A1A' },
+  payoutCtaText: { fontSize: scale(17), fontFamily: 'Inter_900Black' as const, color: '#1A1A1A' },
 });
 
 // ─── Settings Styles (ps prefix) ─────────────────────────────────────────────
 
 const ps = StyleSheet.create({
-  sectionLabel:   { fontSize: scale(11), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.8, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
+  sectionLabel:   { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
   group:          { marginHorizontal: 16, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   divider:        { height: 1, backgroundColor: '#F0EEE8', marginLeft: 68 },
   row:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16, gap: 12 },
   rowIcon:        { width: 36, height: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  rowTitle:       { fontSize: scale(15), fontWeight: '600', color: '#1A1A1A' },
+  rowTitle:       { fontSize: scale(15), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
   rowSub:         { fontSize: scale(12), color: '#ABABAB', marginTop: 1 },
   badge:          { backgroundColor: '#6B35F0', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
-  badgeText:      { fontSize: scale(12), fontWeight: '700', color: '#FFFFFF' },
-  chevron:        { fontSize: scale(20), color: '#C0BEB8', fontWeight: '300' },
+  badgeText:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#FFFFFF' },
+  chevron:        { fontSize: scale(20), color: '#C0BEB8', fontFamily: 'Inter_300Light' },
   kidAvatar:      { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  addKidBtn:      { margin: 16, backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW },
-  addKidText:     { fontSize: scale(16), fontWeight: '700', color: '#FFFFFF' },
   battleHero:     { backgroundColor: '#3D1FA3', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, flexDirection: 'row', alignItems: 'center', gap: 14, ...SOLID_SHADOW },
-  battleHeroTitle:{ fontSize: scale(18), fontWeight: '800', color: '#FFFFFF', marginBottom: 4 },
-  battleHeroSub:  { fontSize: scale(13), color: 'rgba(255,255,255,0.7)', lineHeight: 18 },
+  battleHeroTitle:{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF', marginBottom: 4 },
+  battleHeroSub:  { fontSize: scale(13), color: 'rgba(255,255,255,0.7)', lineHeight: scale(18) },
   toggle:         { width: 44, height: 26, borderRadius: 13, backgroundColor: '#E0DCDC', justifyContent: 'center', paddingHorizontal: 3 },
   toggleOn:       { backgroundColor: '#6B35F0' },
   toggleThumb:    { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFFFFF' },
@@ -7328,44 +7777,42 @@ const ps = StyleSheet.create({
   impactRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   impactCell:     { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 10, padding: 10, alignItems: 'center' },
   impactCellHighlight: { backgroundColor: '#EAE4FF' },
-  impactLabel:    { fontSize: scale(10), fontWeight: '700', color: '#ABABAB', letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase' },
-  impactValue:    { fontSize: scale(18), fontWeight: '900', color: '#1A1A1A' },
-  impactUnit:     { fontSize: scale(12), fontWeight: '500', color: '#ABABAB' },
-  impactArrow:    { fontSize: scale(18), color: '#ABABAB', fontWeight: '300' },
+  impactLabel:    { fontSize: scale(10), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase' },
+  impactValue:    { fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' },
+  impactUnit:     { fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#ABABAB' },
+  impactArrow:    { fontSize: scale(18), color: '#ABABAB', fontFamily: 'Inter_300Light' },
   cosmeticPill:   { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1.5, borderColor: '#C4B5FD', paddingHorizontal: 12, paddingVertical: 5 },
-  cosmeticText:   { fontSize: scale(12), fontWeight: '600', color: '#6B35F0' },
+  cosmeticText:   { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#6B35F0' },
   accountAvatar:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' },
-  accountAvatarText: { fontSize: scale(28), fontWeight: '800', color: '#6B35F0' },
+  accountAvatarText: { fontSize: scale(28), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' },
   logoutBtn:      { margin: 16, marginTop: 20, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW },
-  logoutText:     { fontSize: scale(16), fontWeight: '700', color: '#E53935' },
+  logoutText:     { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#E53935' },
 });
 
 // ─── Onboarding Styles (ob prefix) ───────────────────────────────────────────
 
 const ob = StyleSheet.create({
   skipBtn:           { position: 'absolute', top: 16, right: 20, zIndex: 10, padding: 8 },
-  skipText:          { fontSize: scale(15), fontWeight: '600', color: '#6B35F0' },
+  skipText:          { fontSize: scale(15), fontFamily: 'Inter_600SemiBold', color: '#6B35F0' },
   topHalf:           { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
   robotCircle:       { width: 260, height: 260, borderRadius: 130, backgroundColor: '#EDE8D8', alignItems: 'center', justifyContent: 'center', position: 'relative' },
   xpBadge:           { position: 'absolute', top: 16, left: 0, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#6B35F0', borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5 },
-  xpBadgeText:       { fontSize: scale(13), fontWeight: '700', color: '#6B35F0' },
+  xpBadgeText:       { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#6B35F0' },
   bottomCard:        { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 28, paddingTop: 28, paddingBottom: 32 },
-  slideTitle:        { fontSize: scale(28), fontWeight: '900', color: '#1A1A1A', marginBottom: 2 },
+  slideTitle:        { fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginBottom: 2 },
   slideTitleWord:    { color: '#1A1A1A' },
   yellowUnderline:   { height: 3, width: 80, backgroundColor: '#F5C842', borderRadius: 2, marginBottom: 12 },
-  slideSubtitle:     { fontSize: scale(15), color: '#777', lineHeight: 22, marginBottom: 24 },
-  nextBtn:           { backgroundColor: '#6B35F0', borderRadius: 14, padding: 16, alignItems: 'center' },
-  nextBtnText:       { fontSize: scale(16), fontWeight: '800', color: '#FFFFFF' },
+  slideSubtitle:     { fontSize: scale(15), color: '#777', lineHeight: scale(22), marginBottom: 24 },
   rewardIcon:        { width: 80, height: 80, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
   chestBox:          { alignItems: 'center', justifyContent: 'center' },
   featuresCard:      { backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, ...SOLID_SHADOW },
   featureRow:        { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 },
   featureDivider:    { height: 1, backgroundColor: '#ECEAE4' },
-  featureLabel:      { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A' },
+  featureLabel:      { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   createAccountBtn:  { backgroundColor: '#C5F215', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  createAccountBtnText: { fontSize: scale(16), fontWeight: '800', color: '#1A1A1A' },
+  createAccountBtnText: { fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
   haveAccountBtn:    { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  haveAccountBtnText: { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
+  haveAccountBtnText: { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
 });
 
 // ─── Auth Styles (auth prefix) ────────────────────────────────────────────────
@@ -7387,7 +7834,7 @@ const w = StyleSheet.create({
     margin: scale(14),
   },
   bossTagText: {
-    color: '#fff', fontWeight: '900', fontSize: scale(14), letterSpacing: 0.8,
+    color: '#fff', fontFamily: 'Inter_900Black', fontSize: scale(14), letterSpacing: 0.8,
   },
   bossCardContent: { padding: scale(16), gap: scale(4) },
   teaserLine1: {
@@ -7395,7 +7842,7 @@ const w = StyleSheet.create({
     textShadowColor: '#000', textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 0,
   },
   teaserLine2: {
-    color: 'rgba(255,255,255,0.9)', fontSize: scale(16), fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)', fontSize: scale(16), fontFamily: 'Inter_600SemiBold',
   },
 
   // Countdown card
@@ -7407,10 +7854,10 @@ const w = StyleSheet.create({
   },
   countdownSegment: { alignItems: 'center', flex: 1 },
   countdownNum: { fontFamily: 'FredokaOne_400Regular', fontSize: scale(32), color: '#1A1A1A', letterSpacing: 0 },
-  countdownUnit: { fontSize: scale(14), fontWeight: '600', color: '#6B35F0', marginTop: 2 },
+  countdownUnit: { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#6B35F0', marginTop: 2 },
 
   // Section header (on green bg)
-  sectionHeader: { fontSize: scale(22), fontWeight: '900', color: '#1A1A1A', marginTop: scale(4) },
+  sectionHeader: { fontSize: scale(22), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginTop: scale(4) },
 
   // Intel row
   intelRow: { flexDirection: 'row', gap: scale(10) },
@@ -7418,8 +7865,8 @@ const w = StyleSheet.create({
     backgroundColor: C.surface, borderRadius: 16, padding: scale(14),
     borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW,
   },
-  intelLabel: { fontSize: scale(10), fontWeight: '800', color: C.muted, letterSpacing: 1, marginBottom: 6 },
-  intelValue: { fontSize: scale(22), fontWeight: '900', color: '#1A1A1A' },
+  intelLabel: { fontSize: scale(10), fontFamily: 'Inter_800ExtraBold', color: C.muted, letterSpacing: 1, marginBottom: 6 },
+  intelValue: { fontSize: scale(22), fontFamily: 'Inter_900Black', color: '#1A1A1A' },
   weaknessBox: {
     width: 48, height: 48, borderRadius: 12, backgroundColor: '#FFF9E0',
     alignItems: 'center', justifyContent: 'center', marginBottom: 4,
@@ -7430,7 +7877,7 @@ const w = StyleSheet.create({
     borderWidth: 2, borderColor: '#F0C040', alignSelf: 'flex-start',
   },
   weaknessIcon: { fontSize: scale(16) },
-  weaknessText: { fontSize: scale(13), fontWeight: '800', color: '#8B6800' },
+  weaknessText: { fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#8B6800' },
   unlockArrow: {
     width: 28, height: 28, borderRadius: 14, backgroundColor: '#3AB56A',
     alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end', marginTop: 6,
@@ -7439,45 +7886,45 @@ const w = StyleSheet.create({
     alignSelf: 'flex-start', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 5,
     borderWidth: 2, borderColor: '#1A1A1A',
   },
-  threatPillText: { fontSize: scale(12), fontWeight: '800', color: '#fff' },
+  threatPillText: { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#fff' },
 
   // Section card
   sectionCard: {
     backgroundColor: C.surface, borderRadius: 20, padding: scale(16),
     borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW,
   },
-  sectionTitle: { fontSize: scale(14), fontWeight: '900', color: '#1A1A1A', letterSpacing: 0.3 },
+  sectionTitle: { fontSize: scale(14), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: 0.3 },
 
   // Readiness
   readinessRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  readinessLabel: { fontSize: scale(13), color: C.muted, fontWeight: '600' },
-  readinessValue: { fontSize: scale(15), fontWeight: '800', color: '#1A1A1A' },
+  readinessLabel: { fontSize: scale(13), color: C.muted, fontFamily: 'Inter_600SemiBold' },
+  readinessValue: { fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
   trackWrap: { height: 14, backgroundColor: '#E8E4F2', borderRadius: 100, overflow: 'hidden' },
   trackFill: { height: '100%', backgroundColor: '#6B35F0', borderRadius: 100 },
   forecastPill: {
     backgroundColor: '#F0EBFF', borderRadius: 14, padding: scale(10),
     borderWidth: 2, borderColor: '#C5B8E8',
   },
-  forecastText: { fontSize: scale(13), color: '#5A2DB8', fontWeight: '700' },
+  forecastText: { fontSize: scale(13), color: '#5A2DB8', fontFamily: 'Inter_700Bold' },
 
   // What's at stake
   stakeRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: scale(8) },
   stakeItem: { alignItems: 'center', gap: scale(4) },
   stakeIcon: { width: scale(52), height: scale(52) },
-  stakeVal: { fontSize: scale(16), fontWeight: '900', color: '#1A1A1A' },
-  stakeLbl: { fontSize: scale(11), color: C.muted, fontWeight: '600' },
+  stakeVal: { fontSize: scale(16), fontFamily: 'Inter_900Black', color: '#1A1A1A' },
+  stakeLbl: { fontSize: scale(11), color: C.muted, fontFamily: 'Inter_600SemiBold' },
   evolutionHint: {
     backgroundColor: '#FFF4E0', borderRadius: 12, padding: scale(10),
     borderWidth: 2, borderColor: '#F0C060', marginTop: 8,
   },
-  evolutionHintText: { fontSize: scale(13), color: '#7A4800', fontWeight: '700', textAlign: 'center' },
+  evolutionHintText: { fontSize: scale(13), color: '#7A4800', fontFamily: 'Inter_700Bold', textAlign: 'center' },
 
   // Battle button
   battleBtnPurple: {
     backgroundColor: '#6B35F0', borderRadius: 100, paddingVertical: 20,
     alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW,
   },
-  battleBtnPurpleText: { fontSize: scale(20), fontWeight: '900', color: '#fff', letterSpacing: -0.3 },
+  battleBtnPurpleText: { fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#fff', letterSpacing: -0.3 },
 
   // Legacy (kept for BossIntroScreen compatibility)
   countdownBox: { marginTop: scale(8), alignSelf: 'stretch', backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 14, paddingVertical: scale(10), borderWidth: 2, borderColor: '#1A1A1A' },
@@ -7494,15 +7941,15 @@ const bi = StyleSheet.create({
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.22)',
   },
   badgeText: {
-    fontSize: scale(13), fontWeight: '800', color: '#FFFFFF', letterSpacing: 1,
+    fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF', letterSpacing: 1,
   },
   bossNameFallback: {
-    fontSize: scale(72), fontWeight: '900', color: '#FFFFFF',
+    fontSize: scale(72), fontFamily: 'Inter_900Black', color: '#FFFFFF',
     letterSpacing: -1, lineHeight: scale(76),
     textShadowColor: '#000', textShadowOffset: { width: 4, height: 5 }, textShadowRadius: 0,
   },
   tagline: {
-    fontSize: scale(17), fontWeight: '800', color: '#FFFFFF',
+    fontSize: scale(17), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF',
     letterSpacing: 0.3, lineHeight: scale(23),
     textShadowColor: 'rgba(0,0,0,0.9)',
     textShadowOffset: { width: 2, height: 3 },
@@ -7517,7 +7964,7 @@ const bi = StyleSheet.create({
     zIndex: 1,
   },
   rewardsPillText: {
-    fontSize: scale(13), fontWeight: '800', color: '#FFFFFF', letterSpacing: 2,
+    fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF', letterSpacing: 2,
   },
   rewardsCard: {
     backgroundColor: '#FAF9F4', borderRadius: 20,
@@ -7533,7 +7980,7 @@ const bi = StyleSheet.create({
     ...SOLID_SHADOW,
   },
   battleBtnText: {
-    fontSize: scale(20), fontWeight: '900', color: '#1A1A1A', letterSpacing: 0.5,
+    fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: 0.5,
   },
 });
 
@@ -7542,17 +7989,17 @@ const b = StyleSheet.create({
   hpRow:           { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10 },
   hpCard:          { flex: 1, backgroundColor: C.surface, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 10, flexDirection: 'row', gap: 8, alignItems: 'center', ...SOLID_SHADOW },
   hpAvatarWell:    { width: 38, height: 38, borderRadius: 10, backgroundColor: C.warmBg, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: C.border, flexShrink: 0 },
-  hpName:          { fontSize: scale(12), fontWeight: '700', color: C.text },
-  hpVal:           { fontSize: scale(11), fontWeight: '700', color: C.muted },
-  hpTrack:         { height: 7, borderRadius: 100, backgroundColor: C.border, marginTop: 4, overflow: 'hidden' },
-  hpFill:          { height: '100%', borderRadius: 100 },
-  hpVs:            { fontSize: scale(11), fontWeight: '900', color: C.border, alignSelf: 'center' },
+  hpName:          { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.text },
+  hpVal:           { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.muted },
+  hpTrack:         { height: 20, borderRadius: 100, backgroundColor: '#ECECEC', marginTop: 4, borderWidth: 2, borderColor: '#1A1A1A', padding: 2, overflow: 'hidden' },
+  hpFill:          { flex: 1, borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A' },
+  hpVs:            { fontSize: scale(11), fontFamily: 'Inter_900Black', color: C.border, alignSelf: 'center' },
 
   stage:           { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-around', paddingHorizontal: 20, paddingBottom: 8, height: 160 },
   stageFighter:    { alignItems: 'center', gap: 6 },
   stageArtP:       { width: 100, height: 100, borderRadius: 16, backgroundColor: '#EAE4FF', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
   stageArtE:       { width: 100, height: 100, borderRadius: 16, backgroundColor: C.warmBg, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
-  stageTag:        { fontSize: scale(11), fontWeight: '700', color: C.muted, backgroundColor: C.surface, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 2, borderWidth: 1, borderColor: C.border },
+  stageTag:        { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.muted, backgroundColor: C.surface, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 2, borderWidth: 1, borderColor: C.border },
 
   actionArea:      { flex: 1, paddingHorizontal: 14, justifyContent: 'flex-end', paddingBottom: 24, gap: 8 },
   spRow:           { flexDirection: 'row', gap: 8 },
@@ -7562,46 +8009,44 @@ const b = StyleSheet.create({
   spCardMega:      { backgroundColor: '#EAE4FF' },
   spOff:           { opacity: 0.35 },
   spEmoji:         { fontSize: scale(18) },
-  spLabel:         { fontSize: scale(11), fontWeight: '700', color: C.text },
-  spCost:          { fontSize: scale(10), fontWeight: '700', color: C.muted },
+  spLabel:         { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.text },
+  spCost:          { fontSize: scale(10), fontFamily: 'Inter_700Bold', color: C.muted },
   coreRow:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  coreLabel:       { fontSize: scale(10), fontWeight: '700', letterSpacing: 1.5, color: '#6B35F0' },
+  coreLabel:       { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.5, color: '#6B35F0' },
   corePips:        { flex: 1, flexDirection: 'row', gap: 3 },
   corePip:         { flex: 1, height: 12, borderRadius: 3 },
   corePipOn:       { backgroundColor: '#6B35F0' },
   corePipOff:      { backgroundColor: C.border },
-  coreCount:       { fontSize: scale(12), fontWeight: '700', color: '#6B35F0', minWidth: 20, textAlign: 'right' },
+  coreCount:       { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#6B35F0', minWidth: 20, textAlign: 'right' },
 
   // ── Mini-game shared ──────────────────────────────────────────────────────
-  mgTitle:    { fontSize: scale(11), fontWeight: '800', color: '#ABABAB', letterSpacing: 1.5 },
-  mgInstr:    { fontSize: scale(15), fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
+  mgTitle:    { fontSize: scale(11), fontFamily: 'Inter_800ExtraBold', color: '#ABABAB', letterSpacing: 1.5 },
+  mgInstr:    { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A', textAlign: 'center' },
   mgMainBtn:  { backgroundColor: '#6B35F0', borderRadius: 100, paddingHorizontal: scale(40), paddingVertical: scale(18), borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
-  mgMainBtnText: { color: '#fff', fontWeight: '900', fontSize: scale(18) },
+  mgMainBtnText: { color: '#fff', fontFamily: 'Inter_900Black', fontSize: scale(18) },
   mgBigTap:   { width: scale(130), height: scale(130), borderRadius: scale(65), backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
 
   // ── Card hand ─────────────────────────────────────────────────────────────
   handGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
-  handCard:   { width: '47%', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: scale(10), paddingHorizontal: scale(10), alignItems: 'center', gap: 4, minHeight: scale(82), justifyContent: 'center', ...SOLID_SHADOW },
+  handCard:   { width: '47%', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: scale(12), paddingHorizontal: scale(10), alignItems: 'center', gap: 6, minHeight: scale(110), justifyContent: 'center', ...SOLID_SHADOW },
   handEmoji:  { fontSize: scale(22) },
-  handLabel:  { fontSize: scale(12), fontWeight: '800', color: '#1A1A1A', textAlign: 'center', lineHeight: scale(16) },
-  handCost:   { fontSize: scale(10), fontWeight: '700', color: '#ABABAB' },
+  handLabel:  { fontFamily: 'FredokaOne_400Regular', fontSize: scale(24), color: '#1A1A1A', textAlign: 'center', lineHeight: scale(26) },
+  handCost:   { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#ABABAB' },
 });
 
 const auth = StyleSheet.create({
   backBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  backBtnText:   { fontSize: scale(24), color: '#1A1A1A', fontWeight: '600' },
-  title:         { fontSize: scale(30), fontWeight: '900', color: '#1A1A1A', marginBottom: 6 },
+  backBtnText:   { fontSize: scale(24), color: '#1A1A1A', fontFamily: 'Inter_600SemiBold' },
+  title:         { fontSize: scale(30), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginBottom: 6 },
   subtitle:      { fontSize: scale(15), color: '#ABABAB' },
   inputRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   inputIcon:     { fontSize: scale(20) },
   textInput:     { flex: 1, fontSize: scale(16), color: '#1A1A1A', padding: 0 },
-  primaryBtn:    { backgroundColor: '#6B35F0', borderRadius: 14, padding: 16, alignItems: 'center' },
-  primaryBtnText:{ fontSize: scale(16), fontWeight: '800', color: '#FFFFFF' },
   dividerRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dividerLine:   { flex: 1, height: 1, backgroundColor: '#ECEAE4' },
-  dividerText:   { fontSize: scale(14), color: '#ABABAB', fontWeight: '500' },
+  dividerText:   { fontSize: scale(14), color: '#ABABAB', fontFamily: 'Inter_500Medium' },
   googleBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1.5, borderColor: '#ECEAE4', padding: 16 },
-  googleBtnText: { fontSize: scale(16), fontWeight: '700', color: '#1A1A1A' },
+  googleBtnText: { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   leafDecor:     { position: 'absolute', bottom: 60, left: -10, fontSize: scale(72), opacity: 0.5 },
   purpleBlob:    { position: 'absolute', bottom: 80, right: -20, borderRadius: 60, backgroundColor: '#6B35F0', opacity: 0.15, width: 120, height: 120 },
   sparkle:       { position: 'absolute', fontSize: scale(20), opacity: 0.6 },

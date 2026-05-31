@@ -235,7 +235,7 @@ const s = StyleSheet.create({
   title: {
     flex:       1,
     fontSize:   12,
-    fontWeight: '700',
+    fontFamily: 'Inter_700Bold',
     color:      '#fff',
     letterSpacing: 0.6,
   },
@@ -255,7 +255,7 @@ const s = StyleSheet.create({
   },
   label: {
     fontSize:   10,
-    fontWeight: '600',
+    fontFamily: 'Inter_600SemiBold',
     color:      'rgba(255,255,255,0.55)',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
@@ -273,14 +273,14 @@ const s = StyleSheet.create({
   },
   stepBtnTxt: {
     fontSize:   11,
-    fontWeight: '700',
+    fontFamily: 'Inter_700Bold',
     color:      '#fff',
   },
   val: {
     flex:       1,
     textAlign:  'center',
     fontSize:   13,
-    fontWeight: '800',
+    fontFamily: 'Inter_800ExtraBold',
     color:      '#C5F215',   // lime green — easy to read
     fontVariant: ['tabular-nums'],
   },
@@ -296,7 +296,7 @@ const s = StyleSheet.create({
   },
   copyBtnTxt: {
     fontSize:   12,
-    fontWeight: '700',
+    fontFamily: 'Inter_700Bold',
     color:      '#fff',
   },
   valuesBox: {

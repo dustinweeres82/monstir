@@ -56,7 +56,7 @@ const s = StyleSheet.create({
   },
   label: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
+    fontFamily: 'Inter_700Bold',
     color: colors.muted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -73,7 +73,7 @@ const s = StyleSheet.create({
   },
   prefix: {
     fontSize: fontSize.xl,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: colors.black,
   },
   input: {

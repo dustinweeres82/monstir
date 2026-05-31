@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
-import { colors, fontSize, fontWeight, borders, spacing, radii } from '../tokens';
+import { colors, fontSize, fontWeight, borders, spacing, radii, scale } from '../tokens';
 
 interface ScreenHeaderProps {
   title: string;
@@ -19,7 +19,7 @@ export function ScreenHeader({ title, onBack, right, onAdd, onDelete, style }: S
       </TouchableOpacity>
     ) : onDelete ? (
       <TouchableOpacity style={s.iconBtn} onPress={onDelete} activeOpacity={0.7}>
-        <Text style={{ fontSize: 22 }}>🗑️</Text>
+        <Text style={{ fontSize: scale(22) }}>🗑️</Text>
       </TouchableOpacity>
     ) : (
       <View style={s.placeholder} />
@@ -55,7 +55,7 @@ const s = StyleSheet.create({
   title: {
     flex: 1,
     fontSize: fontSize.xxl,
-    fontWeight: fontWeight.heavy,
+    fontFamily: 'Inter_800ExtraBold',
     color: colors.black,
     textAlign: 'center',
   },
@@ -66,9 +66,9 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   backArrow: {
-    fontSize: 22,
+    fontSize: scale(22),
     color: colors.black,
-    fontWeight: fontWeight.semibold,
+    fontFamily: 'Inter_600SemiBold',
   },
   placeholder: {
     width: 40,
@@ -89,9 +89,9 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: {
-    fontSize: 22,
+    fontSize: scale(22),
     color: colors.black,
-    fontWeight: fontWeight.bold,
-    lineHeight: 26,
+    fontFamily: 'Inter_700Bold',
+    lineHeight: scale(26),
   },
 });
