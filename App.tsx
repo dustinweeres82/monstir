@@ -8,6 +8,7 @@ import { SafeAreaView, SafeAreaProvider, useSafeAreaInsets } from 'react-native-
 import Svg, { Ellipse, Circle, Path, Polygon, Line, Defs, LinearGradient as SvgLinearGradient, RadialGradient, Stop } from 'react-native-svg';
 import { EvolutionAnimation } from './src/components/EvolutionAnimation';
 import { ChestReveal, type ChestTier } from './src/components/ChestReveal';
+import { pickForTier } from './src/data/collectibles';
 import { MascotBanner } from './src/components/MascotBanner';
 import { CreamBg } from './src/components/CreamBg';
 import { KidProfileCreation, getAvatarImage } from './src/screens/KidProfileCreation';
@@ -356,6 +357,10 @@ const DEFAULT_MANAGED_CHORES: ManagedChore[] = [
   { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
   { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
   { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '7', name: 'Vacuum the floors',  description: 'Vacuum all carpeted rooms.',           frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconVacuum.png'), bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
+  { id: '8', name: 'Sweep & mop',        description: 'Sweep and mop the kitchen floor.',     frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconBroom.png'),  bg: '#F5F0FB', status: 'active', weeklyCompletions: 0 },
+  { id: '9', name: 'Wash the dishes',    description: 'Wash, dry, and put away dishes.',      frequency: 'Every day',        difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconDishes.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '10', name: 'Tidy your room',   description: 'Put everything back in its place.',    frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBroom.png'),  bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
 ];
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -1041,7 +1046,6 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const need       = monster.needed;
   const pct        = Math.min(100, Math.round((xp / need) * 100));
   const dailyChores  = managedChores.filter(c =>
-    c.frequency === 'Every day' &&
     (c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName))
   );
   const remaining    = dailyChores.filter(c => c.status === 'active' || c.status === 'rejected').length;
@@ -2080,11 +2084,11 @@ function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
 
 // ── Attack name flavour text by monster type ──────────────────────────────────
 const ATTACK_NAMES: Record<MonsterId, Record<string, string>> = {
-  slime:  { 'zap-strike':'Goop Zap',       'frenzy':'Slime Frenzy',    'overcharge':'Ooze Overload',   'whack':'Glob Smack',     'block-breaker':'Slime Code',    'power-slash':'Goo Slash',      'earthquake':'Slime Quake',    'defuse':'Bubble Bomb',    'combo-chain':'Slime Chain',    'shake-potion':'Goo Brew',       'slingshot':'Goop Shot'     },
-  flamer: { 'zap-strike':'Ember Blast',    'frenzy':'Inferno Frenzy',  'overcharge':'Magma Surge',     'whack':'Scorch Spot',    'block-breaker':'Fire Code',     'power-slash':'Flame Slash',    'earthquake':'Magma Quake',    'defuse':'Fire Bomb',      'combo-chain':'Fire Chain',     'shake-potion':'Lava Brew',      'slingshot':'Ember Shot'    },
-  robot:  { 'zap-strike':'Shock Strike',   'frenzy':'Glitch Frenzy',   'overcharge':'Power Surge',     'whack':'Bug Zap',        'block-breaker':'Hack Attack',   'power-slash':'Blade Slash',    'earthquake':'System Crash',   'defuse':'Circuit Bomb',   'combo-chain':'Combo Protocol', 'shake-potion':'Circuit Brew',   'slingshot':'Rail Shot'     },
-  candy:  { 'zap-strike':'Sugar Rush',     'frenzy':'Candy Frenzy',    'overcharge':'Syrup Surge',     'whack':'Jawbreaker',     'block-breaker':'Sweet Code',    'power-slash':'Lollipop Slash', 'earthquake':'Candy Quake',    'defuse':'Pop Rocks Bomb', 'combo-chain':'Sweet Chain',    'shake-potion':'Sugar Brew',     'slingshot':'Candy Shot'    },
-  food:   { 'zap-strike':'Sauce Splat',    'frenzy':'Food Fight',      'overcharge':'Grease Surge',    'whack':'Splat Smack',    'block-breaker':'Crumb Code',    'power-slash':'Noodle Slash',   'earthquake':'Kitchen Crash',  'defuse':'Mess Bomb',      'combo-chain':'Leftover Chain', 'shake-potion':'Secret Sauce',   'slingshot':'Bread Roll'    },
+  slime:  { 'zap-strike':'Goop Zap',       'frenzy':'Slime Frenzy',    'overcharge':'Ooze Overload',   'whack':'Glob Smack',     'block-breaker':'Slime Code',    'power-slash':'Goo Slash',      'earthquake':'Slime Quake',    'defuse':'Bubble Bomb',    'combo-chain':'Slime Chain',    'shake-potion':'Goo Brew',       'slingshot':'Goop Shot',     'feed-boss':'Slime Soup'    },
+  flamer: { 'zap-strike':'Ember Blast',    'frenzy':'Inferno Frenzy',  'overcharge':'Magma Surge',     'whack':'Scorch Spot',    'block-breaker':'Fire Code',     'power-slash':'Flame Slash',    'earthquake':'Magma Quake',    'defuse':'Fire Bomb',      'combo-chain':'Fire Chain',     'shake-potion':'Lava Brew',      'slingshot':'Ember Shot',    'feed-boss':'Hot Pot'       },
+  robot:  { 'zap-strike':'Shock Strike',   'frenzy':'Glitch Frenzy',   'overcharge':'Power Surge',     'whack':'Bug Zap',        'block-breaker':'Hack Attack',   'power-slash':'Blade Slash',    'earthquake':'System Crash',   'defuse':'Circuit Bomb',   'combo-chain':'Combo Protocol', 'shake-potion':'Circuit Brew',   'slingshot':'Rail Shot',     'feed-boss':'Debug Stew'    },
+  candy:  { 'zap-strike':'Sugar Rush',     'frenzy':'Candy Frenzy',    'overcharge':'Syrup Surge',     'whack':'Jawbreaker',     'block-breaker':'Sweet Code',    'power-slash':'Lollipop Slash', 'earthquake':'Candy Quake',    'defuse':'Pop Rocks Bomb', 'combo-chain':'Sweet Chain',    'shake-potion':'Sugar Brew',     'slingshot':'Candy Shot',    'feed-boss':'Candy Cauldron'},
+  food:   { 'zap-strike':'Sauce Splat',    'frenzy':'Food Fight',      'overcharge':'Grease Surge',    'whack':'Splat Smack',    'block-breaker':'Crumb Code',    'power-slash':'Noodle Slash',   'earthquake':'Kitchen Crash',  'defuse':'Mess Bomb',      'combo-chain':'Leftover Chain', 'shake-potion':'Secret Sauce',   'slingshot':'Bread Roll',    'feed-boss':'Mystery Broth' },
 };
 function atkName(monsterId: MonsterId, mechanic: string, fallback: string): string {
   return ATTACK_NAMES[monsterId]?.[mechanic] ?? fallback;
@@ -2093,14 +2097,24 @@ function atkName(monsterId: MonsterId, mechanic: string, fallback: string): stri
 // ── Mini-game: Shake the Potion ───────────────────────────────────────────────
 
 const INGREDIENTS = [
-  { key: 'cereal', src: require('./assets/battleui/Ingredient=cereal.png') },
-  { key: 'leaf',   src: require('./assets/battleui/Ingredient=leaf.png')   },
-  { key: 'meat',   src: require('./assets/battleui/Ingredient=meat.png')   },
-  { key: 'milk',   src: require('./assets/battleui/Ingredient=milk.png')   },
-  { key: 'slime',  src: require('./assets/battleui/Ingredient=slime.png')  },
-  { key: 'sock',   src: require('./assets/battleui/Ingredient=sock.png')   },
-  { key: 'tp',     src: require('./assets/battleui/Ingredient=tp.png')     },
-  { key: 'yarn',   src: require('./assets/battleui/Ingredient=yarn.png')   },
+  { key: 'booger',   src: require('./assets/battleui/Ingredient=booger.png')   },
+  { key: 'burger',   src: require('./assets/battleui/Ingredient=burger.png')   },
+  { key: 'cereal',   src: require('./assets/battleui/Ingredient=cereal.png')   },
+  { key: 'eyelid',   src: require('./assets/battleui/Ingredient=eyelid.png')   },
+  { key: 'fang',     src: require('./assets/battleui/Ingredient=fang.png')     },
+  { key: 'fish',     src: require('./assets/battleui/Ingredient=fish.png')     },
+  { key: 'leaf',     src: require('./assets/battleui/Ingredient=leaf.png')     },
+  { key: 'meat',     src: require('./assets/battleui/Ingredient=meat.png')     },
+  { key: 'milk',     src: require('./assets/battleui/Ingredient=milk.png')     },
+  { key: 'pancakes', src: require('./assets/battleui/Ingredient=pancakes.png') },
+  { key: 'pizza',    src: require('./assets/battleui/Ingredient=pizza.png')    },
+  { key: 'slime',    src: require('./assets/battleui/Ingredient=slime.png')    },
+  { key: 'sock',     src: require('./assets/battleui/Ingredient=sock.png')     },
+  { key: 'taco',     src: require('./assets/battleui/Ingredient=taco.png')     },
+  { key: 'toenail',  src: require('./assets/battleui/Ingredient=toenail.png')  },
+  { key: 'tooth',    src: require('./assets/battleui/Ingredient=tooth.png')    },
+  { key: 'tp',       src: require('./assets/battleui/Ingredient=tp.png')       },
+  { key: 'yarn',     src: require('./assets/battleui/Ingredient=yarn.png')     },
 ];
 
 function ShakePotionGame({ onScore }: { onScore: (s: number) => void }) {
@@ -2319,8 +2333,14 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
   const [firing,    setFiring]    = useState(false);
   const [done,      setDone]      = useState(false);
   const [hit,       setHit]       = useState(false);
+  const [miss,      setMiss]      = useState(false);
   const totalScore                = useRef(0);
   const [containerH, setContainerH] = useState(SH * 0.5);
+
+  // Hitzone — centred horizontally, near the top of the action area
+  const HITZONE_R  = scale(52);
+  const hitzoneX   = SW / 2;
+  const hitzoneY   = scale(60); // from top of container
 
   // Rock rest position in container coordinates
   const restX = SLING_L + REST_X;
@@ -2347,8 +2367,15 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
         setPull({ dx: 0, dy: 0 });
         return;
       }
-      const power = Math.min(1, dist / 200); // 200px = full power
-      totalScore.current += Math.round(power * 100);
+      const power = Math.min(1, dist / 200);
+
+      // Hit = fired upward (pulled down, dy > 20) AND horizontal aim
+      // lands within the hitzone's x-range (centre ± radius).
+      const finalX = restX + (-g.dx * 4);
+      const firedUp = g.dy > 20;
+      const inXRange = Math.abs(finalX - hitzoneX) < HITZONE_R * 2.5;
+      const isHit = firedUp && inXRange;
+      totalScore.current += isHit ? Math.round(power * 100) : 0;
       setFiring(true);
       setPull({ dx: 0, dy: 0 });
 
@@ -2357,9 +2384,9 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
         Animated.timing(rockDX, { toValue: -g.dx * 4, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
         Animated.timing(rockDY, { toValue: -g.dy * 4, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
       ]).start(() => {
-        setHit(true);
+        if (isHit) setHit(true); else setMiss(true);
         setTimeout(() => {
-          setHit(false);
+          setHit(false); setMiss(false);
           const next = shotsRef.current - 1;
           shotsRef.current = next;
           setShotsLeft(next);
@@ -2391,10 +2418,31 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
   })();
 
   return (
-    <View style={{ flex: 1 }} onLayout={e => setContainerH(e.nativeEvent.layout.height)}>
+    <View style={{ flex: 1 }} onLayout={e => setContainerH(e.nativeEvent.layout.height)} {...panResponder.panHandlers}>
 
-      {/* SVG: trajectory dots + elastic bands */}
-      <Svg width={SW} height={containerH} style={StyleSheet.absoluteFill} pointerEvents="none">
+      {/* Hitzone ring — top centre of action area */}
+      {!done && (
+        <View style={{
+          position: 'absolute',
+          top: hitzoneY - HITZONE_R,
+          left: hitzoneX - HITZONE_R,
+          width: HITZONE_R * 2,
+          height: HITZONE_R * 2,
+          borderRadius: HITZONE_R,
+          borderWidth: 3,
+          borderColor: hit ? '#C5F215' : 'rgba(255,255,255,0.5)',
+          borderStyle: 'dashed',
+          backgroundColor: hit ? 'rgba(197,242,21,0.15)' : 'rgba(255,255,255,0.08)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1,
+        }} pointerEvents="none">
+          <Text style={{ fontSize: scale(22), opacity: 0.7 }}>🎯</Text>
+        </View>
+      )}
+
+      {/* SVG: elastic bands + trajectory dots — zIndex 2, visually above handle */}
+      <Svg width={SW} height={containerH} style={[StyleSheet.absoluteFill, { zIndex: 2 }]} pointerEvents="none">
         {dots.map((d, i) => <Circle key={i} cx={d.x} cy={d.y} r={scale(5)} fill="white" opacity={d.op} />)}
         {!firing && <>
           <Line x1={tipLX} y1={tipY} x2={restX + pull.dx} y2={restY + pull.dy} stroke="#4C1D95" strokeWidth={scale(8)} strokeLinecap="round" />
@@ -2402,18 +2450,16 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
         </>}
       </Svg>
 
-      {/* Rock — floats freely over the whole container */}
-      <Animated.Image
-        source={require('./assets/battleui/slingshotrock.png')}
-        style={{ position: 'absolute', width: scale(58), height: scale(54), left: restX - scale(29), top: restY - scale(27), transform: [{ translateX: rockDX }, { translateY: rockDY }] }}
-        resizeMode="contain"
-      />
-
-      {/* Slingshot handle — full area is the touch target */}
-      <View
-        style={{ position: 'absolute', bottom: SLING_B, left: SLING_L, width: HANDLE_W, height: HANDLE_H }}
-        {...panResponder.panHandlers}
+      {/* Rock — zIndex 3, visually on top of everything, touches pass through */}
+      <Animated.View
+        pointerEvents="none"
+        style={{ position: 'absolute', zIndex: 3, width: scale(58), height: scale(54), left: restX - scale(29), top: restY - scale(27), transform: [{ translateX: rockDX }, { translateY: rockDY }] }}
       >
+        <Image source={require('./assets/battleui/slingshotrock.png')} style={{ width: scale(58), height: scale(54) }} resizeMode="contain" />
+      </Animated.View>
+
+      {/* Slingshot handle — visual only, zIndex 1 behind bands */}
+      <View style={{ position: 'absolute', bottom: SLING_B, left: SLING_L, width: HANDLE_W, height: HANDLE_H, zIndex: 1 }}>
         <Image source={require('./assets/battleui/slingshothandle.png')} style={{ width: HANDLE_W, height: HANDLE_H }} resizeMode="contain" />
       </View>
 
@@ -2421,17 +2467,189 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
       {hit && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
         <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(52), color: '#C5F215' }}>💥 HIT!</Text>
       </View>}
+      {miss && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
+        <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(52), color: '#FF6B6B' }}>Miss!</Text>
+      </View>}
 
-      {/* Ammo */}
-      <View style={{ position: 'absolute', top: scale(16), right: scale(20), flexDirection: 'row', gap: scale(8) }}>
+      {/* Ammo — vertical stack beside the slingshot */}
+      <View style={{ position: 'absolute', bottom: SLING_B, left: SLING_L + HANDLE_W + scale(8), flexDirection: 'column', gap: scale(6), justifyContent: 'center', height: HANDLE_H }}>
         {Array.from({ length: SHOTS }).map((_, i) => (
-          <Image key={i} source={require('./assets/battleui/slingshotrock.png')} style={{ width: scale(32), height: scale(30), opacity: i < shotsLeft ? 1 : 0.2 }} resizeMode="contain" />
+          <Image key={i} source={require('./assets/battleui/slingshotrock.png')} style={{ width: scale(36), height: scale(34), opacity: i < shotsLeft ? 1 : 0.2 }} resizeMode="contain" />
         ))}
       </View>
 
       {!firing && !done && <View style={{ position: 'absolute', bottom: HANDLE_H + scale(40), left: 0, right: 0, alignItems: 'center' }}>
         <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(15), color: 'rgba(255,255,255,0.85)' }}>Pull back and release!</Text>
       </View>}
+    </View>
+  );
+}
+
+// ── Mini-game: Feed the Boss ─────────────────────────────────────────────────
+
+// Grossness score per ingredient (higher = grosser = more damage)
+const GROSSNESS: Record<string, number> = {
+  // Very gross
+  booger:   97,
+  toenail:  96,
+  sock:     95,
+  tp:       90,
+  eyelid:   88,
+  tooth:    82,
+  slime:    85,
+  // Kinda gross
+  fang:     68,
+  fish:     52,
+  meat:     55,
+  // Not gross (yummy foods)
+  taco:     14,
+  burger:   14,
+  yarn:     18,
+  leaf:     15,
+  pizza:    12,
+  milk:     12,
+  cereal:   10,
+  pancakes: 10,
+};
+
+const FEED_GROSS_QUIPS   = ["BLECH! That's AWFUL! 🤢", "You tricked me!! 😤", "What IS this?!", "I'm gonna be sick...", "DISGUSTING! 😫"];
+const FEED_MEDIUM_QUIPS  = ["Hmm... not bad...", "I've had worse.", "Could be grosser.", "Meh. 😐"];
+const FEED_YUMMY_QUIPS   = ["Mmm! Delicious! 😋", "PERFECT! More please!", "Now THAT'S a brew!", "Ooh yummy! 😍"];
+
+function FeedBossGame({ onScore, onBossReact }: { onScore: (s: number) => void; onBossReact: (text: string) => void }) {
+  const NEEDED = 3;
+  const { width: SW } = Dimensions.get('window');
+
+  // Pick 4 random ingredients
+  const [shown] = useState(() =>
+    [...INGREDIENTS].sort(() => Math.random() - 0.5).slice(0, 4)
+  );
+
+  const [dropped, setDropped]       = useState<string[]>([]);
+  const droppedRef                  = useRef<string[]>([]);
+  const [splashing, setSplashing]   = useState<string | null>(null);
+  const doneRef2                    = useRef(false);
+  const [done, setDone]             = useState(false);
+  const cauldronRef = useRef<View>(null);
+  const cauldronScreen = useRef({ x: 0, y: 0, width: 0, height: 0 });
+
+  // Per-ingredient animated positions
+  const anims = useRef(shown.map(() => ({
+    x: new Animated.Value(0),
+    y: new Animated.Value(0),
+    opacity: new Animated.Value(1),
+  }))).current;
+
+  const dropIngredient = (key: string, idx: number) => {
+    if (droppedRef.current.includes(key) || doneRef2.current) return;
+    const next = [...droppedRef.current, key];
+    droppedRef.current = next;
+    setSplashing(key);
+    Animated.timing(anims[idx].opacity, { toValue: 0, duration: 400, useNativeDriver: true }).start(() => {
+      setSplashing(null);
+      setDropped([...next]);
+      if (next.length >= NEEDED) {
+        doneRef2.current = true;
+        setDone(true);
+        const gross = next.reduce((sum, k) => sum + (GROSSNESS[k] ?? 30), 0) / NEEDED;
+        const quips = gross > 70 ? FEED_GROSS_QUIPS : gross > 40 ? FEED_MEDIUM_QUIPS : FEED_YUMMY_QUIPS;
+        setTimeout(() => onBossReact(quips[Math.floor(Math.random() * quips.length)]), 200);
+        setTimeout(() => onScore(Math.min(100, Math.round(gross))), 900);
+      }
+    });
+  };
+
+  const makePanResponder = (key: string, idx: number) =>
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !droppedRef.current.includes(key) && !doneRef2.current,
+      onMoveShouldSetPanResponder:  () => !droppedRef.current.includes(key) && !doneRef2.current,
+      onPanResponderMove: (_, g) => {
+        anims[idx].x.setValue(g.dx);
+        anims[idx].y.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        // Check if released over cauldron
+        const { x, y, width, height } = cauldronScreen.current;
+        const cx = x + width / 2;
+        const cy = y + height / 2;
+        const dist = Math.sqrt((g.moveX - cx) ** 2 + (g.moveY - cy) ** 2);
+
+        if (dist < width * 0.8) {
+          dropIngredient(key, idx);
+        } else {
+          // Snap back
+          Animated.parallel([
+            Animated.spring(anims[idx].x, { toValue: 0, useNativeDriver: true }),
+            Animated.spring(anims[idx].y, { toValue: 0, useNativeDriver: true }),
+          ]).start();
+        }
+      },
+    });
+
+  const panResponders = useRef(shown.map((ing, i) => makePanResponder(ing.key, i))).current;
+
+  // Liquid colour darkens as gross ingredients go in
+  const grossSoFar = dropped.reduce((s, k) => s + (GROSSNESS[k] ?? 30), 0) / Math.max(1, dropped.length);
+  const liquidColor = grossSoFar > 70 ? '#2D4A1E' : grossSoFar > 40 ? '#4A2D6B' : '#6B35F0';
+
+  return (
+    <View style={{ paddingHorizontal: scale(16) }}>
+      <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(20), alignItems: 'center', gap: scale(16), ...SOLID_SHADOW }}>
+
+        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
+          Make the yuckiest brew!
+        </Text>
+
+        {/* Cauldron */}
+        <View ref={cauldronRef} onLayout={() => {
+          cauldronRef.current?.measureInWindow((x, y, width, height) => {
+            cauldronScreen.current = { x, y, width, height };
+          });
+        }}>
+          <Image
+            source={require('./assets/battleui/cauldron.png')}
+            style={{ width: scale(130), height: scale(120) }}
+            resizeMode="contain"
+          />
+          {/* Ingredient count badge */}
+          <View style={{ position: 'absolute', top: -scale(8), right: -scale(8), width: scale(28), height: scale(28), borderRadius: scale(14), backgroundColor: dropped.length === NEEDED ? '#C5F215' : '#6B35F0', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(13), color: '#1A1A1A' }}>{dropped.length}</Text>
+          </View>
+        </View>
+
+        {/* Ingredients row — draggable */}
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: scale(12), width: '100%' }}>
+          {shown.map((ing, i) => {
+            const isDropped = dropped.includes(ing.key);
+            return (
+              <Animated.View
+                key={ing.key}
+                style={{
+                  opacity: isDropped ? 0.15 : anims[i].opacity,
+                  transform: [{ translateX: anims[i].x }, { translateY: anims[i].y }],
+                }}
+                {...(!isDropped ? panResponders[i].panHandlers : {})}
+              >
+                <View style={{ width: scale(60), height: scale(60), borderRadius: scale(30), backgroundColor: isDropped ? '#F0F0F0' : '#EAE4FF', borderWidth: 2, borderColor: isDropped ? '#D0D0D0' : '#6B35F0', alignItems: 'center', justifyContent: 'center' }}>
+                  <Image source={ing.src} style={{ width: scale(44), height: scale(44) }} resizeMode="contain" />
+                </View>
+              </Animated.View>
+            );
+          })}
+        </View>
+
+        {done && (
+          <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#6B35F0', textAlign: 'center' }}>
+            {grossSoFar > 70 ? '🤢 Disgustingly perfect!' : grossSoFar > 40 ? '😬 Pretty gross!' : '😅 Not gross enough...'}
+          </Text>
+        )}
+
+        {!done && (
+          <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#ABABAB' }}>
+            Drag {NEEDED - dropped.length} more ingredient{NEEDED - dropped.length !== 1 ? 's' : ''} into the cauldron
+          </Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -2764,9 +2982,9 @@ function DefuseGame({ onScore }: { onScore: (s: number) => void }) {
 
 // ── 5. Interactive Battle Arena ───────────────────────────────────────────────
 
-type BattlePhase = 'choosing' | 'zap-strike' | 'frenzy' | 'overcharge' | 'whack' | 'block-breaker' | 'power-slash' | 'earthquake' | 'defuse' | 'combo-chain' | 'shake-potion' | 'slingshot' | 'combo-reveal' | 'boss-turn';
+type BattlePhase = 'choosing' | 'zap-strike' | 'frenzy' | 'overcharge' | 'whack' | 'block-breaker' | 'power-slash' | 'earthquake' | 'defuse' | 'combo-chain' | 'shake-potion' | 'slingshot' | 'feed-boss' | 'combo-reveal' | 'boss-turn';
 
-type AttackCardId = 'zap-strike'|'frenzy'|'overcharge'|'whack'|'block-breaker'|'power-slash'|'earthquake'|'defuse'|'combo-chain'|'shake-potion'|'slingshot'|'weakness'|'defend';
+type AttackCardId = 'zap-strike'|'frenzy'|'overcharge'|'whack'|'block-breaker'|'power-slash'|'earthquake'|'defuse'|'combo-chain'|'shake-potion'|'slingshot'|'feed-boss'|'weakness'|'defend';
 interface AttackCard { id: AttackCardId; mechanic: BattlePhase|'weakness'|'defend'; label: string; baseDmg: number; shardCost: number; emoji: string; cardBg: string; icon: ReturnType<typeof require>; }
 
 const ATTACK_POOL: Omit<AttackCard,'label'>[] = [
@@ -2781,6 +2999,7 @@ const ATTACK_POOL: Omit<AttackCard,'label'>[] = [
   { id:'combo-chain',   mechanic:'combo-chain',   baseDmg:34, shardCost:0, emoji:'🔗', cardBg:'#F0F7F0', icon: require('./assets/icons/icon-graph.png') },
   { id:'shake-potion',  mechanic:'shake-potion',  baseDmg:36, shardCost:0, emoji:'🧪', cardBg:'#F0EDFF', icon: require('./assets/battleui/potionicon.png') },
   { id:'slingshot',     mechanic:'slingshot',     baseDmg:38, shardCost:0, emoji:'🪃', cardBg:'#FFF9E0', icon: require('./assets/battleui/slingshotrock.png') },
+  { id:'feed-boss',     mechanic:'feed-boss',     baseDmg:40, shardCost:0, emoji:'🫕', cardBg:'#EAE4FF', icon: require('./assets/battleui/cauldron.png') },
 ];
 
 function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, totalPower, completionPct, shards: initialShards, weaknessUnlocked, guaranteedWin, onBattleEnd, bossOverride }: {
@@ -2840,6 +3059,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     return () => clearTimeout(t);
   }, []);
 
+
   const PLAYER_MAX = Math.round(50 + totalPower * 0.5);
   const ENEMY_MAX  = boss.hp;
 
@@ -2865,6 +3085,13 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
 
   const playerHpRef = useRef(PLAYER_MAX);
   const enemyHpRef  = useRef(ENEMY_MAX);
+
+  // Feed the Boss — boss pleads for something yummy when that phase starts
+  useEffect(() => {
+    if (phase === 'feed-boss') {
+      setTimeout(() => showBubble("Make me something\nYUMMY! 😋", 3000), 300);
+    }
+  }, [phase]);
 
   const animHp = (anim: Animated.Value, ratio: number) =>
     Animated.timing(anim, { toValue: ratio, duration: 500, useNativeDriver: false }).start();
@@ -3156,6 +3383,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
         {phase === 'combo-chain'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={true} /></View>}
         {phase === 'shake-potion'  && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ShakePotionGame  onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
         {phase === 'slingshot'     && activeCard && <SlingshotGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} />}
+        {phase === 'feed-boss'     && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FeedBossGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} onBossReact={t => showBubble(t, 2500)} /></View>}
 
         {/* ── Card hand (choosing phase) ── */}
         {phase === 'choosing' && (
@@ -3164,7 +3392,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
               {hand.map((card) => (
                 <TouchableOpacity
                   key={card.id}
-                  style={[b.handCard, { backgroundColor: card.cardBg }]}
+                  style={b.handCard}
                   onPress={() => handleCardPlay(card)}
                   activeOpacity={0.82}
                 >
@@ -6404,6 +6632,7 @@ function AppInner() {
   const [battleResult, setBattleResult] = useState<'captured' | 'got-away' | null>(null);
   const [chestTier, setChestTier]           = useState<ChestTier>('Common');
   const [chorePctAtBattle, setChorePctAtBattle] = useState(0);
+  const [chestCollectible, setChestCollectible] = useState(() => pickForTier('Common'));
   const [battleCoinBonusEnabled,    setBattleCoinBonusEnabled]    = useState(false);
   const [battleCoinBonusMultiplier, setBattleCoinBonusMultiplier] = useState(1.0);
 
@@ -6694,7 +6923,9 @@ function AppInner() {
         pct = Math.min(100, Math.round((totalDone / totalTarget) * 100));
       }
       setChorePctAtBattle(pct);
-      setChestTier(tierFromPct(pct));
+      const t = tierFromPct(pct);
+      setChestTier(t);
+      setChestCollectible(pickForTier(t));
       setScreen('chestReveal');
     } else {
       setScreen('result');
@@ -6947,12 +7178,7 @@ function AppInner() {
               <ChestReveal
                 tier={chestTier}
                 completionPct={chorePctAtBattle}
-                collectible={{
-                  key:    'raregem',
-                  name:   'Rare Gem',
-                  rarity: chestTier,
-                  image:  require('./assets/battleui/trophyitems/raregem.png'),
-                }}
+                collectible={chestCollectible}
                 weekLabel={new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 onDone={() => { setTab('home'); setScreen('home'); }}
               />
@@ -7207,7 +7433,9 @@ function AppInner() {
                     style={s.debugResetBtn}
                     onPress={() => {
                       setChorePctAtBattle(dbgCompletionPct);
-                      setChestTier(tierFromPct(dbgCompletionPct));
+                      const dt = tierFromPct(dbgCompletionPct);
+                      setChestTier(dt);
+                      setChestCollectible(pickForTier(dt));
                       setScreen('chestReveal');
                       setDebugOpen(false);
                     }}
@@ -8028,7 +8256,7 @@ const b = StyleSheet.create({
 
   // ── Card hand ─────────────────────────────────────────────────────────────
   handGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
-  handCard:   { width: '47%', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: scale(12), paddingHorizontal: scale(10), alignItems: 'center', gap: 6, minHeight: scale(110), justifyContent: 'center', ...SOLID_SHADOW },
+  handCard:   { width: '47%', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: scale(12), paddingHorizontal: scale(10), alignItems: 'center', gap: 6, minHeight: scale(110), justifyContent: 'center', backgroundColor: '#FAF9F4', ...SOLID_SHADOW },
   handEmoji:  { fontSize: scale(22) },
   handLabel:  { fontFamily: 'FredokaOne_400Regular', fontSize: scale(24), color: '#1A1A1A', textAlign: 'center', lineHeight: scale(26) },
   handCost:   { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#ABABAB' },

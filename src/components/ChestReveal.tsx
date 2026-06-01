@@ -75,42 +75,62 @@ const TIER_COLORS: Record<ChestTier, string> = {
   Legendary: '#B8600A',
 };
 
-// ─── Tier ladder ─────────────────────────────────────────────────────────────
+// ─── Tier meter ──────────────────────────────────────────────────────────────
 
 const TIERS: ChestTier[] = ['Common', 'Rare', 'Epic', 'Legendary'];
 
-function TierLadder({ activeTier }: { activeTier: ChestTier }) {
+const METER_COLORS: Record<ChestTier, string> = {
+  Common:    '#9CA3AF',
+  Rare:      '#10B981',
+  Epic:      '#F59E0B',
+  Legendary: '#6B35F0',
+};
+
+function TierMeter({ activeTier }: { activeTier: ChestTier }) {
+  const activeIdx = TIERS.indexOf(activeTier);
+  // Indicator sits centered on the active segment: 12.5%, 37.5%, 62.5%, 87.5%
+  const indicatorLeft = `${activeIdx * 25 + 12.5}%`;
+
   return (
-    <View style={ladder.row}>
-      {TIERS.map((t, i) => {
-        const isActive = t === activeTier;
-        const isPast   = TIERS.indexOf(t) < TIERS.indexOf(activeTier);
-        return (
-          <React.Fragment key={t}>
-            {i > 0 && (
-              <View style={[ladder.dash, (isPast || isActive) && { backgroundColor: TIER_COLORS[activeTier] }]} />
-            )}
-            <View style={[ladder.dot, { borderColor: TIER_COLORS[t], backgroundColor: isActive ? TIER_COLORS[t] : 'transparent' }]}>
-              {isActive && <View style={ladder.dotInner} />}
-            </View>
-            <Text style={[ladder.label, { color: isActive ? TIER_COLORS[t] : '#555' }, isActive && ladder.labelActive]}>
-              {t}
-            </Text>
-          </React.Fragment>
-        );
-      })}
+    <View style={{ width: '100%', gap: scale(6) }}>
+      {/* Segmented bar */}
+      <View style={{ position: 'relative' }}>
+        <View style={{ flexDirection: 'row', gap: scale(4), height: scale(18) }}>
+          {TIERS.map(t => (
+            <View key={t} style={{ flex: 1, backgroundColor: METER_COLORS[t], borderRadius: scale(100), borderWidth: 2, borderColor: '#1A1A1A' }} />
+          ))}
+        </View>
+        {/* Active indicator circle */}
+        <View style={{
+          position: 'absolute',
+          top: -scale(10),
+          left: indicatorLeft as any,
+          marginLeft: -scale(14),
+          width: scale(28), height: scale(28),
+          borderRadius: scale(14),
+          backgroundColor: METER_COLORS[activeTier],
+          borderWidth: 2.5, borderColor: '#1A1A1A',
+          alignItems: 'center', justifyContent: 'center',
+          shadowColor: '#1A1A1A', shadowOffset: { width: 2, height: 2 }, shadowOpacity: 1, shadowRadius: 0,
+        }}>
+          <View style={{ width: scale(10), height: scale(10), borderRadius: scale(5), backgroundColor: '#FFFFFF' }} />
+        </View>
+      </View>
+      {/* Labels */}
+      <View style={{ flexDirection: 'row' }}>
+        {TIERS.map((t, i) => (
+          <Text key={t} style={{
+            flex: 1,
+            textAlign: 'center',
+            fontFamily: 'Inter_700Bold',
+            fontSize: scale(11),
+            color: i === activeIdx ? METER_COLORS[t] : '#ABABAB',
+          }}>{t}</Text>
+        ))}
+      </View>
     </View>
   );
 }
-
-const ladder = StyleSheet.create({
-  row:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, flexWrap: 'wrap' },
-  dash:        { width: 16, height: 2, backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 1 },
-  dot:         { width: 10, height: 10, borderRadius: 5, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  dotInner:    { width: 4, height: 4, borderRadius: 2, backgroundColor: '#1A1A1A' },
-  label:       { fontSize: scale(11), fontFamily: 'Inter_700Bold', letterSpacing: 0.5, marginLeft: 2, marginRight: 6 },
-  labelActive: { fontSize: scale(13) },
-});
 
 // ─── ChestReveal component ────────────────────────────────────────────────────
 
@@ -237,21 +257,34 @@ export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDon
       {/* ── Pre-open screen ── */}
       {phase === 'preOpen' && (
         <View style={styles.preOpen}>
-          <Text style={styles.gotText}>YOU GOT A</Text>
-          <ScreenHeading style={{ width: '100%' }} textStyle={{ fontSize: scale(44), lineHeight: scale(48), color: '#FFFFFF' }} strokeRadius={4}>
-            {tier + '\nChest'}
-          </ScreenHeading>
-          <Text style={styles.pctText}>for doing {Math.round(completionPct)}% of your chores</Text>
 
-          <View style={styles.ladderWrap}>
-            <TierLadder activeTier={tier} />
+          {/* Top: heading + subline */}
+          <View style={styles.preOpenTop}>
+            <ScreenHeading style={{ width: '100%' }} numberOfLines={2} textStyle={{ fontSize: scale(56), lineHeight: scale(60), color: '#FFFFFF' }} strokeRadius={5}>
+              {'You got a\nbonus!'}
+            </ScreenHeading>
+            <Text style={styles.subLine}>
+              {'YOU GOT A '}
+              <Text style={{ color: tierColor }}>{tier.toUpperCase()}</Text>
+              {` CHEST FOR DOING ${Math.round(completionPct)}% OF YOUR CHORES`}
+            </Text>
           </View>
 
-          <Animated.View style={{ transform: [{ scale: chestScale }], marginTop: -50 }}>
+          {/* Centre: chest — absolutely centred, same position as cracking phase */}
+          <Animated.View style={[styles.preOpenChest, { transform: [{ scale: chestScale }] }]}>
             <Image source={CHEST_FRAMES[0]} style={styles.chestImg} resizeMode="contain" />
           </Animated.View>
 
+          {/* Bottom: button + meter */}
+          <View style={styles.preOpenBottom}>
           <Button label="Break it open!" onPress={handleStartCracking} style={{ width: '100%' }} />
+
+          {/* Tier meter card */}
+          <View style={styles.meterCard}>
+            <Text style={styles.meterTitle}>More chores done = better chest</Text>
+            <TierMeter activeTier={tier} />
+          </View>
+          </View>{/* end preOpenBottom */}
         </View>
       )}
 
@@ -326,28 +359,65 @@ const styles = StyleSheet.create({
   // Pre-open
   preOpen: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    gap: 8,
     width: '100%',
   },
-  gotText: {
-    ...textStyles.secondaryText,
-    marginBottom: 2,
+  preOpenTop: {
+    position: 'absolute',
+    top: scale(24),
+    left: scale(24),
+    right: scale(24),
+    alignItems: 'center',
+    gap: scale(8),
   },
-  pctText: {
-    ...textStyles.secondaryText,
-    marginBottom: 8,
+  preOpenChest: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  ladderWrap: {
-    marginBottom: 28,
+  preOpenBottom: {
+    position: 'absolute',
+    bottom: scale(24),
+    left: scale(24),
+    right: scale(24),
+    gap: scale(10),
+  },
+  subLine: {
+    fontFamily: 'Inter_800ExtraBold',
+    fontSize: scale(16),
+    color: '#1A1A1A',
+    textAlign: 'center',
+    lineHeight: scale(22),
+    marginBottom: scale(4),
+  },
+  meterCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(16),
+    borderWidth: 2,
+    borderColor: '#1A1A1A',
+    paddingHorizontal: scale(16),
+    paddingTop: scale(14),
+    paddingBottom: scale(12),
+    gap: scale(16),
+    marginTop: scale(8),
+    shadowColor: '#1A1A1A',
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 5,
+  },
+  meterTitle: {
+    fontFamily: 'Inter_800ExtraBold',
+    fontSize: scale(14),
+    color: '#1A1A1A',
+    textAlign: 'center',
   },
 
   // Chest image (shared)
   chestImg: {
-    width: 220,
-    height: 220,
+    width: scale(220),
+    height: scale(220),
   },
 
   // Cracking
@@ -356,11 +426,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    gap: 24,
+    gap: scale(24),
   },
   tierLabelWrap: {
     position: 'absolute',
-    top: 60,
+    top: scale(60),
     alignItems: 'center',
   },
   tierPill: {
@@ -368,16 +438,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_800ExtraBold',
     letterSpacing: 2,
     borderWidth: 2,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    borderRadius: scale(20),
+    paddingHorizontal: scale(14),
+    paddingVertical: scale(5),
     backgroundColor: '#1A1A1A',
     color: '#C5F215',
     borderColor: '#1A1A1A',
   },
   tapHint: {
     ...textStyles.secondaryText,
-    marginTop: 16,
+    marginTop: scale(16),
   },
 
   // Burst
@@ -394,25 +464,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    paddingHorizontal: 32,
-    gap: 4,
+    paddingHorizontal: scale(32),
+    gap: scale(4),
   },
   itemWrap: {
-    marginBottom: 12,
+    marginBottom: scale(12),
   },
   itemImg: {
-    width: 180,
-    height: 180,
+    width: scale(180),
+    height: scale(180),
   },
   card: {
     backgroundColor: '#1A1A1A',
-    borderRadius: 16,
+    borderRadius: scale(16),
     borderWidth: 2.5,
     borderColor: '#1A1A1A',
-    paddingHorizontal: 28,
-    paddingVertical: 20,
+    paddingHorizontal: scale(28),
+    paddingVertical: scale(20),
     alignItems: 'center',
-    gap: 6,
+    gap: scale(6),
     width: '100%',
   },
   cardRarity: {
