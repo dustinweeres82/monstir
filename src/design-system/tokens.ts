@@ -29,16 +29,18 @@ export const colors = {
   lavender: '#EAE4FF',   // active tab bg, purple-tinted surfaces
 
   // Neutrals
-  black:    '#1A1A1A',
-  white:    '#FFFFFF',
-  cream:    '#FAF9F4',   // card backgrounds (kid view)
-  warmBg:   '#EFEDE6',   // character image well
-  bg:       '#F7F6F2',   // page background (non-green screens)
-  surface:  '#FFFFFF',
-  border:   '#ECEAE4',   // subtle dividers and card borders
-  inputBorder: '#D0CEC8',
-  muted:    '#ABABAB',   // secondary / placeholder text
-  hint:     '#C0BEB8',   // tertiary text
+  black:      '#1A1A1A',
+  white:      '#FFFFFF',
+  cream:      '#FAF9F4',   // card backgrounds (kid view)
+  warmBg:     '#EFEDE6',   // character image well
+  bg:         '#F7F6F2',   // page background (non-green screens)
+  surface:    '#FFFFFF',
+  border:     '#ECEAE4',   // subtle dividers and card borders
+  trackBg:    '#ECECEC',   // progress bar / XP track backgrounds
+  inputBorder:'#D0CEC8',
+  muted:      '#ABABAB',   // secondary / placeholder text
+  dim:        '#888888',   // tertiary / caption text (darker than muted)
+  hint:       '#C0BEB8',   // quaternary text
 
   // Semantic
   gold:       '#996B00',
@@ -82,7 +84,8 @@ export const radii = {
   md:   12,
   lg:   14,
   xl:   16,
-  xxl:  20,
+  xxl:  18,   // Monstir design system card radius (MON-61)
+  xxxl: 24,
   full: 100,
 } as const;
 
@@ -121,6 +124,21 @@ export const interFamily = {
   black:    'Inter_900Black',
 } as const;
 
+/** Nunito — body copy and descriptions (MON-61 design system) */
+export const nunitoFamily = {
+  regular:  'Nunito_400Regular',
+  semibold: 'Nunito_600SemiBold',
+  bold:     'Nunito_700Bold',
+  heavy:    'Nunito_800ExtraBold',
+  black:    'Nunito_900Black',
+} as const;
+
+/** Space Mono — UI stat labels and monospace data (MON-61 design system) */
+export const spaceMonoFamily = {
+  regular: 'SpaceMono_400Regular',
+  bold:    'SpaceMono_700Bold',
+} as const;
+
 // ─── Shadows ─────────────────────────────────────────────────────────────────
 
 export const shadows = {
@@ -134,9 +152,10 @@ export const shadows = {
     android: { elevation: 3 },
     default: {},
   })!,
+  /** Monstir design system: 0px 6px 0px #111111 */
   solid: Platform.select({
-    ios:     { shadowColor: '#1A1A1A', shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
-    android: { elevation: 5 },
+    ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 0 },
+    android: { elevation: 6 },
     default: {},
   })!,
 };
@@ -179,5 +198,38 @@ export const textStyles = {
     lineHeight: scale(28),
     color:      colors.black,
     textAlign:  'center' as const,
+  },
+
+  /**
+   * Section label / sheet title — small all-caps Inter label.
+   * Used above bottom sheets, form sections, and step counters.
+   */
+  sheetLabel: {
+    fontFamily:    'Inter_700Bold',
+    fontSize:      scale(12),
+    color:         colors.muted,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase' as const,
+  },
+
+  /**
+   * Card heading — Fredoka One mid-size, dark, centred.
+   * Used inside content cards (monster name, how-it-works steps, etc.).
+   */
+  cardHeading: {
+    fontFamily: 'FredokaOne_400Regular',
+    fontSize:   scale(24),
+    color:      colors.black,
+    textAlign:  'center' as const,
+  },
+
+  /**
+   * Screen title on cream/white parent screens — Inter Black, large.
+   */
+  screenTitle: {
+    fontFamily: 'Inter_900Black',
+    fontSize:   scale(32),
+    lineHeight: scale(38),
+    color:      colors.black,
   },
 } as const;

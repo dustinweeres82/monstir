@@ -82,7 +82,7 @@ export const COLLECTIBLES: CollectibleDef[] = [
   { key: 'fossilearwax',    name: 'Fossil Earwax',       rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=fossilearwax, rarity=legendary.png') },
   { key: 'gemearwax',       name: 'Gem Earwax',          rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=gemearwax, rarity=legendary.png') },
   { key: 'gemnugget',       name: 'Gem Nugget',          rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=gemnugget, rarity=legendary.png') },
-  { key: 'goldenapple',     name: 'Platinum Toenail',    rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=goldenapple, rarity=legendary.png') },
+  { key: 'goldenapple',     name: 'Platinum Toenail',     rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=goldenapple, rarity=legendary.png') },
   { key: 'goonugget',       name: 'Goo Nugget',          rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=goonugget, rarity=legendary.png') },
   { key: 'nosepearl',       name: 'Nose Pearl',          rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=nosepearl, rarity=legendary.png') },
   { key: 'rainbownugg',     name: 'Rainbow Nugget',      rarity: 'Legendary', image: require('../../assets/battleui/trophyitems/trophy=rainbownugg, rarity=legendary.png') },
