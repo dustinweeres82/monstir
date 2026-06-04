@@ -5,8 +5,12 @@ import {
   Modal, Platform, ActionSheetIOS,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, fontSize, fontWeight, radii, spacing, scale } from '../design-system/tokens';
 import { Button } from '../design-system/components/Button';
+import { useScaleAnimation } from '../design-system/hooks';
+
+const KID_PROFILE_DRAFT_KEY = 'monstir:kid-profile-draft';
 import { CreamBg } from '../components/CreamBg';
 
 const KidSafeScreen = ({ children }: { children: React.ReactNode }) => (
@@ -137,9 +141,12 @@ function PrimaryButton({ label, onPress, disabled }: { label: string; onPress: (
 }
 
 function BackButton({ onPress }: { onPress: () => void }) {
+  const { scaleAnim, pressIn, pressOut } = useScaleAnimation({ toScale: 0.85 });
   return (
-    <TouchableOpacity onPress={onPress} style={s.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-      <Text style={s.backArrow}>←</Text>
+    <TouchableOpacity onPress={onPress} onPressIn={pressIn} onPressOut={pressOut} activeOpacity={1} style={s.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+        <Text style={s.backArrow}>←</Text>
+      </Animated.View>
     </TouchableOpacity>
   );
 }
@@ -388,6 +395,8 @@ function StepMonsterCarousel({ onChoose, onBack }: {
   const scrollX  = useRef(new Animated.Value(0)).current;
   const bobAnim  = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<any>(null);
+  const { scaleAnim: leftScale, pressIn: leftPI, pressOut: leftPO } = useScaleAnimation({ toScale: 0.85 });
+  const { scaleAnim: rightScale, pressIn: rightPI, pressOut: rightPO } = useScaleAnimation({ toScale: 0.85 });
   const monster = STARTER_MONSTERS[activeIdx];
 
   useEffect(() => {
@@ -504,20 +513,26 @@ function StepMonsterCarousel({ onChoose, onBack }: {
         <TouchableOpacity
           style={[s.arrowBtn, { left: 8 }, activeIdx === 0 && { opacity: 0.5 }]}
           onPress={() => scrollTo(activeIdx - 1)}
-          activeOpacity={0.8}
+          onPressIn={leftPI} onPressOut={leftPO}
+          activeOpacity={1}
           disabled={activeIdx === 0}
         >
-          <Image source={ARROW} style={[s.arrowIcon, { transform: [{ rotate: '180deg' }] }]} />
+          <Animated.View style={{ transform: [{ scale: leftScale }] }}>
+            <Image source={ARROW} style={[s.arrowIcon, { transform: [{ rotate: '180deg' }] }]} />
+          </Animated.View>
         </TouchableOpacity>
 
         {/* Right arrow */}
         <TouchableOpacity
           style={[s.arrowBtn, { right: 8 }, activeIdx === STARTER_MONSTERS.length - 1 && { opacity: 0.5 }]}
           onPress={() => scrollTo(activeIdx + 1)}
-          activeOpacity={0.8}
+          onPressIn={rightPI} onPressOut={rightPO}
+          activeOpacity={1}
           disabled={activeIdx === STARTER_MONSTERS.length - 1}
         >
-          <Image source={ARROW} style={s.arrowIcon} />
+          <Animated.View style={{ transform: [{ scale: rightScale }] }}>
+            <Image source={ARROW} style={s.arrowIcon} />
+          </Animated.View>
         </TouchableOpacity>
       </View>
 
@@ -579,9 +594,10 @@ function StepMonsterName({ onNext, onBack, nickname, setNickname, monsterKey }: 
   );
 }
 
-function StepItsOfficial({ onDone, onBack, monsterKey, nickname, avatarIdx }: {
+function StepItsOfficial({ onDone, onBack, monsterKey, nickname, avatarIdx, submitError }: {
   onDone: () => void; onBack: () => void;
   monsterKey: string; nickname: string; avatarIdx: number;
+  submitError?: string;
 }) {
   const monster  = STARTER_MONSTERS.find(m => m.key === monsterKey) ?? STARTER_MONSTERS[0];
   const dispName = nickname.trim() || monster.name;
@@ -624,6 +640,11 @@ function StepItsOfficial({ onDone, onBack, monsterKey, nickname, avatarIdx }: {
       </View>
 
       <View style={s.carouselFooter}>
+        {!!submitError && (
+          <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontFamily: 'Inter_600SemiBold', marginBottom: 4 }}>
+            {submitError}
+          </Text>
+        )}
         <Button label="Let's go!" onPress={onDone} />
         <Button label="Back" onPress={onBack} variant="secondary" />
       </View>
@@ -641,11 +662,51 @@ export function KidProfileCreation({ onComplete, onSkip }: Props) {
   const [accentColor,     setAccentColor]     = useState(ACCENT_COLORS[1].hex);
   const [monsterKey,      setMonsterKey]      = useState('');
   const [monsterNickname, setMonsterNickname] = useState('');
+  const [submitError,     setSubmitError]     = useState('');
+
+  // ── Draft persistence ─────────────────────────────────────────────────────
+  useEffect(() => {
+    AsyncStorage.getItem(KID_PROFILE_DRAFT_KEY)
+      .then(raw => {
+        if (!raw) return;
+        try {
+          const d = JSON.parse(raw) as {
+            step?: number; name?: string; ageRange?: string;
+            avatarIdx?: number; accentColor?: string;
+            monsterKey?: string; monsterNickname?: string;
+          };
+          if (d.name)            setName(d.name);
+          if (d.ageRange)        setAgeRange(d.ageRange);
+          if (typeof d.avatarIdx === 'number') setAvatarIdx(d.avatarIdx);
+          if (d.accentColor)     setAccentColor(d.accentColor);
+          if (d.monsterKey)      setMonsterKey(d.monsterKey);
+          if (d.monsterNickname) setMonsterNickname(d.monsterNickname);
+          if (typeof d.step === 'number' && d.step > 0) setStep(d.step);
+        } catch {
+          // ignore corrupt draft
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(KID_PROFILE_DRAFT_KEY, JSON.stringify({
+      step, name, ageRange, avatarIdx, accentColor, monsterKey, monsterNickname,
+    })).catch(() => undefined);
+  }, [step, name, ageRange, avatarIdx, accentColor, monsterKey, monsterNickname]);
 
   const next = () => setStep(s => s + 1);
   const back = () => setStep(s => s - 1);
 
-  const finish = () => onComplete({ name, ageRange, avatarIdx, accentColor, monsterKey, monsterNickname });
+  const finish = () => {
+    setSubmitError('');
+    try {
+      AsyncStorage.removeItem(KID_PROFILE_DRAFT_KEY).catch(() => undefined);
+      onComplete({ name, ageRange, avatarIdx, accentColor, monsterKey, monsterNickname });
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    }
+  };
 
   switch (step) {
     case 0: return <StepWelcome onNext={next} onSkip={onSkip} />;
@@ -654,7 +715,7 @@ export function KidProfileCreation({ onComplete, onSkip }: Props) {
     case 3: return <StepAvatar  onNext={next} onBack={back} avatarIdx={avatarIdx} setAvatarIdx={setAvatarIdx} accentColor={accentColor} setAccentColor={setAccentColor} />;
     case 4: return <StepMonsterCarousel onChoose={(key) => { setMonsterKey(key); next(); }} onBack={back} />;
     case 5: return <StepMonsterName onNext={next} onBack={back} nickname={monsterNickname} setNickname={setMonsterNickname} monsterKey={monsterKey} />;
-    case 6: return <StepItsOfficial onDone={finish} onBack={back} monsterKey={monsterKey} nickname={monsterNickname} avatarIdx={avatarIdx} />;
+    case 6: return <StepItsOfficial onDone={finish} onBack={back} monsterKey={monsterKey} nickname={monsterNickname} avatarIdx={avatarIdx} submitError={submitError} />;
     default: return null;
   }
 }

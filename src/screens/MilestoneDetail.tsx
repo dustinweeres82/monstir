@@ -1,8 +1,9 @@
 import React from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated,
 } from 'react-native';
 import { colors, spacing, fontSize, interFamily, nunitoFamily, spaceMonoFamily, radii, scale, shadows } from '../design-system/tokens';
+import { useScaleAnimation } from '../design-system/hooks';
 import { ProgressBar } from '../design-system/components/ProgressBar';
 import type { MilestoneDef } from '../data/milestones';
 import type { EarnedMilestone } from '../storage/milestones';
@@ -53,6 +54,7 @@ const MONEY_THRESHOLDS: Record<string, number> = {
 };
 
 export function MilestoneDetail({ milestone, earned, totalAllowance = 0, onBack }: MilestoneDetailProps) {
+  const { scaleAnim: backScale, pressIn: backPI, pressOut: backPO } = useScaleAnimation({ toScale: 0.85 });
   const earnedDate = earned
     ? new Date(earned.earnedAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : null;
@@ -65,8 +67,10 @@ export function MilestoneDetail({ milestone, earned, totalAllowance = 0, onBack 
 
       {/* ── Header ── */}
       <View style={s.header}>
-        <TouchableOpacity style={s.backBtn} onPress={onBack} activeOpacity={0.7}>
-          <Text style={s.backBtnText}>←</Text>
+        <TouchableOpacity style={s.backBtn} onPress={onBack} onPressIn={backPI} onPressOut={backPO} activeOpacity={1}>
+          <Animated.View style={{ transform: [{ scale: backScale }] }}>
+            <Text style={s.backBtnText}>←</Text>
+          </Animated.View>
         </TouchableOpacity>
         <Text style={s.headerTitle}>Milestone Trophy</Text>
         <View style={s.backBtn} />

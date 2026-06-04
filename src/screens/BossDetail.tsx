@@ -1,9 +1,10 @@
 import React from 'react';
 import {
   View, Text, StyleSheet, Image, ScrollView,
-  TouchableOpacity,
+  TouchableOpacity, Animated,
 } from 'react-native';
 import { colors, spacing, scale, fontSize, interFamily } from '../design-system/tokens';
+import { useScaleAnimation } from '../design-system/hooks';
 import { getBossDisplay, THREAT_STARS } from '../data/bossLookup';
 import type { BossCaptureEntry } from '../storage/bossCaptures';
 
@@ -37,6 +38,7 @@ function MetaCell({ label, value, purple }: { label: string; value: string; purp
 }
 
 export function BossDetail({ capture, relicName, relicImage, onBack }: BossDetailProps) {
+  const { scaleAnim: backScale, pressIn: backPI, pressOut: backPO } = useScaleAnimation({ toScale: 0.85 });
   const boss   = getBossDisplay(capture.bossName);
   const stars  = THREAT_STARS[capture.threat] ?? '★';
 
@@ -49,8 +51,10 @@ export function BossDetail({ capture, relicName, relicImage, onBack }: BossDetai
 
       {/* ── Header ── */}
       <View style={s.header}>
-        <TouchableOpacity style={s.backBtn} onPress={onBack} activeOpacity={0.7}>
-          <Text style={s.backBtnText}>←</Text>
+        <TouchableOpacity style={s.backBtn} onPress={onBack} onPressIn={backPI} onPressOut={backPO} activeOpacity={1}>
+          <Animated.View style={{ transform: [{ scale: backScale }] }}>
+            <Text style={s.backBtnText}>←</Text>
+          </Animated.View>
         </TouchableOpacity>
         <Text style={s.headerTitle}>Boss Trophy</Text>
         <View style={s.backBtn} />

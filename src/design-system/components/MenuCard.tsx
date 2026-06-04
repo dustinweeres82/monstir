@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { colors, radii, fontSize, fontWeight, borders, spacing, scale } from '../tokens';
 import { IconBox } from './IconBox';
+import { PressableShadow } from './PressableShadow';
 
 interface MenuCardProps {
   icon: string;
@@ -14,10 +15,11 @@ interface MenuCardProps {
 
 export function MenuCard({ icon, iconBg, title, subtitle, onPress, style }: MenuCardProps) {
   return (
-    <TouchableOpacity
-      style={[s.card, style]}
+    <PressableShadow
+      style={[s.card, style] as unknown as ViewStyle}
       onPress={onPress}
-      activeOpacity={0.8}
+      pressScale={0.97}
+      depth={0}
     >
       <IconBox icon={icon} bg={iconBg} size="md" />
       <View style={s.info}>
@@ -25,7 +27,7 @@ export function MenuCard({ icon, iconBg, title, subtitle, onPress, style }: Menu
         <Text style={s.subtitle}>{subtitle}</Text>
       </View>
       <Text style={s.arrow}>›</Text>
-    </TouchableOpacity>
+    </PressableShadow>
   );
 }
 

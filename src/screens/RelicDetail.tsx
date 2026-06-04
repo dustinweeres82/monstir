@@ -6,6 +6,7 @@ import {
 import { colors, spacing, fontSize, interFamily, scale, borders, shadows } from '../design-system/tokens';
 import { ProgressBar } from '../design-system/components/ProgressBar';
 import { PressableShadow } from '../design-system/components/PressableShadow';
+import { useScaleAnimation } from '../design-system/hooks';
 import type { CollectibleEntry } from '../storage/collectibles';
 import type { CollectibleDef, Rarity } from '../data/collectibles';
 import { COLLECTIBLES } from '../data/collectibles';
@@ -69,6 +70,8 @@ export interface RelicDetailProps {
 
 export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBack, onOpenBoss }: RelicDetailProps) {
   const [idx, setIdx] = useState(initialIndex);
+  const { scaleAnim: backScale, pressIn: backPressIn, pressOut: backPressOut } = useScaleAnimation({ toScale: 0.85 });
+  const { scaleAnim: sourceScale, pressIn: sourcePressIn, pressOut: sourcePressOut } = useScaleAnimation({ toScale: 0.96 });
 
   // Hover animation — same as monster bob on home screen
   const bobAnim = useRef(new Animated.Value(0)).current;
@@ -116,8 +119,10 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
 
       {/* ── Header ── */}
       <View style={s.header}>
-        <TouchableOpacity style={s.iconBtn} onPress={onBack} activeOpacity={0.7}>
-          <Text style={s.iconBtnText}>←</Text>
+        <TouchableOpacity style={s.iconBtn} onPress={onBack} onPressIn={backPressIn} onPressOut={backPressOut} activeOpacity={1}>
+          <Animated.View style={{ transform: [{ scale: backScale }] }}>
+            <Text style={s.iconBtnText}>←</Text>
+          </Animated.View>
         </TouchableOpacity>
 
         {/* Share placeholder */}
@@ -210,16 +215,20 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
         <View style={s.sourceRow}>
           {/* Dropped by */}
           <TouchableOpacity
-            style={[s.sourceCard, { backgroundColor: '#EDE9FC' }, CARD_SHADOW]}
             onPress={() => sourceBoss && onOpenBoss && onOpenBoss(sourceBoss)}
-            activeOpacity={sourceBoss && onOpenBoss ? 0.85 : 1}
+            onPressIn={sourceBoss && onOpenBoss ? sourcePressIn : undefined}
+            onPressOut={sourceBoss && onOpenBoss ? sourcePressOut : undefined}
+            activeOpacity={1}
+            disabled={!(sourceBoss && onOpenBoss)}
           >
-            <Text style={[s.sourceLabel, { color: PURPLE }]}>DROPPED BY</Text>
-            {bossDisplay?.image
-              ? <Image source={bossDisplay.image} style={s.bossImg} resizeMode="contain" />
-              : <Text style={s.bossEmoji}>🫙</Text>}
-            <Text style={s.sourceName}>{sourceBoss?.bossName ?? 'CHEST DROP'}</Text>
-            {sourceBoss && <Text style={s.sourceSubtitle}>{sourceBoss.threat.toUpperCase()} BOSS</Text>}
+            <Animated.View style={[s.sourceCard, { backgroundColor: '#EDE9FC' }, CARD_SHADOW, { transform: [{ scale: sourceScale }] }]}>
+              <Text style={[s.sourceLabel, { color: PURPLE }]}>DROPPED BY</Text>
+              {bossDisplay?.image
+                ? <Image source={bossDisplay.image} style={s.bossImg} resizeMode="contain" />
+                : <Text style={s.bossEmoji}>🫙</Text>}
+              <Text style={s.sourceName}>{sourceBoss?.bossName ?? 'CHEST DROP'}</Text>
+              {sourceBoss && <Text style={s.sourceSubtitle}>{sourceBoss.threat.toUpperCase()} BOSS</Text>}
+            </Animated.View>
           </TouchableOpacity>
 
           {/* Rewarded for */}
@@ -244,10 +253,10 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
         </View>
 
         {/* ── CTA ── */}
-        <TouchableOpacity style={[s.ctaBtn, CARD_SHADOW]} onPress={onBack} activeOpacity={0.85}>
+        <PressableShadow style={[s.ctaBtn, CARD_SHADOW]} onPress={onBack} pressScale={0.97} depth={0}>
           <Image source={require('../../assets/icons/icon-trophy.png')} style={s.ctaIcon} resizeMode="contain" />
           <Text style={s.ctaText}>SHOW IN TROPHY CASE</Text>
-        </TouchableOpacity>
+        </PressableShadow>
 
       </ScrollView>
     </View>

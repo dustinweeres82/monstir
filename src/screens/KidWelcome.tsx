@@ -22,6 +22,8 @@ import { useFonts, FredokaOne_400Regular } from '@expo-google-fonts/fredoka-one'
 import { ScreenHeading } from '../design-system/components/ScreenHeading';
 import { Button } from '../design-system/components/Button';
 import { scale, fontSize as fs, fontWeight as fw, colors, textStyles } from '../design-system/tokens';
+import { ArrowButton } from '../design-system/components/ArrowButton';
+import { useScaleAnimation } from '../design-system/hooks';
 
 // Disable system font scaling in this screen too
 // @ts-ignore
@@ -370,13 +372,7 @@ function PickMonsterScreen({
         {/* ── Hero scene with arrows — negative margin breaks out of safe-area padding ── */}
         <View style={[s.heroWrap, { marginHorizontal: -20 }]}>
           {/* Arrows float above scene at zIndex 10 */}
-          <TouchableOpacity style={[s.arrowBtn, { zIndex: 10 }]} onPress={prev} activeOpacity={0.75}>
-            <Image
-              source={require('../../assets/arrow_icon.png')}
-              style={[s.arrowImg, { transform: [{ scaleX: -1 }] }]}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
+          <ArrowButton direction="left" onPress={prev} />
 
           {/*
            * The bob wraps the whole scene so platform + monster float together,
@@ -418,9 +414,7 @@ function PickMonsterScreen({
             </Animated.View>
           </Animated.View>
 
-          <TouchableOpacity style={[s.arrowBtn, { zIndex: 10 }]} onPress={next} activeOpacity={0.75}>
-            <Image source={require('../../assets/arrow_icon.png')} style={s.arrowImg} resizeMode="contain" />
-          </TouchableOpacity>
+          <ArrowButton direction="right" onPress={next} />
         </View>
 
         {/* ── Monster card carousel — negative margin for edge-to-edge scroll ── */}
@@ -631,18 +625,7 @@ function ReadyScreen({
 
         {/* ── Carousel + arrows ── */}
         <View style={rs.carouselRow}>
-          <TouchableOpacity
-            style={[s.arrowBtn, activeIdx === 0 && rs.arrowDisabled]}
-            onPress={() => goTo(activeIdx - 1)}
-            activeOpacity={0.75}
-            disabled={activeIdx === 0}
-          >
-            <Image
-              source={require('../../assets/arrow_icon.png')}
-              style={[s.arrowImg, { transform: [{ scaleX: -1 }] }]}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
+          <ArrowButton direction="left" onPress={() => goTo(activeIdx - 1)} disabled={activeIdx === 0} />
 
           <FlatList
             ref={flatRef}
@@ -700,18 +683,7 @@ function ReadyScreen({
           }}
           />
 
-          <TouchableOpacity
-            style={[s.arrowBtn, activeIdx === cards.length - 1 && rs.arrowDisabled]}
-            onPress={() => goTo(activeIdx + 1)}
-            activeOpacity={0.75}
-            disabled={activeIdx === cards.length - 1}
-          >
-            <Image
-              source={require('../../assets/arrow_icon.png')}
-              style={s.arrowImg}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
+          <ArrowButton direction="right" onPress={() => goTo(activeIdx + 1)} disabled={activeIdx === cards.length - 1} />
         </View>
 
         {/* ── Dot indicators ── */}

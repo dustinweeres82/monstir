@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, Image, ScrollView,
-  TouchableOpacity, Dimensions,
+  TouchableOpacity, Dimensions, Animated,
 } from 'react-native';
 import { colors, spacing, radii, scale, fontSize, interFamily, shadows } from '../design-system/tokens';
+import { ScreenState } from '../design-system/components/ScreenState';
+import { useScaleAnimation } from '../design-system/hooks';
 import { ProgressBar } from '../design-system/components/ProgressBar';
 import { getCollectibles, type CollectibleEntry } from '../storage/collectibles';
 import { getBossCaptures, type BossCaptureEntry } from '../storage/bossCaptures';
@@ -77,6 +79,7 @@ export interface TrophyRoomProps {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export function TrophyRoom({ monsterIdx, monsterImg, monsterName, xp, initialRelicKey, onBack }: TrophyRoomProps) {
+  const { scaleAnim: backScale, pressIn: backPI, pressOut: backPO } = useScaleAnimation({ toScale: 0.85 });
   const [relics, setRelics]               = useState<CollectibleEntry[]>([]);
   const [rawEntries, setRawEntries]       = useState<CollectibleEntry[]>([]);
   const [captures, setCaptures]           = useState<BossCaptureEntry[]>([]);
@@ -84,20 +87,39 @@ export function TrophyRoom({ monsterIdx, monsterImg, monsterName, xp, initialRel
   const [detailCapture, setDetail]        = useState<BossCaptureEntry | null>(null);
   const [detailIndex, setDetailIndex]     = useState<number | null>(null);
   const [detailMilestone, setDetailMs]    = useState<MilestoneDef | null>(null);
+  const [loadState, setLoadState]         = useState<'loading' | 'error' | 'idle'>('loading');
+  const [loadError, setLoadError]         = useState<string | undefined>(undefined);
+
+  const loadData = () => {
+    setLoadState('loading');
+    setLoadError(undefined);
+    Promise.all([
+      getCollectibles(),
+      getBossCaptures(),
+      getEarnedMilestones(),
+    ])
+      .then(([all, caps, milestones]) => {
+        setRawEntries(all);
+        const seen = new Set<string>();
+        const deduped = all.filter(e => { if (seen.has(e.itemKey)) return false; seen.add(e.itemKey); return true; });
+        setRelics(deduped);
+        if (initialRelicKey) {
+          const idx = deduped.findIndex(e => e.itemKey === initialRelicKey);
+          if (idx !== -1) setDetailIndex(idx);
+        }
+        setCaptures(caps);
+        setEarnedMs(milestones);
+        setLoadState('idle');
+      })
+      .catch((err: unknown) => {
+        setLoadError(err instanceof Error ? err.message : 'Failed to load trophy data');
+        setLoadState('error');
+      });
+  };
 
   useEffect(() => {
-    getCollectibles().then(all => {
-      setRawEntries(all);
-      const seen = new Set<string>();
-      const deduped = all.filter(e => { if (seen.has(e.itemKey)) return false; seen.add(e.itemKey); return true; });
-      setRelics(deduped);
-      if (initialRelicKey) {
-        const idx = deduped.findIndex(e => e.itemKey === initialRelicKey);
-        if (idx !== -1) setDetailIndex(idx);
-      }
-    });
-    getBossCaptures().then(setCaptures);
-    getEarnedMilestones().then(setEarnedMs);
+    loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Detail routing ───────────────────────────────────────────────────────────
@@ -152,13 +174,28 @@ export function TrophyRoom({ monsterIdx, monsterImg, monsterName, xp, initialRel
 
       {/* ── Header ── */}
       <View style={s.header}>
-        <TouchableOpacity style={s.headerBtn} onPress={onBack} activeOpacity={0.7}>
-          <Text style={s.headerBtnText}>←</Text>
+          <TouchableOpacity style={s.headerBtn} onPress={onBack} onPressIn={backPI} onPressOut={backPO} activeOpacity={1}>
+          <Animated.View style={{ transform: [{ scale: backScale }] }}>
+            <Text style={s.headerBtnText}>←</Text>
+          </Animated.View>
         </TouchableOpacity>
         <Text style={s.headerTitleText}>🏆 Trophy Room</Text>
         <View style={s.headerBtn} />
       </View>
 
+      {/* Loading / Error state */}
+      {loadState !== 'idle' && (
+        <ScreenState
+          state={loadState === 'error' ? 'error' : 'loading'}
+          skeletonVariant="card-list"
+          skeletonCount={3}
+          errorMessage={loadError}
+          onRetry={loadData}
+          style={{ flex: 1 }}
+        />
+      )}
+
+      {loadState === 'idle' && (
       <ScrollView style={{ flex: 1 }} contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Hero ── */}
@@ -350,6 +387,8 @@ export function TrophyRoom({ monsterIdx, monsterImg, monsterName, xp, initialRel
         )}
 
       </ScrollView>
+      )}
+
     </View>
   );
 }

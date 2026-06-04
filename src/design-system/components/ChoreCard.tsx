@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { colors, radii, fontSize, fontWeight, borders, spacing } from '../tokens';
 import { IconBox } from './IconBox';
+import { PressableShadow } from './PressableShadow';
 
 interface ChoreCardProps {
   icon: string;
@@ -15,10 +16,12 @@ interface ChoreCardProps {
 
 export function ChoreCard({ icon, iconBg, title, reward, done, onPress, style }: ChoreCardProps) {
   return (
-    <TouchableOpacity
-      style={[s.card, done && s.cardDone, style]}
+    <PressableShadow
+      style={[s.card, done && s.cardDone, style] as unknown as ViewStyle}
       onPress={done ? undefined : onPress}
-      activeOpacity={0.7}
+      disabled={done}
+      pressScale={0.97}
+      depth={0}
     >
       <IconBox icon={icon} bg={iconBg} size="lg" />
       <View style={s.info}>
@@ -31,7 +34,7 @@ export function ChoreCard({ icon, iconBg, title, reward, done, onPress, style }:
       <View style={[s.checkbox, done && s.checkboxDone]}>
         {done && <View style={s.checkDot} />}
       </View>
-    </TouchableOpacity>
+    </PressableShadow>
   );
 }
 

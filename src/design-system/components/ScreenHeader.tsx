@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import React, { useRef } from 'react';
+import { View, Text, TouchableOpacity, Animated, StyleSheet, ViewStyle } from 'react-native';
 import { colors, fontSize, fontWeight, borders, spacing, radii, scale } from '../tokens';
 
 interface ScreenHeaderProps {
@@ -11,16 +11,27 @@ interface ScreenHeaderProps {
   style?: ViewStyle;
 }
 
+function ScalePress({ onPress, style, children }: { onPress?: () => void; style?: any; children: React.ReactNode }) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const pressIn  = () => Animated.timing(scaleAnim, { toValue: 0.88, duration: 80, useNativeDriver: true }).start();
+  const pressOut = () => Animated.spring(scaleAnim,  { toValue: 1, useNativeDriver: true, tension: 280, friction: 10 }).start();
+  return (
+    <TouchableOpacity onPress={onPress} onPressIn={pressIn} onPressOut={pressOut} activeOpacity={1} style={style}>
+      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>{children}</Animated.View>
+    </TouchableOpacity>
+  );
+}
+
 export function ScreenHeader({ title, onBack, right, onAdd, onDelete, style }: ScreenHeaderProps) {
   const rightSlot = right ?? (
     onAdd ? (
-      <TouchableOpacity style={s.addBtn} onPress={onAdd} activeOpacity={0.8}>
+      <ScalePress style={s.addBtn} onPress={onAdd}>
         <Text style={s.addBtnText}>+</Text>
-      </TouchableOpacity>
+      </ScalePress>
     ) : onDelete ? (
-      <TouchableOpacity style={s.iconBtn} onPress={onDelete} activeOpacity={0.7}>
+      <ScalePress style={s.iconBtn} onPress={onDelete}>
         <Text style={{ fontSize: scale(22) }}>🗑️</Text>
-      </TouchableOpacity>
+      </ScalePress>
     ) : (
       <View style={s.placeholder} />
     )
@@ -29,9 +40,9 @@ export function ScreenHeader({ title, onBack, right, onAdd, onDelete, style }: S
   return (
     <View style={[s.root, style]}>
       {onBack ? (
-        <TouchableOpacity style={s.backBtn} onPress={onBack} activeOpacity={0.7}>
+        <ScalePress style={s.backBtn} onPress={onBack}>
           <Text style={s.backArrow}>←</Text>
-        </TouchableOpacity>
+        </ScalePress>
       ) : (
         <View style={s.placeholder} />
       )}

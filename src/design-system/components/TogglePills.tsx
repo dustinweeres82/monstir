@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import React, { useRef } from 'react';
+import { View, Text, TouchableOpacity, Animated, StyleSheet, ViewStyle } from 'react-native';
 import { colors, radii, fontSize, fontWeight, spacing } from '../tokens';
 
 interface Option<T extends string> {
@@ -14,22 +14,32 @@ interface TogglePillsProps<T extends string> {
   style?: ViewStyle;
 }
 
+function PillItem<T extends string>({ opt, isActive, onSelect }: { opt: Option<T>; isActive: boolean; onSelect: (id: T) => void }) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const pressIn  = () => Animated.timing(scaleAnim, { toValue: 0.92, duration: 80, useNativeDriver: true }).start();
+  const pressOut = () => Animated.spring(scaleAnim,  { toValue: 1, useNativeDriver: true, tension: 280, friction: 10 }).start();
+
+  return (
+    <TouchableOpacity
+      onPress={() => onSelect(opt.id)}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      activeOpacity={1}
+    >
+      <Animated.View style={[s.pill, isActive && s.pillActive, { transform: [{ scale: scaleAnim }] }]}>
+        <Text style={[s.label, isActive && s.labelActive]}>{opt.label}</Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
 export function TogglePills<T extends string>({ options, active, onSelect, style }: TogglePillsProps<T>) {
   return (
     <View style={[s.row, style]}>
-      {options.map(opt => {
-        const isActive = opt.id === active;
-        return (
-          <TouchableOpacity
-            key={opt.id}
-            style={[s.pill, isActive && s.pillActive]}
-            onPress={() => onSelect(opt.id)}
-            activeOpacity={0.7}
-          >
-            <Text style={[s.label, isActive && s.labelActive]}>{opt.label}</Text>
-          </TouchableOpacity>
-        );
-      })}
+      {options.map(opt => (
+        <PillItem key={opt.id} opt={opt} isActive={opt.id === active} onSelect={onSelect} />
+      ))}
     </View>
   );
 }

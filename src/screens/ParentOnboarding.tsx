@@ -1,13 +1,16 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Image, Modal, Platform, ActionSheetIOS,
   Animated, Easing, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, fontSize, fontWeight, radii, spacing, scale } from '../design-system/tokens';
 import { Button } from '../design-system/components/Button';
 import { CreamBg } from '../components/CreamBg';
+
+const DRAFT_KEY = 'monstir:parent-onboarding-draft';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -537,12 +540,13 @@ function Step3ChooseReward({
 // ─── Step 4: All Set ───────────────────────────────────────────────────────
 
 function Step4AllSet({
-  children, rewardType, onComplete, onBack,
+  children, rewardType, onComplete, onBack, submitError,
 }: {
   children: OnboardingChild[];
   rewardType: string;
   onComplete: () => void;
   onBack: () => void;
+  submitError?: string;
 }) {
   const rewardLabel = REWARD_TYPES.find(r => r.id === rewardType)?.label ?? '';
 
@@ -579,6 +583,11 @@ function Step4AllSet({
         </ScrollView>
 
         <View style={s.footer}>
+          {!!submitError && (
+            <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontFamily: 'Inter_600SemiBold', marginBottom: 4 }}>
+              {submitError}
+            </Text>
+          )}
           <Button label="Start Adventure! 🚀" onPress={onComplete} />
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
@@ -593,17 +602,49 @@ export function ParentOnboarding({ onComplete }: Props) {
   const [step, setStep]           = useState(0);
   const [children, setChildren]   = useState<OnboardingChild[]>([makeChild(0)]);
   const [rewardType, setRewardType] = useState('screen_time');
+  const [submitError, setSubmitError] = useState('');
+
+  // ── Draft persistence ─────────────────────────────────────────────────────
+  // Restore draft on mount
+  useEffect(() => {
+    AsyncStorage.getItem(DRAFT_KEY)
+      .then(raw => {
+        if (!raw) return;
+        try {
+          const draft = JSON.parse(raw) as { step: number; children: OnboardingChild[]; rewardType: string };
+          if (draft.children?.length) setChildren(draft.children);
+          if (draft.rewardType)       setRewardType(draft.rewardType);
+          if (typeof draft.step === 'number') setStep(draft.step);
+        } catch {
+          // ignore corrupt drafts
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  // Save draft whenever state changes
+  useEffect(() => {
+    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ step, children, rewardType })).catch(() => undefined);
+  }, [step, children, rewardType]);
 
   const next = () => setStep(s => s + 1);
   const back = () => setStep(s => s - 1);
 
-  const finish = () => onComplete({ children, rewardType });
+  const finish = () => {
+    setSubmitError('');
+    try {
+      AsyncStorage.removeItem(DRAFT_KEY).catch(() => undefined);
+      onComplete({ children, rewardType });
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    }
+  };
 
   switch (step) {
     case 0: return <Step1AddChildren children={children} setChildren={setChildren} onNext={next} />;
     case 1: return <Step2AssignChores children={children} setChildren={setChildren} onNext={next} onBack={back} />;
     case 2: return <Step3ChooseReward rewardType={rewardType} setRewardType={setRewardType} onNext={next} onBack={back} />;
-    case 3: return <Step4AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={back} />;
+    case 3: return <Step4AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={back} submitError={submitError} />;
     default: return null;
   }
 }

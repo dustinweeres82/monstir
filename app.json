@@ -32,7 +32,9 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "@sentry/react-native/expo",
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {

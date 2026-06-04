@@ -6,8 +6,9 @@
  */
 
 import React from 'react';
-import { TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { Image, StyleSheet } from 'react-native';
 import { scale, colors, shadows } from '../tokens';
+import { PressableShadow } from './PressableShadow';
 
 interface Props {
   direction:   'left' | 'right';
@@ -18,10 +19,10 @@ interface Props {
 
 export function ArrowButton({ direction, onPress, disabled, size = 52 }: Props) {
   return (
-    <TouchableOpacity
+    <PressableShadow
       onPress={onPress}
       disabled={disabled}
-      activeOpacity={0.75}
+      pressScale={0.92}
       style={[
         s.btn,
         { width: scale(size), height: scale(size), borderRadius: scale(size / 2) },
@@ -33,7 +34,7 @@ export function ArrowButton({ direction, onPress, disabled, size = 52 }: Props) 
         style={[s.icon, direction === 'left' && { transform: [{ scaleX: -1 }] }]}
         resizeMode="contain"
       />
-    </TouchableOpacity>
+    </PressableShadow>
   );
 }
 
