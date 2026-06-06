@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
 import { colors, radii, borders, shadows } from '../tokens';
 
-type Variant = 'default' | 'outlined' | 'subtle';
+type Variant = 'default' | 'outlined' | 'subtle' | 'hero';
 
 interface CardProps {
   children: React.ReactNode;
@@ -40,5 +40,14 @@ const s = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: colors.border,
     ...shadows.soft,
+  },
+  // Full-bleed hero card — purple bg, black border, solid shadow, larger radius
+  // Note: no overflow:hidden so shadow renders correctly on iOS
+  hero: {
+    backgroundColor: colors.purple,
+    borderWidth: 2.5,
+    borderColor: colors.black,
+    borderRadius: radii.xxxl,
+    ...shadows.solid,
   },
 });

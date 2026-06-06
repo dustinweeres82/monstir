@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -33,8 +33,7 @@
     },
     "plugins": [
       "expo-font",
-      "@sentry/react-native/expo",
-      "@sentry/react-native"
+      "@bugsnag/react-native"
     ],
     "extra": {
       "eas": {

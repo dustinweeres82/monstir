@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monstir — App Architecture Map</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e14;
+    --surface: #16161f;
+    --border: #2a2a3a;
+    --text: #e8e8f0;
+    --muted: #7a7a9a;
+    --purple: #8b5cf6;
+    --green: #22c55e;
+    --blue: #3b82f6;
+    --orange: #f97316;
+    --grey: #6b7280;
+    --red: #ef4444;
+    --yellow: #eab308;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ── TOP BAR ── */
+  #topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    z-index: 1000;
+  }
+  #topbar h1 {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.3px;
+    white-space: nowrap;
+  }
+  #topbar .tagline {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  #search {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 7px 12px;
+    font-size: 13px;
+    width: 200px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #search:focus { border-color: var(--purple); }
+  #search::placeholder { color: var(--muted); }
+
+  .btn-reset {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-reset:hover { border-color: var(--purple); color: var(--text); }
+
+  /* ── CANVAS ── */
+  #canvas-wrap {
+    position: fixed;
+    top: 56px; left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+    cursor: grab;
+  }
+  #canvas-wrap.panning { cursor: grabbing; }
+  #canvas {
+    position: absolute;
+    top: 0; left: 0;
+    transform-origin: 0 0;
+  }
+
+  /* SVG arrows */
+  #arrows-svg {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  /* ── NODES ── */
+  .node {
+    position: absolute;
+    border-radius: 14px;
+    border: 1.5px solid transparent;
+    padding: 12px 14px 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: transform 0.15s, box-shadow 0.15s, opacity 0.25s;
+    min-width: 160px;
+    max-width: 200px;
+  }
+  .node:hover { transform: scale(1.04); }
+  .node.dragging { cursor: grabbing; transform: scale(1.05); z-index: 100; }
+  .node.dimmed { opacity: 0.22; }
+  .node.highlighted { box-shadow: 0 0 0 3px white; }
+
+  .node-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 5px;
+  }
+  .node-title {
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.3;
+    flex: 1;
+  }
+  .node-desc {
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.65);
+    line-height: 1.45;
+  }
+  .status-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-dot.working  { background: #22c55e; }
+  .status-dot.issues   { background: #ef4444; }
+  .status-dot.partial  { background: #eab308; }
+
+  /* colour categories */
+  .node.purple { background: #1e1232; border-color: #6d28d9; }
+  .node.purple .node-title { color: #c4b5fd; }
+  .node.green  { background: #0f2318; border-color: #166534; }
+  .node.green  .node-title { color: #86efac; }
+  .node.blue   { background: #0e1e38; border-color: #1d4ed8; }
+  .node.blue   .node-title { color: #93c5fd; }
+  .node.orange { background: #2b1500; border-color: #c2410c; }
+  .node.orange .node-title { color: #fdba74; }
+  .node.grey   { background: #181820; border-color: #374151; }
+  .node.grey   .node-title { color: #d1d5db; }
+
+  /* ── SIDE PANEL ── */
+  #panel {
+    position: fixed;
+    top: 56px; right: 0;
+    width: 340px;
+    height: calc(100vh - 56px);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+    z-index: 900;
+    padding: 20px;
+  }
+  #panel.open { transform: translateX(0); }
+
+  #panel .panel-close {
+    position: absolute;
+    top: 14px; right: 14px;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--border);
+    border: none;
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #panel .panel-close:hover { background: var(--purple); color: white; }
+
+  .panel-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    border: 1px solid transparent;
+  }
+
+  .panel-title { font-size: 20px; font-weight: 800; letter-spacing: -0.4px; margin-bottom: 6px; }
+  .panel-desc  { font-size: 13px; color: var(--muted); line-height: 1.55; margin-bottom: 18px; }
+
+  .panel-section {
+    margin-bottom: 16px;
+  }
+  .panel-section h4 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .panel-section ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .panel-section li {
+    font-size: 12.5px;
+    color: var(--text);
+    padding: 5px 10px;
+    background: var(--bg);
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    line-height: 1.4;
+  }
+  .panel-section li.issue {
+    background: #1e0808;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+  }
+  .panel-section li.issue::before { content: '⚠ '; }
+
+  .conn-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 9px;
+    cursor: pointer;
+    margin: 3px;
+    transition: border-color 0.15s;
+  }
+  .conn-chip:hover { border-color: var(--purple); color: var(--purple); }
+  .conn-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ── LEGEND ── */
+  #legend {
+    position: fixed;
+    bottom: 20px; left: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 11.5px;
+    z-index: 500;
+  }
+  #legend h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 8px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+  /* ── ZOOM CONTROLS ── */
+  #zoom-controls {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 500;
+  }
+  .zoom-btn {
+    width: 36px; height: 36px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .zoom-btn:hover { border-color: var(--purple); }
+
+  /* Edge labels */
+  .edge-label {
+    font-size: 10px;
+    fill: #7a7a9a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <h1>🧟 Monstir</h1>
+  <span class="tagline">App Architecture Map</span>
+  <div style="flex:1"></div>
+  <input id="search" placeholder="Search screens…" autocomplete="off" />
+  <button class="btn-reset" id="btn-reset">Reset view</button>
+</div>
+
+<!-- CANVAS -->
+<div id="canvas-wrap">
+  <div id="canvas">
+    <svg id="arrows-svg"></svg>
+  </div>
+</div>
+
+<!-- SIDE PANEL -->
+<div id="panel">
+  <button class="panel-close" id="panel-close">✕</button>
+  <div id="panel-content"></div>
+</div>
+
+<!-- LEGEND -->
+<div id="legend">
+  <h3>Colour key</h3>
+  <div class="legend-row"><div class="legend-swatch" style="background:#6d28d9"></div> Parent screens</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#166534"></div> Kid screens</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#1d4ed8"></div> Onboarding</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#c2410c"></div> Battle / game</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#374151"></div> Shared / utility</div>
+  <div style="margin-top:10px; border-top:1px solid #2a2a3a; padding-top:8px;">
+    <div class="legend-row"><span class="status-dot working" style="display:inline-block;margin-right:2px"></span> Working</div>
+    <div class="legend-row"><span class="status-dot issues" style="display:inline-block;margin-right:2px"></span> Has known issues</div>
+    <div class="legend-row"><span class="status-dot partial" style="display:inline-block;margin-right:2px"></span> Partial / in progress</div>
+  </div>
+</div>
+
+<!-- ZOOM CONTROLS -->
+<div id="zoom-controls">
+  <button class="zoom-btn" id="btn-zoom-in">+</button>
+  <button class="zoom-btn" id="btn-zoom-out">−</button>
+</div>
+
+<script>
+// ─── DATA ─────────────────────────────────────────────────────────────────────
+
+const NODES = [
+  // ── ONBOARDING ──
+  {
+    id: 'onboard-step1',
+    label: 'Onboarding: Add Children',
+    category: 'blue',
+    status: 'working',
+    x: 60, y: 80,
+    desc: 'Step 1 of 5. Parent adds their kids — name, avatar, and age range. Supports multiple children.',
+    reads: ['AsyncStorage: draft progress (auto-restored if app closes)'],
+    writes: ['AsyncStorage: onboarding draft (saves after every change)'],
+    issues: [],
+    connects: ['onboard-step2'],
+  },
+  {
+    id: 'onboard-step2',
+    label: 'Onboarding: Parent Role',
+    category: 'blue',
+    status: 'working',
+    x: 280, y: 80,
+    desc: 'Step 2 of 5. Parent picks their role (Mom / Dad / Guardian etc). Shows up on rejection notes sent to kids.',
+    reads: ['Onboarding draft'],
+    writes: ['parentRole field in onboarding draft'],
+    issues: [],
+    connects: ['onboard-step3'],
+  },
+  {
+    id: 'onboard-step3',
+    label: 'Onboarding: Assign Chores',
+    category: 'blue',
+    status: 'working',
+    x: 500, y: 80,
+    desc: 'Step 3 of 5. Pick chores for each child. Suggestions are age-appropriate. Custom chores can be added.',
+    reads: ['Age-based chore suggestions (built-in list)'],
+    writes: ['selectedChoreIds per child in onboarding draft'],
+    issues: [],
+    connects: ['onboard-step4'],
+  },
+  {
+    id: 'onboard-step4',
+    label: 'Onboarding: Choose Reward',
+    category: 'blue',
+    status: 'working',
+    x: 720, y: 80,
+    desc: 'Step 4 of 5. Parent picks the reward type for the whole household: screen time, allowance, treats, activities, or custom.',
+    reads: ['Onboarding draft'],
+    writes: ['rewardType in onboarding draft'],
+    issues: [],
+    connects: ['onboard-step5'],
+  },
+  {
+    id: 'onboard-step5',
+    label: "Onboarding: You're All Set!",
+    category: 'blue',
+    status: 'working',
+    x: 940, y: 80,
+    desc: "Step 5 of 5. Summary screen. Shows each child's setup and teases their Monstir. Tapping 'Start Adventure' commits the setup.",
+    reads: ['All onboarding draft data'],
+    writes: ['Clears onboarding draft. Passes setup to App root to bootstrap the app.'],
+    issues: [],
+    connects: ['kid-welcome'],
+  },
+  // ── KID WELCOME FLOW ──
+  {
+    id: 'kid-welcome',
+    label: "Kid Welcome: Hey [Name]!",
+    category: 'blue',
+    status: 'working',
+    x: 1160, y: 80,
+    desc: "Kid's first screen. Shows a splash with Slimey and explains Monstir in 3 steps. Entry point for each new child.",
+    reads: ["Child's name (from parent setup)"],
+    writes: ['Nothing — intro only'],
+    issues: [],
+    connects: ['kid-how-it-works'],
+  },
+  {
+    id: 'kid-how-it-works',
+    label: 'Kid Welcome: How It Works',
+    category: 'blue',
+    status: 'working',
+    x: 1380, y: 80,
+    desc: 'Explains the 3-step loop: do chores → earn XP → unlock rewards. One screen, no interaction needed.',
+    reads: ['Nothing'],
+    writes: ['Nothing'],
+    issues: [],
+    connects: ['kid-pick-monster'],
+  },
+  {
+    id: 'kid-pick-monster',
+    label: 'Kid Welcome: Pick Your Monstir',
+    category: 'blue',
+    status: 'partial',
+    x: 1600, y: 80,
+    desc: 'Kid swipes through 5 monster types (Slimey, Flamer, Bitbot, Jaws, Ronnie) and picks their buddy.',
+    reads: ['Hard-coded monster catalogue (5 monsters)'],
+    writes: ['selectedIdx in local state'],
+    issues: [
+      '"Jaws" and "Ronnie" have no artwork yet — show a 🐾 placeholder. Kids who pick these see broken visuals throughout the app.',
+    ],
+    connects: ['kid-name-monster'],
+  },
+  {
+    id: 'kid-name-monster',
+    label: 'Kid Welcome: Name Your Monstir',
+    category: 'blue',
+    status: 'working',
+    x: 1820, y: 80,
+    desc: "Kid types a name for their monster. If left blank, the default name (e.g. 'Slimey') is used.",
+    reads: ['Selected monster from previous step'],
+    writes: ['monsterName in local state'],
+    issues: [],
+    connects: ['kid-ready'],
+  },
+  {
+    id: 'kid-ready',
+    label: "Kid Welcome: You're Ready!",
+    category: 'blue',
+    status: 'working',
+    x: 2040, y: 80,
+    desc: "Four swipeable cards recap the game loop. Tapping 'Start Adventure' completes onboarding for this child.",
+    reads: ["Monster name and type"],
+    writes: ["Calls onComplete → saves monsterId + monsterName to app state"],
+    issues: [],
+    connects: ['kid-home'],
+  },
+
+  // ── KID SCREENS ──
+  {
+    id: 'kid-home',
+    label: 'Kid Home',
+    category: 'green',
+    status: 'working',
+    x: 60, y: 380,
+    desc: "The kid's main screen. Shows their monster on a platform with an idle bob animation, XP bar, and today's chore list.",
+    reads: [
+      "Monster name, type, level, XP",
+      "Today's chores (filtered to this kid)",
+      "Coins balance",
+      "Parent's approval-required setting",
+    ],
+    writes: [
+      "Chore status → 'pending' (if approval required) or 'approved' (instant)",
+      "XP and coins update on instant-approve",
+      "Monster name (rename modal)",
+    ],
+    issues: [
+      "Kid avatar change on this screen is LOCAL only — it doesn't persist across app restarts. The avatar is not saved to storage.",
+      "Age range picker on this screen does nothing — no feature is connected to it.",
+    ],
+    connects: ['kid-world', 'kid-wallet', 'parent-home'],
+  },
+  {
+    id: 'kid-world',
+    label: 'Kid World (Battle Hub)',
+    category: 'green',
+    status: 'working',
+    x: 280, y: 380,
+    desc: "Shows this week's boss with a countdown to Sunday battle day. Monday–Friday the boss is hidden. Saturday it reveals. Sunday the Fight Now button unlocks.",
+    reads: [
+      "Current boss (rotates weekly by monster tier)",
+      "Weekly XP and chore completion %",
+      "Days until Sunday countdown",
+      "Week approval days (for the 7-day dot row)",
+    ],
+    writes: ['Nothing — read-only war room'],
+    issues: [
+      "A debug 'trigger battle instantly' button is always visible, even in production builds.",
+      "Boss weakness stays hidden unless it's Saturday or Sunday — but the logic is based on a hard-coded day check, not chore completion as the UI hint implies.",
+    ],
+    connects: ['boss-intro', 'kid-home', 'kid-wallet'],
+  },
+  {
+    id: 'kid-wallet',
+    label: 'Kid Wallet',
+    category: 'green',
+    status: 'working',
+    x: 500, y: 380,
+    desc: "Shows coins balance, streak, savings goals, and recent trophies. Kids can create and track a savings goal here.",
+    reads: [
+      "Coins balance",
+      "Current streak (days)",
+      "Saved goals (name, target amount, progress)",
+      "Recent collectibles (up to 3)",
+      "Weekly XP",
+      "Battle result from this week",
+    ],
+    writes: [
+      "New savings goal",
+      "Goal edits / deletion",
+    ],
+    issues: [
+      "Trophies section shows up to 3 unique collectibles but has no 'see all' button — full collection is only in Trophy Room.",
+    ],
+    connects: ['trophy-room', 'goal-flow', 'kid-home'],
+  },
+  {
+    id: 'trophy-room',
+    label: 'Trophy Room',
+    category: 'green',
+    status: 'working',
+    x: 720, y: 380,
+    desc: "Kid's collection hall. Three tabs: Relics (collectible items earned from battles), Boss Captures (every boss they've beaten), and Milestones (achievements).",
+    reads: [
+      "AsyncStorage: all collectibles earned",
+      "AsyncStorage: all boss captures",
+      "AsyncStorage: earned milestones",
+      "Monster level and XP for progress display",
+    ],
+    writes: ['Nothing — read-only collection view'],
+    issues: [],
+    connects: ['boss-detail', 'relic-detail', 'milestone-detail'],
+  },
+  {
+    id: 'boss-detail',
+    label: 'Boss Detail',
+    category: 'green',
+    status: 'working',
+    x: 660, y: 580,
+    desc: "Full-screen detail for a captured boss. Shows the boss image, capture date, threat level, XP and coins earned at capture.",
+    reads: ["Boss capture entry from storage", "Boss display data from bossLookup"],
+    writes: ['Nothing'],
+    issues: [],
+    connects: ['trophy-room'],
+  },
+  {
+    id: 'relic-detail',
+    label: 'Relic Detail',
+    category: 'green',
+    status: 'working',
+    x: 820, y: 580,
+    desc: "Full-screen detail for a collectible relic. Shows rarity, when it was earned, and which week's battle it came from.",
+    reads: ["Collectible entry from storage", "Collectible definition from data/collectibles"],
+    writes: ['Nothing'],
+    issues: [],
+    connects: ['trophy-room'],
+  },
+  {
+    id: 'milestone-detail',
+    label: 'Milestone Detail',
+    category: 'green',
+    status: 'partial',
+    x: 980, y: 580,
+    desc: "Detail view for an earned milestone (achievement badge). Shows the milestone name, description, and when it was earned.",
+    reads: ["Earned milestone entry from AsyncStorage", "Milestone definition from data/milestones"],
+    writes: ['Nothing'],
+    issues: [
+      "Milestone system appears to be under construction — earnMilestone() is called after boss captures but milestone triggers for other events (streaks, chore counts) are not wired up yet.",
+    ],
+    connects: ['trophy-room'],
+  },
+
+  // ── BATTLE FLOW ──
+  {
+    id: 'boss-intro',
+    label: 'Boss Intro',
+    category: 'orange',
+    status: 'working',
+    x: 280, y: 600,
+    desc: "Cinematic intro for the week's boss. Full-screen video plays, boss name slams in with a shake animation, and rewards are previewed. Kid taps BATTLE! to proceed.",
+    reads: [
+      "Current boss (video URL, name, tagline, rewards)",
+      "Monster tier (to pick the right boss pool)",
+    ],
+    writes: ['Nothing — presentation only'],
+    issues: [],
+    connects: ['battle-arena'],
+  },
+  {
+    id: 'battle-arena',
+    label: 'Battle Arena',
+    category: 'orange',
+    status: 'working',
+    x: 500, y: 600,
+    desc: "Turn-based battle screen. Kid picks attack cards, plays a mini-game to determine damage, then the boss hits back. Repeat until someone's HP hits zero.",
+    reads: [
+      "Monster HP (scaled from weekly XP)",
+      "Boss HP, attack range, zap zone",
+      "Shards available (from chore completion %)",
+      "Completion % (scales damage output)",
+      "Weakness unlocked flag (Saturday/Sunday only)",
+    ],
+    writes: [
+      "Battle result (captured or got-away) back to App state",
+      "Shards used count",
+      "Remaining boss HP (if player loses, boss carries wound to next battle)",
+    ],
+    issues: [
+      "Boss carries over reduced HP when player loses — but this persists in local state only and resets if the app is closed before Sunday.",
+      "12 different mini-games (Zap Strike, Frenzy, Overcharge, etc.) are all implemented but 'Jaws' and 'Ronnie' monster types fall back to Slime attack names.",
+    ],
+    connects: ['battle-result', 'chest-reveal'],
+  },
+  {
+    id: 'battle-result',
+    label: 'Battle Result',
+    category: 'orange',
+    status: 'working',
+    x: 720, y: 600,
+    desc: "Shows win (CAPTURED!) or loss screen. On win, awards bonus coins and triggers the Chest Reveal. On loss, shows an encouraging message.",
+    reads: ["Battle outcome", "Bonus coins from boss definition"],
+    writes: ["Boss capture saved to AsyncStorage (on win)", "Coins balance updated (on win)"],
+    issues: [],
+    connects: ['chest-reveal', 'kid-home'],
+  },
+  {
+    id: 'chest-reveal',
+    label: 'Chest Reveal',
+    category: 'orange',
+    status: 'working',
+    x: 940, y: 600,
+    desc: "Animated chest-opening sequence after winning a battle. Reveals a collectible relic (Common, Rare, Epic, or Legendary). Higher chore completion = better chest tier.",
+    reads: [
+      "Chore completion % (determines chest tier: Bronze / Silver / Gold / Rainbow)",
+      "COLLECTIBLES catalogue",
+    ],
+    writes: [
+      "New collectible saved to AsyncStorage",
+      "Milestone triggered if applicable (e.g. first capture)",
+    ],
+    issues: [],
+    connects: ['kid-home'],
+  },
+  {
+    id: 'evolve-screen',
+    label: 'Evolution Screen',
+    category: 'orange',
+    status: 'working',
+    x: 1160, y: 600,
+    desc: "Triggered after winning a battle when the monster has enough XP to level up. A full particle-beam animation plays as the monster transforms into its next form.",
+    reads: ["Current and next monster level/image"],
+    writes: ['Monster level updated in App state (monsterIdx incremented)'],
+    issues: [],
+    connects: ['kid-home'],
+  },
+  {
+    id: 'goal-flow',
+    label: 'Goal Creation Flow',
+    category: 'green',
+    status: 'working',
+    x: 1380, y: 380,
+    desc: "Modal flow for creating or editing a savings goal. Kid picks a category, names their goal, and sets a target amount.",
+    reads: ["Existing goal data (when editing)"],
+    writes: ["New or updated goal to App state", "Goal data includes: name, amount, category, color, icon"],
+    issues: [],
+    connects: ['kid-wallet'],
+  },
+
+  // ── PARENT SCREENS ──
+  {
+    id: 'parent-home',
+    label: 'Parent Home',
+    category: 'purple',
+    status: 'partial',
+    x: 1600, y: 380,
+    desc: "Parent dashboard. Shows all children in a scrollable row, this week's task completion overview, chores needing approval, and a pay-out button when earnings are ready.",
+    reads: [
+      "All managed chores and their statuses",
+      "Kid profiles (name, avatar)",
+      "Total coins owed",
+      "Weekly task completion stats",
+      "Whether today is Sunday (controls payout visibility)",
+    ],
+    writes: [
+      "Chore status → 'approved' or 'rejected' (with optional note)",
+    ],
+    issues: [
+      "The 'View report ›' button on the weekly overview does nothing — not implemented.",
+      "The 🔔 notification bell does nothing — not implemented.",
+      "Chore approval only checks global chore.status, not per-child childStatus — so approving a chore shared by multiple kids approves it for all of them simultaneously.",
+    ],
+    connects: ['parent-chores', 'parent-money', 'parent-settings', 'parent-payout', 'kid-profile-creation'],
+  },
+  {
+    id: 'parent-chores',
+    label: 'Parent Chores',
+    category: 'purple',
+    status: 'working',
+    x: 1820, y: 380,
+    desc: "Full chore management screen. Lists all chores with their status, frequency, difficulty, and assigned children. Parent can add, edit, or delete chores.",
+    reads: [
+      "All managed chores",
+      "Kid profiles (for assignment)",
+      "Base pay rate",
+    ],
+    writes: [
+      "New chore added",
+      "Chore edited (name, icon, frequency, difficulty, assigned kids)",
+      "Chore deleted",
+    ],
+    issues: [],
+    connects: ['add-chore', 'edit-chore', 'parent-home'],
+  },
+  {
+    id: 'add-chore',
+    label: 'Add Chore',
+    category: 'purple',
+    status: 'working',
+    x: 1720, y: 580,
+    desc: "Form to create a new chore. Parent sets name, icon, frequency, difficulty level (1-3 stars), and which children it applies to.",
+    reads: ["Kid profiles (to populate assignment options)", "Chore icon options (built-in set)"],
+    writes: ["New ManagedChore added to state"],
+    issues: [],
+    connects: ['parent-chores'],
+  },
+  {
+    id: 'edit-chore',
+    label: 'Edit Chore',
+    category: 'purple',
+    status: 'working',
+    x: 1920, y: 580,
+    desc: "Same form as Add Chore, pre-filled with existing data. Can also delete the chore from here.",
+    reads: ["Existing chore data"],
+    writes: ["Updated chore saved to state", "Or chore deleted"],
+    issues: [],
+    connects: ['parent-chores'],
+  },
+  {
+    id: 'parent-money',
+    label: 'Parent Money / Pay Rates',
+    category: 'purple',
+    status: 'partial',
+    x: 2040, y: 380,
+    desc: "Where the parent sets the base pay rate (e.g. $1.00 per chore). Harder chores multiply this: Easy = 1×, Medium = 1.5×, Hard = 2×. Also shows a rate guide.",
+    reads: ["Current base rate", "Difficulty multipliers (built-in)"],
+    writes: ["Base pay rate saved to state"],
+    issues: [
+      "The 'Rate Guide' link navigates to a read-only help screen — it exists but has no routing/back-nav wired up correctly in all code paths.",
+    ],
+    connects: ['parent-home', 'parent-settings'],
+  },
+  {
+    id: 'parent-settings',
+    label: 'Parent Settings',
+    category: 'purple',
+    status: 'partial',
+    x: 2260, y: 380,
+    desc: "Settings screen with: require approval toggle (forces kids to submit chores for review), base pay rate, and debug options.",
+    reads: ["requireApproval flag", "Base pay rate"],
+    writes: ["requireApproval toggle", "Base pay rate changes"],
+    issues: [
+      "Debug panel is accessible in production — long-pressing the monster on Kid Home, or tapping 'debug' button on Battle Hub.",
+      "No way to reset the app / sign out from Settings. Parent is stuck unless they clear app data manually.",
+    ],
+    connects: ['parent-home'],
+  },
+  {
+    id: 'parent-payout',
+    label: 'Parent Payout',
+    category: 'purple',
+    status: 'working',
+    x: 2040, y: 600,
+    desc: "Payout review screen. Lists each child's earnings for the week. Parent taps 'Mark as Paid' — this is a manual reminder, not an actual payment transfer.",
+    reads: ["All kid profiles", "Coins balance per kid", "Payout log history"],
+    writes: ["Payout log entry saved", "Kid's coin balance reset to 0 after paying"],
+    issues: [],
+    connects: ['parent-home'],
+  },
+  {
+    id: 'kid-profile-creation',
+    label: 'Kid Profile Creation',
+    category: 'purple',
+    status: 'partial',
+    x: 2260, y: 600,
+    desc: "Used when parent adds a new child after initial setup (or edits an existing child). Sets name, avatar, and age range.",
+    reads: ["Existing kid profile data (when editing)"],
+    writes: ["New or updated kid profile"],
+    issues: [
+      "Adding a new child here creates their profile but does NOT trigger the Kid Welcome onboarding flow — the new kid starts without picking a monster.",
+    ],
+    connects: ['parent-home'],
+  },
+
+  // ── SHARED / UTILITY ──
+  {
+    id: 'milestone-toast',
+    label: 'Milestone Toast (overlay)',
+    category: 'grey',
+    status: 'partial',
+    x: 1160, y: 380,
+    desc: "A floating toast notification that pops up when a milestone is unlocked (e.g. first boss capture). Appears over any screen.",
+    reads: ["Milestone definition (from data/milestones)"],
+    writes: ['Nothing — display only'],
+    issues: [
+      "Milestone triggers are incomplete. Only 'first boss capture' is reliably wired up. Other milestones (streaks, chore counts) are defined but never triggered.",
+    ],
+    connects: [],
+  },
+  {
+    id: 'error-boundary',
+    label: 'Error Boundary (global)',
+    category: 'grey',
+    status: 'working',
+    x: 60, y: 600,
+    desc: "Wraps the entire app. If any screen crashes with a JavaScript error, this catches it and shows a friendly fallback screen instead of a blank crash.",
+    reads: ['Nothing'],
+    writes: ['Errors reported to Bugsnag in production builds'],
+    issues: [],
+    connects: [],
+  },
+];
+
+// ─── EDGES ────────────────────────────────────────────────────────────────────
+
+const EDGES = [
+  // Onboarding chain
+  { from: 'onboard-step1', to: 'onboard-step2', label: 'Taps Continue →' },
+  { from: 'onboard-step2', to: 'onboard-step3', label: "Taps That's me →" },
+  { from: 'onboard-step3', to: 'onboard-step4', label: 'Taps Continue →' },
+  { from: 'onboard-step4', to: 'onboard-step5', label: 'Taps Continue →' },
+  { from: 'onboard-step5', to: 'kid-welcome', label: 'Taps Start Adventure' },
+
+  // Kid welcome chain
+  { from: 'kid-welcome', to: 'kid-how-it-works', label: "Taps Let's go!" },
+  { from: 'kid-how-it-works', to: 'kid-pick-monster', label: 'Taps Got it!' },
+  { from: 'kid-pick-monster', to: 'kid-name-monster', label: 'Taps Select Monster' },
+  { from: 'kid-name-monster', to: 'kid-ready', label: "Taps That's their name!" },
+  { from: 'kid-ready', to: 'kid-home', label: 'Taps Start Adventure' },
+
+  // Kid tab navigation
+  { from: 'kid-home', to: 'kid-world', label: 'Taps World tab' },
+  { from: 'kid-home', to: 'kid-wallet', label: 'Taps Wallet tab (or coin pill)' },
+  { from: 'kid-world', to: 'kid-home', label: 'Taps Monsters tab' },
+  { from: 'kid-world', to: 'kid-wallet', label: 'Taps Wallet tab' },
+  { from: 'kid-wallet', to: 'kid-home', label: 'Taps Monsters tab' },
+
+  // View switcher (kid ↔ parent)
+  { from: 'kid-home', to: 'parent-home', label: 'Taps name → Parent view' },
+  { from: 'parent-home', to: 'kid-home', label: "Taps child's name" },
+
+  // Battle flow
+  { from: 'kid-world', to: 'boss-intro', label: 'Taps Fight Now! (Sunday only)' },
+  { from: 'boss-intro', to: 'battle-arena', label: 'Taps BATTLE!' },
+  { from: 'battle-arena', to: 'battle-result', label: 'Battle ends (HP → 0)' },
+  { from: 'battle-result', to: 'chest-reveal', label: 'Win — chest unlocked' },
+  { from: 'battle-result', to: 'kid-home', label: 'Loss — Back to Home' },
+  { from: 'chest-reveal', to: 'evolve-screen', label: 'Enough XP to evolve' },
+  { from: 'chest-reveal', to: 'kid-home', label: 'No evolution — continue' },
+  { from: 'evolve-screen', to: 'kid-home', label: 'Evolution complete' },
+
+  // Trophy room
+  { from: 'kid-wallet', to: 'trophy-room', label: 'Taps Trophy Room' },
+  { from: 'trophy-room', to: 'boss-detail', label: 'Taps a boss capture' },
+  { from: 'trophy-room', to: 'relic-detail', label: 'Taps a relic' },
+  { from: 'trophy-room', to: 'milestone-detail', label: 'Taps a milestone' },
+
+  // Goals
+  { from: 'kid-wallet', to: 'goal-flow', label: 'Taps Set a Goal / Edit Goal' },
+  { from: 'goal-flow', to: 'kid-wallet', label: 'Goal saved or cancelled' },
+
+  // Parent tabs
+  { from: 'parent-home', to: 'parent-chores', label: 'Taps Chores tab' },
+  { from: 'parent-home', to: 'parent-money', label: 'Taps Money tab' },
+  { from: 'parent-home', to: 'parent-settings', label: 'Taps Settings tab' },
+  { from: 'parent-home', to: 'parent-payout', label: 'Taps Pay Out card' },
+  { from: 'parent-home', to: 'kid-profile-creation', label: 'Taps + Add kid / edits kid' },
+
+  // Chore sub-screens
+  { from: 'parent-chores', to: 'add-chore', label: 'Taps + Add chore' },
+  { from: 'parent-chores', to: 'edit-chore', label: 'Taps an existing chore' },
+];
+
+// ─── ENGINE ───────────────────────────────────────────────────────────────────
+
+const canvas = document.getElementById('canvas');
+const svg    = document.getElementById('arrows-svg');
+const panel  = document.getElementById('panel');
+const wrap   = document.getElementById('canvas-wrap');
+
+let zoom = 0.72, panX = 40, panY = 40;
+let isPanning = false, panStartX = 0, panStartY = 0;
+let activeNode = null;
+
+// Node DOM map
+const nodeEls = {};
+
+// Build nodes
+NODES.forEach(n => {
+  const el = document.createElement('div');
+  el.className = `node ${n.category}`;
+  el.id = 'node-' + n.id;
+  el.style.left = n.x + 'px';
+  el.style.top  = n.y + 'px';
+
+  const statusClass = n.status === 'working' ? 'working' : n.status === 'issues' ? 'issues' : 'partial';
+
+  el.innerHTML = `
+    <div class="node-header">
+      <div class="status-dot ${statusClass}"></div>
+      <div class="node-title">${n.label}</div>
+    </div>
+    <div class="node-desc">${n.desc.slice(0, 80)}${n.desc.length > 80 ? '…' : ''}</div>
+  `;
+
+  el.addEventListener('click', (e) => { e.stopPropagation(); openPanel(n); });
+  makeDraggable(el, n);
+  canvas.appendChild(el);
+  nodeEls[n.id] = el;
+});
+
+// ── DRAGGING ──
+function makeDraggable(el, nodeData) {
+  let dragging = false, ox = 0, oy = 0, sx = 0, sy = 0;
+
+  el.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    dragging = true;
+    el.classList.add('dragging');
+    ox = nodeData.x; oy = nodeData.y;
+    sx = e.clientX;  sy = e.clientY;
+    e.stopPropagation();
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const dx = (e.clientX - sx) / zoom;
+    const dy = (e.clientY - sy) / zoom;
+    nodeData.x = ox + dx;
+    nodeData.y = oy + dy;
+    el.style.left = nodeData.x + 'px';
+    el.style.top  = nodeData.y + 'px';
+    drawArrows();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (dragging) { dragging = false; el.classList.remove('dragging'); }
+  });
+}
+
+// ── ARROWS ──
+function getNodeCenter(id) {
+  const n = NODES.find(x => x.id === id);
+  const el = nodeEls[id];
+  if (!n || !el) return { x: 0, y: 0 };
+  const w = el.offsetWidth  || 180;
+  const h = el.offsetHeight || 80;
+  return { x: n.x + w / 2, y: n.y + h / 2 };
+}
+
+function getCategoryColor(id) {
+  const n = NODES.find(x => x.id === id);
+  if (!n) return '#555';
+  return { purple:'#7c3aed', green:'#16a34a', blue:'#2563eb', orange:'#ea580c', grey:'#4b5563' }[n.category] || '#555';
+}
+
+function drawArrows() {
+  const W = 6000, H = 4000;
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+
+  let defs = '<defs>';
+  EDGES.forEach((e, i) => {
+    const col = getCategoryColor(e.from);
+    defs += `<marker id="ah${i}" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="${col}" opacity="0.7"/></marker>`;
+  });
+  defs += '</defs>';
+
+  let paths = '';
+  EDGES.forEach((e, i) => {
+    const f = getNodeCenter(e.from);
+    const t = getNodeCenter(e.to);
+    const col = getCategoryColor(e.from);
+    const mx = (f.x + t.x) / 2;
+    const my = (f.y + t.y) / 2;
+    const dx = t.x - f.x, dy = t.y - f.y;
+    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+    const cx1 = f.x + dx * 0.4 + (-dy/len) * 40;
+    const cy1 = f.y + dy * 0.4 + (dx/len) * 40;
+
+    paths += `<path d="M${f.x},${f.y} Q${cx1},${cy1} ${t.x},${t.y}" stroke="${col}" stroke-opacity="0.45" stroke-width="1.5" fill="none" marker-end="url(#ah${i})"/>`;
+
+    if (e.label) {
+      const lx = (f.x + cx1 + t.x) / 3;
+      const ly = (f.y + cy1 + t.y) / 3;
+      paths += `<text x="${lx}" y="${ly}" class="edge-label" text-anchor="middle">${e.label.slice(0,30)}</text>`;
+    }
+  });
+
+  svg.innerHTML = defs + paths;
+}
+
+// ── PANEL ──
+function openPanel(n) {
+  activeNode = n.id;
+  highlightConnected(n.id);
+
+  const categoryColors = { purple:'#8b5cf6', green:'#22c55e', blue:'#3b82f6', orange:'#f97316', grey:'#9ca3af' };
+  const categoryLabels = { purple:'Parent Screen', green:'Kid Screen', blue:'Onboarding', orange:'Battle / Game', grey:'Shared' };
+  const col = categoryColors[n.category] || '#888';
+  const catLabel = categoryLabels[n.category] || '';
+
+  const statusLabel = n.status === 'working' ? '🟢 Working' : n.status === 'issues' ? '🔴 Has Known Issues' : '🟡 Partial / In Progress';
+  const statusBg = n.status === 'working' ? '#052e16' : n.status === 'issues' ? '#1f1015' : '#1c1800';
+  const statusBorder = n.status === 'working' ? '#16a34a' : n.status === 'issues' ? '#dc2626' : '#ca8a04';
+
+  let connectedHtml = '';
+  const connectedIds = [];
+  EDGES.forEach(e => {
+    if (e.from === n.id) connectedIds.push({ id: e.to, dir: '→', label: e.label });
+    if (e.to === n.id)   connectedIds.push({ id: e.from, dir: '←', label: e.label });
+  });
+  if (connectedIds.length > 0) {
+    connectedHtml = `<div class="panel-section"><h4>Connected Screens</h4><div style="display:flex;flex-wrap:wrap">`;
+    connectedIds.forEach(c => {
+      const cn = NODES.find(x => x.id === c.id);
+      if (!cn) return;
+      const cc = categoryColors[cn.category] || '#888';
+      connectedHtml += `<span class="conn-chip" onclick="jumpTo('${c.id}')"><span class="dot" style="background:${cc}"></span>${cn.label}</span>`;
+    });
+    connectedHtml += `</div></div>`;
+  }
+
+  const readsHtml = n.reads.length ? `<div class="panel-section"><h4>What This Screen Reads</h4><ul>${n.reads.map(r => `<li>${r}</li>`).join('')}</ul></div>` : '';
+  const writesHtml = n.writes.length ? `<div class="panel-section"><h4>What This Screen Writes / Changes</h4><ul>${n.writes.map(r => `<li>${r}</li>`).join('')}</ul></div>` : '';
+  const issuesHtml = n.issues.length ? `<div class="panel-section"><h4>Known Issues</h4><ul>${n.issues.map(r => `<li class="issue">${r}</li>`).join('')}</ul></div>` : '';
+
+  document.getElementById('panel-content').innerHTML = `
+    <div class="panel-badge" style="background:${col}22;border-color:${col}44;color:${col}">${catLabel}</div>
+    <div class="panel-title">${n.label}</div>
+    <div class="panel-desc">${n.desc}</div>
+    <div class="panel-badge" style="background:${statusBg};border-color:${statusBorder};color:${statusBorder === '#dc2626' ? '#fca5a5' : statusBorder === '#ca8a04' ? '#fde047' : '#86efac'};margin-bottom:20px">${statusLabel}</div>
+    ${readsHtml}
+    ${writesHtml}
+    ${issuesHtml}
+    ${connectedHtml}
+  `;
+  panel.classList.add('open');
+}
+
+function jumpTo(id) {
+  const n = NODES.find(x => x.id === id);
+  if (!n) return;
+  openPanel(n);
+  // Pan to node
+  const el = nodeEls[id];
+  const w = el ? el.offsetWidth  : 180;
+  const h = el ? el.offsetHeight : 80;
+  const cx = window.innerWidth / 2;
+  const cy = (window.innerHeight - 56) / 2 + 56;
+  panX = cx - (n.x + w/2) * zoom;
+  panY = cy - (n.y + h/2) * zoom;
+  applyTransform();
+}
+
+function highlightConnected(id) {
+  const connected = new Set([id]);
+  EDGES.forEach(e => { if (e.from === id) connected.add(e.to); if (e.to === id) connected.add(e.from); });
+  NODES.forEach(n => {
+    const el = nodeEls[n.id];
+    if (!el) return;
+    if (connected.has(n.id)) {
+      el.classList.remove('dimmed');
+      el.classList.toggle('highlighted', n.id === id);
+    } else {
+      el.classList.add('dimmed');
+      el.classList.remove('highlighted');
+    }
+  });
+}
+
+function clearHighlight() {
+  NODES.forEach(n => {
+    const el = nodeEls[n.id];
+    if (!el) return;
+    el.classList.remove('dimmed', 'highlighted');
+  });
+}
+
+document.getElementById('panel-close').addEventListener('click', () => {
+  panel.classList.remove('open');
+  activeNode = null;
+  clearHighlight();
+});
+
+canvas.addEventListener('click', () => {
+  if (activeNode) { panel.classList.remove('open'); activeNode = null; clearHighlight(); }
+});
+
+// ── PAN ──
+wrap.addEventListener('mousedown', e => {
+  if (e.target === wrap || e.target === canvas || e.target === svg) {
+    isPanning = true;
+    panStartX = e.clientX - panX;
+    panStartY = e.clientY - panY;
+    wrap.classList.add('panning');
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isPanning) return;
+  panX = e.clientX - panStartX;
+  panY = e.clientY - panStartY;
+  applyTransform();
+});
+
+window.addEventListener('mouseup', () => {
+  isPanning = false;
+  wrap.classList.remove('panning');
+});
+
+// ── ZOOM ──
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  const newZoom = Math.min(2, Math.max(0.2, zoom * delta));
+  const rx = e.clientX;
+  const ry = e.clientY - 56;
+  panX = rx - (rx - panX) * (newZoom / zoom);
+  panY = ry - (ry - panY) * (newZoom / zoom);
+  zoom = newZoom;
+  applyTransform();
+}, { passive: false });
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => {
+  zoom = Math.min(2, zoom * 1.2);
+  applyTransform();
+});
+document.getElementById('btn-zoom-out').addEventListener('click', () => {
+  zoom = Math.max(0.2, zoom / 1.2);
+  applyTransform();
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  zoom = 0.72; panX = 40; panY = 40;
+  applyTransform();
+});
+
+function applyTransform() {
+  canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  drawArrows();
+}
+
+// ── SEARCH ──
+document.getElementById('search').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) { clearHighlight(); return; }
+  const matched = new Set();
+  NODES.forEach(n => {
+    if (n.label.toLowerCase().includes(q) || n.desc.toLowerCase().includes(q)) matched.add(n.id);
+  });
+  NODES.forEach(n => {
+    const el = nodeEls[n.id];
+    if (!el) return;
+    if (matched.has(n.id)) { el.classList.remove('dimmed'); el.classList.add('highlighted'); }
+    else { el.classList.add('dimmed'); el.classList.remove('highlighted'); }
+  });
+});
+
+// ── CANVAS SIZE ──
+function resizeCanvas() {
+  const maxX = Math.max(...NODES.map(n => n.x + 250)) + 200;
+  const maxY = Math.max(...NODES.map(n => n.y + 200)) + 200;
+  canvas.style.width  = maxX + 'px';
+  canvas.style.height = maxY + 'px';
+}
+
+// ── INIT ──
+resizeCanvas();
+applyTransform();
+
+// Re-draw on font load (sizes may shift)
+setTimeout(() => { drawArrows(); }, 400);
+
+</script>
+</body>
+</html>

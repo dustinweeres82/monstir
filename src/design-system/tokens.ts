@@ -201,6 +201,17 @@ export const textStyles = {
   },
 
   /**
+   * Body / Secondary Text — Inter Regular 18px.
+   * Used as subtitle copy beneath screen titles (onboarding, settings, etc.)
+   */
+  bodySecondary: {
+    fontFamily: 'Inter_400Regular',
+    fontSize:   scale(18),
+    lineHeight: scale(24),
+    color:      colors.muted,
+  },
+
+  /**
    * Section label / sheet title — small all-caps Inter label.
    * Used above bottom sheets, form sections, and step counters.
    */

@@ -2,11 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Image, Modal, Platform, ActionSheetIOS,
-  Animated, Easing, KeyboardAvoidingView,
+  Animated, Easing, KeyboardAvoidingView, PanResponder,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, fontSize, fontWeight, radii, spacing, scale } from '../design-system/tokens';
+import { colors, fontSize, fontWeight, radii, spacing, scale, interFamily, textStyles } from '../design-system/tokens';
 import { Button } from '../design-system/components/Button';
 import { CreamBg } from '../components/CreamBg';
 
@@ -27,16 +28,41 @@ export interface OnboardingChild {
 export interface ParentSetupResult {
   children: OnboardingChild[];
   rewardType: string;
+  parentRole: string;
 }
 
 interface Props {
   onComplete: (setup: ParentSetupResult) => void;
 }
 
-// ─── Constants ─────────────────────────────────────────────────────────────
+// ─── Local style constants ──────────────────────────────────────────────────
+// NOTE: These intentionally differ from design-system tokens:
+// • PURPLE / LAVENDER are the onboarding-specific active-state palette (slightly
+//   warmer than colors.purple / colors.lavender from tokens).
+// • BLACK matches the Monstir solid-shadow spec (#111111, per tokens.ts comment)
+//   which differs from colors.black (#1A1A1A used for text).
+// • CHORE_ROW_CHECKED_BG — light purple tint for a checked chore row; no token.
+// • AVATAR_INITIAL_COLOR — deep purple used for avatar initials; no token.
+// • SUBMIT_ERROR_COLOR   — destructive red for inline form errors; no token.
+// • FREDOKA_BOLD         — Fredoka (not FredokaOne) bold weight; no token in
+//   tokens.ts (which only covers Inter, Nunito, SpaceMono, FredokaOne).
 
-const PURPLE = '#6B35F0';
-const LAVENDER = '#EAE4FF';
+const PURPLE               = '#7B3FF2';
+const LAVENDER             = '#EDE5FD';
+const BLACK                = '#111111';
+const CHORE_ROW_CHECKED_BG = '#F7F2FE';
+const AVATAR_INITIAL_COLOR = '#3A2080';
+const SUBMIT_ERROR_COLOR   = '#E53935';
+const FREDOKA_BOLD         = 'Fredoka_700Bold';
+
+// Difficulty badge tints — no token; these are specific to the difficulty
+// spectrum and don't map to any existing design-system color.
+const DIFF_EASY_BG    = '#E8FBB4';
+const DIFF_EASY_TEXT  = '#3B6D11';
+const DIFF_MED_BG     = '#FFF0C0';
+const DIFF_MED_TEXT   = '#854F0B';
+const DIFF_HARD_BG    = '#FAECE7';
+const DIFF_HARD_TEXT  = '#993C1D';
 
 const AGE_RANGES: OnboardingChild['ageRange'][] = ['5-6', '7-9', '10-12', '13+'];
 const DIFFICULTIES: OnboardingChild['difficulty'][] = ['Easy', 'Medium', 'Hard'];
@@ -58,58 +84,80 @@ interface SuggestedChore {
   id: string;
   name: string;
   xp: number;
+  difficulty: 'Easy' | 'Medium' | 'Hard';
   icon: ReturnType<typeof require>;
   iconBg: string;
 }
 
 const CHORES_BY_AGE: Record<OnboardingChild['ageRange'], SuggestedChore[]> = {
   '5-6': [
-    { id: 'make_bed',     name: 'Make bed',        xp: 10, icon: require('../../assets/icons/chore=iconBed.png'),     iconBg: '#FEF3D7' },
-    { id: 'tidy_room',    name: 'Tidy room',        xp: 10, icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: '#F5F0FB' },
-    { id: 'water_plants', name: 'Water plants',     xp: 10, icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: '#F0F7F0' },
-    { id: 'put_clothes',  name: 'Put away clothes', xp: 10, icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: '#FFF9E6' },
-    { id: 'set_table',    name: 'Help set table',   xp: 15, icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: '#FFF9E6' },
+    { id: 'make_bed',     name: 'Make bed',        xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBed.png'),     iconBg: colors.iconBed },
+    { id: 'tidy_room',    name: 'Tidy room',        xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: colors.iconBroom },
+    { id: 'water_plants', name: 'Water plants',     xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconTrash },
+    { id: 'put_clothes',  name: 'Put away clothes', xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
+    { id: 'set_table',    name: 'Help set table',   xp: 15, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: colors.iconDishes },
   ],
   '7-9': [
-    { id: 'make_bed',       name: 'Make bed',           xp: 15, icon: require('../../assets/icons/chore=iconBed.png'),     iconBg: '#FEF3D7' },
-    { id: 'unload_dishes',  name: 'Unload dishwasher',  xp: 20, icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: '#FFF9E6' },
-    { id: 'take_trash',     name: 'Take out trash',     xp: 20, icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: '#F0F7F0' },
-    { id: 'pack_bag',       name: 'Pack school bag',    xp: 15, icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: '#F5F0FB' },
-    { id: 'water_plants',   name: 'Water plants',       xp: 10, icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: '#F0F7F0' },
+    { id: 'make_bed',      name: 'Make bed',          xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBed.png'),     iconBg: colors.iconBed },
+    { id: 'unload_dishes', name: 'Unload dishwasher', xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: colors.iconDishes },
+    { id: 'take_trash',    name: 'Take out trash',    xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: colors.iconTrash },
+    { id: 'pack_bag',      name: 'Pack school bag',   xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: colors.iconBroom },
+    { id: 'water_plants',  name: 'Water plants',      xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconTrash },
   ],
   '10-12': [
-    { id: 'vacuum',       name: 'Vacuum',           xp: 25, icon: require('../../assets/icons/chore=iconVacuum.png'),  iconBg: '#EAF3FB' },
-    { id: 'laundry',      name: 'Do laundry',       xp: 30, icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: '#FFF9E6' },
-    { id: 'wash_dishes',  name: 'Wash dishes',      xp: 20, icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: '#FFF9E6' },
-    { id: 'clean_bath',   name: 'Clean bathroom',   xp: 25, icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: '#EAF3FB' },
-    { id: 'take_trash',   name: 'Take out trash',   xp: 20, icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: '#F0F7F0' },
+    { id: 'vacuum',      name: 'Vacuum',         xp: 25, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconVacuum.png'),  iconBg: colors.iconBlue },
+    { id: 'laundry',     name: 'Do laundry',     xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
+    { id: 'wash_dishes', name: 'Wash dishes',    xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: colors.iconDishes },
+    { id: 'clean_bath',  name: 'Clean bathroom', xp: 25, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconBlue },
+    { id: 'take_trash',  name: 'Take out trash', xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: colors.iconTrash },
   ],
   '13+': [
-    { id: 'vacuum',       name: 'Vacuum',           xp: 25, icon: require('../../assets/icons/chore=iconVacuum.png'),  iconBg: '#EAF3FB' },
-    { id: 'laundry',      name: 'Do laundry',       xp: 30, icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: '#FFF9E6' },
-    { id: 'sweep',        name: 'Sweep floors',     xp: 20, icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: '#F5F0FB' },
-    { id: 'clean_bath',   name: 'Clean bathroom',   xp: 30, icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: '#EAF3FB' },
-    { id: 'take_trash',   name: 'Take out trash',   xp: 20, icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: '#F0F7F0' },
+    { id: 'vacuum',     name: 'Vacuum',         xp: 25, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconVacuum.png'),  iconBg: colors.iconBlue },
+    { id: 'laundry',    name: 'Do laundry',     xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
+    { id: 'sweep',      name: 'Sweep floors',   xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: colors.iconBroom },
+    { id: 'clean_bath', name: 'Clean bathroom', xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconBlue },
+    { id: 'take_trash', name: 'Take out trash', xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: colors.iconTrash },
   ],
 };
 
 const CHORE_ICONS: { icon: ReturnType<typeof require>; bg: string }[] = [
-  { icon: require('../../assets/icons/chore=iconBed.png'),     bg: '#FEF3D7' },
-  { icon: require('../../assets/icons/chore=iconBroom.png'),   bg: '#F5F0FB' },
-  { icon: require('../../assets/icons/chore=iconDishes.png'),  bg: '#FFF9E6' },
-  { icon: require('../../assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0' },
-  { icon: require('../../assets/icons/chore=iconLaundry.png'), bg: '#EEF6FF' },
-  { icon: require('../../assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB' },
-  { icon: require('../../assets/icons/chore=iconVacuum.png'),  bg: '#EAF3FB' },
+  { icon: require('../../assets/icons/chore=iconBed.png'),     bg: colors.iconBed },
+  { icon: require('../../assets/icons/chore=iconBroom.png'),   bg: colors.iconBroom },
+  { icon: require('../../assets/icons/chore=iconDishes.png'),  bg: colors.iconDishes },
+  { icon: require('../../assets/icons/chore=iconGarbage.png'), bg: colors.iconTrash },
+  { icon: require('../../assets/icons/chore=iconLaundry.png'), bg: colors.iconLaundry },
+  { icon: require('../../assets/icons/chore=iconSoap.png'),    bg: colors.iconBlue },
+  { icon: require('../../assets/icons/chore=iconVacuum.png'),  bg: colors.iconBlue },
 ];
 
+// Reward type still used in Step4ChooseReward (payout/slider) and persisted
 const REWARD_TYPES = [
-  { id: 'screen_time',       label: 'Screen time',       desc: 'e.g. 30 mins extra',  icon: '🎮' },
-  { id: 'allowance',         label: 'Allowance',         desc: 'e.g. $5 per week',    icon: '💵' },
-  { id: 'treats',            label: 'Treats',            desc: 'e.g. ice cream night', icon: '🍦' },
-  { id: 'special_activities',label: 'Special activities', desc: 'e.g. late bedtime',  icon: '⭐' },
-  { id: 'custom',            label: 'Custom reward',     desc: 'You decide',           icon: '✏️' },
+  { id: 'screen_time',        label: 'Screen time',       desc: 'e.g. 30 mins extra',   icon: '🎮' },
+  { id: 'allowance',          label: 'Allowance',         desc: 'e.g. $5 per week',     icon: '💵' },
+  { id: 'treats',             label: 'Treats',            desc: 'e.g. ice cream night',  icon: '🍦' },
+  { id: 'special_activities', label: 'Special activities', desc: 'e.g. late bedtime',   icon: '⭐' },
+  { id: 'custom',             label: 'Custom reward',     desc: 'You decide',            icon: '✏️' },
 ];
+
+// ─── Slider helpers ────────────────────────────────────────────────────────
+
+// Base pay range: $0.25 – $2.00 in $0.25 steps → 8 steps (index 0..7)
+const BASE_PAY_STEPS = [0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00];
+const MEDIUM_MULTIPLIER = 1.5;
+const HARD_MULTIPLIER   = 2.0;
+
+function fmtDollar(n: number) {
+  return `$${n.toFixed(2)}`;
+}
+
+function difficultyAmounts(baseIdx: number) {
+  const base = BASE_PAY_STEPS[baseIdx];
+  return {
+    easy:   base,
+    medium: parseFloat((base * MEDIUM_MULTIPLIER).toFixed(2)),
+    hard:   parseFloat((base * HARD_MULTIPLIER).toFixed(2)),
+  };
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -127,10 +175,31 @@ function makeChild(index: number): OnboardingChild {
 
 // ─── Shared sub-components ─────────────────────────────────────────────────
 
+function StepDots({ step, total }: { step: number; total: number }) {
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+      {Array.from({ length: total }).map((_, i) => {
+        const active = i + 1 === step;
+        return (
+          <View
+            key={i}
+            style={{
+              width: active ? 10 : 8,
+              height: active ? 10 : 8,
+              borderRadius: active ? 5 : 4,
+              backgroundColor: active ? PURPLE : colors.inputBorder,
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 function StepHeader({ step, total, title, subtitle }: { step: number; total: number; title: string; subtitle: string }) {
   return (
     <View style={{ paddingHorizontal: 24, paddingTop: 48, paddingBottom: 4 }}>
-      <Text style={s.stepCounter}>{step} OF {total}</Text>
+      <StepDots step={step} total={total} />
       <Text style={s.heading}>{title}</Text>
       <Text style={s.subtitle}>{subtitle}</Text>
     </View>
@@ -174,14 +243,7 @@ function AgeRangePicker({
   const { open, openSheet, closeSheet, sheetY, scrimOpacity } = useBottomSheet();
 
   function handlePress() {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: [...AGE_RANGES, 'Cancel'], cancelButtonIndex: AGE_RANGES.length, title: 'Age range' },
-        (i) => { if (i < AGE_RANGES.length) onChange(AGE_RANGES[i]); },
-      );
-    } else {
-      openSheet();
-    }
+    openSheet();
   }
 
   return (
@@ -253,6 +315,142 @@ function AvatarPicker({
   );
 }
 
+// ─── Difficulty badge ──────────────────────────────────────────────────────
+
+function DifficultyBadge({ difficulty }: { difficulty: 'Easy' | 'Medium' | 'Hard' }) {
+  const style = difficulty === 'Easy'
+    ? { bg: DIFF_EASY_BG, text: DIFF_EASY_TEXT }
+    : difficulty === 'Medium'
+    ? { bg: DIFF_MED_BG, text: DIFF_MED_TEXT }
+    : { bg: DIFF_HARD_BG, text: DIFF_HARD_TEXT };
+  return (
+    <View style={[s.diffBadge, { backgroundColor: style.bg }]}>
+      <Text style={[s.diffBadgeText, { color: style.text }]}>{difficulty}</Text>
+    </View>
+  );
+}
+
+// ─── Horizontal Slider — smooth drag, snaps to 25¢ on release ─────────────
+
+const PAY_MIN = 0.25;
+const PAY_MAX = 2.00;
+const PAY_STEP = 0.25;
+
+function snapToCents(raw: number): number {
+  return Math.round(Math.max(PAY_MIN, Math.min(PAY_MAX, raw)) / PAY_STEP) * PAY_STEP;
+}
+
+function centsToIdx(cents: number): number {
+  return Math.round((cents - PAY_MIN) / PAY_STEP);
+}
+
+function PaySlider({ value, onChange, onLiveChange, onDragging }: { value: number; onChange: (idx: number) => void; onLiveChange?: (dollars: number) => void; onDragging?: (isDragging: boolean) => void }) {
+  const trackWidthRef = useRef(0);
+
+  // Raw drag position (0–1 ratio) drives the visual; snapped value drives numbers
+  const dragRatio   = useRef(value / (BASE_PAY_STEPS.length - 1)).current;
+  const thumbX      = useRef(new Animated.Value(value / (BASE_PAY_STEPS.length - 1))).current;
+  const thumbScale  = useRef(new Animated.Value(1)).current;
+
+  // Live display value during drag (not snapped yet)
+  const [liveValue, setLiveValue] = useState(BASE_PAY_STEPS[value]);
+
+  const ratioToDollars = (ratio: number) =>
+    PAY_MIN + ratio * (PAY_MAX - PAY_MIN);
+
+  const lastSnappedRef = useRef<number | null>(null);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      // Capture immediately — prevents ScrollView from stealing the gesture
+      onStartShouldSetPanResponder:        () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder:         () => true,
+      onMoveShouldSetPanResponderCapture:  () => true,
+      onPanResponderGrant: (e) => {
+        onDragging?.(true);
+        Animated.spring(thumbScale, { toValue: 1.25, useNativeDriver: false, tension: 300, friction: 8 }).start();
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / (trackWidthRef.current || 1)));
+        thumbX.setValue(ratio);
+        const raw = ratioToDollars(ratio);
+        setLiveValue(raw); onLiveChange?.(raw);
+      },
+      onPanResponderMove: (e) => {
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / (trackWidthRef.current || 1)));
+        thumbX.setValue(ratio);
+        const raw = ratioToDollars(ratio);
+        setLiveValue(raw); onLiveChange?.(raw);
+        // Haptic tick each time we cross a 25¢ boundary
+        const snapped = snapToCents(raw);
+        if (snapped !== lastSnappedRef.current) {
+          lastSnappedRef.current = snapped;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+      },
+      onPanResponderRelease: (e) => {
+        onDragging?.(false);
+        Animated.spring(thumbScale, { toValue: 1, useNativeDriver: false, tension: 200, friction: 6 }).start();
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / (trackWidthRef.current || 1)));
+        const snapped = snapToCents(ratioToDollars(ratio));
+        const snappedRatio = (snapped - PAY_MIN) / (PAY_MAX - PAY_MIN);
+        Animated.spring(thumbX, { toValue: snappedRatio, useNativeDriver: false, tension: 280, friction: 9 }).start();
+        setLiveValue(snapped); onLiveChange?.(snapped);
+        onChange(centsToIdx(snapped));
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        lastSnappedRef.current = null;
+      },
+      onPanResponderTerminate: () => {
+        onDragging?.(false);
+        Animated.spring(thumbScale, { toValue: 1, useNativeDriver: false, tension: 200, friction: 6 }).start();
+        lastSnappedRef.current = null;
+      },
+    }),
+  ).current;
+
+  // Sync thumbX when value changes externally (ratio 0–1)
+  useEffect(() => {
+    const snappedRatio = (BASE_PAY_STEPS[value] - PAY_MIN) / (PAY_MAX - PAY_MIN);
+    Animated.spring(thumbX, { toValue: snappedRatio, useNativeDriver: false, tension: 280, friction: 9 }).start();
+    setLiveValue(BASE_PAY_STEPS[value]); onLiveChange?.(BASE_PAY_STEPS[value]);
+  }, [value]);
+
+  const [trackWidth, setTrackWidth] = useState(0);
+  const snappedDisplay = liveValue; // show raw during drag, parent snaps on release
+
+  // Interpolate ratio → pixels once track width is known
+  const w = trackWidth > 0 ? trackWidth : 1;
+  const fillWidthAnim   = thumbX.interpolate({ inputRange: [0, 1], outputRange: [0, w] });
+  const thumbTranslateX = thumbX.interpolate({ inputRange: [0, 1], outputRange: [-12, w - 12] });
+
+  return (
+    <View {...panResponder.panHandlers} style={{ paddingVertical: 12 }}>
+      <View
+        style={s.sliderTrack}
+        onLayout={e => { const tw = e.nativeEvent.layout.width; trackWidthRef.current = tw; setTrackWidth(tw); }}
+      >
+        <Animated.View style={[s.sliderFill, { width: fillWidthAnim }]} />
+        <Animated.View
+          style={[s.sliderThumb, { position: 'absolute', left: 0, transform: [{ translateX: thumbTranslateX }, { scale: thumbScale }] }]}
+          pointerEvents="none"
+        />
+      </View>
+      <View style={s.sliderLabels}>
+        {(['Easy', 'Medium', 'Hard'] as const).map(d => {
+          const base = snappedDisplay;
+          const amt = d === 'Easy' ? base : d === 'Medium' ? parseFloat((base * MEDIUM_MULTIPLIER).toFixed(2)) : parseFloat((base * HARD_MULTIPLIER).toFixed(2));
+          return (
+            <View key={d} style={{ alignItems: 'center', flex: 1 }}>
+              <Text style={s.sliderLabelText}>{d}</Text>
+              <Text style={s.sliderLabelAmt}>{fmtDollar(amt)}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 // ─── Step 1: Add Children ──────────────────────────────────────────────────
 
 function Step1AddChildren({
@@ -266,7 +464,6 @@ function Step1AddChildren({
 
   const updateChild = (id: string, patch: Partial<OnboardingChild>) => {
     setChildren(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
-    // Re-seed chores when age changes
     if (patch.ageRange) {
       setChildren(prev => prev.map(c =>
         c.id === id
@@ -283,31 +480,32 @@ function Step1AddChildren({
   return (
     <CreamBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={1} total={4} title="Add your children" subtitle="You can add more anytime." />
+        <StepHeader step={1} total={5} title="Add your kids" subtitle="Each kid gets their own monster and chore list." />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
           {children.map((child, i) => (
             <View key={child.id} style={s.childCard}>
               <View style={s.childCardHeader}>
                 <AvatarPicker avatarIdx={child.avatarIdx} color={child.avatarColor} name={child.name} onChange={idx => updateChild(child.id, { avatarIdx: idx })} />
-                <TextInput
-                  style={s.childNameInput}
-                  value={child.name}
-                  onChangeText={v => updateChild(child.id, { name: v })}
-                  placeholder={`Child ${i + 1}'s name`}
-                  placeholderTextColor={colors.hint}
-                  returnKeyType="done"
-                />
+                <View style={{ flex: 1 }}>
+                  <TextInput
+                    style={s.childNameInput}
+                    value={child.name}
+                    onChangeText={v => updateChild(child.id, { name: v })}
+                    placeholder={`Child ${i + 1}'s name`}
+                    placeholderTextColor={colors.hint}
+                    autoCapitalize="words"
+                    returnKeyType="done"
+                  />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    <Text style={s.kidAgeLabel}>Age</Text>
+                    <AgeRangePicker value={child.ageRange} onChange={v => updateChild(child.id, { ageRange: v })} />
+                  </View>
+                </View>
                 {children.length > 1 && (
                   <TouchableOpacity onPress={() => removeChild(child.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                     <Text style={{ fontSize: scale(18), color: colors.muted }}>🗑</Text>
                   </TouchableOpacity>
                 )}
-              </View>
-              <View style={s.childCardRow}>
-                <View style={s.childCardField}>
-                  <Text style={s.fieldLabel}>Age range</Text>
-                  <AgeRangePicker value={child.ageRange} onChange={v => updateChild(child.id, { ageRange: v })} />
-                </View>
               </View>
             </View>
           ))}
@@ -317,21 +515,101 @@ function Step1AddChildren({
             onPress={() => setChildren(prev => [...prev, makeChild(prev.length)])}
             activeOpacity={0.7}
           >
-            <Text style={s.addChildLabel}>+ Add another child</Text>
+            <Text style={s.addChildLabel}>+ Add another kid</Text>
           </TouchableOpacity>
         </ScrollView>
 
         <View style={s.footer}>
-          <Button label="Continue →" onPress={onNext} disabled={!canContinue} />
+          <Button label="Continue" onPress={onNext} disabled={!canContinue} />
         </View>
       </SafeAreaView>
     </CreamBg>
   );
 }
 
-// ─── Step 2: Assign Chores ─────────────────────────────────────────────────
+// ─── Step 2: Parent Identity ───────────────────────────────────────────────
 
-function Step2AssignChores({
+const PARENT_CARDS = [
+  { id: 'mom', label: 'Mom', emoji: '👩' },
+  { id: 'dad', label: 'Dad', emoji: '👨' },
+] as const;
+
+const PARENT_CHIPS = ['Guardian', 'Grandma', 'Grandpa', 'Caregiver'] as const;
+
+function Step2ParentIdentity({
+  parentRole,
+  setParentRole,
+  onNext,
+  onBack,
+}: {
+  parentRole: string;
+  setParentRole: (v: string) => void;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  const selectedCard = PARENT_CARDS.find(c => c.id === parentRole) ? parentRole : null;
+  const selectedChip = PARENT_CHIPS.map(c => c.toLowerCase()).includes(parentRole.toLowerCase()) && !selectedCard ? parentRole : null;
+
+  const selectCard = (id: string) => setParentRole(id);
+  const selectChip = (label: string) => setParentRole(label.toLowerCase());
+
+  return (
+    <CreamBg>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <StepHeader step={2} total={5} title="Who's the boss?" subtitle="Pick your role — this shows up when you leave notes for your kids." />
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, gap: 24 }} showsVerticalScrollIndicator={false}>
+          {/* 2-column avatar card grid */}
+          <View style={{ flexDirection: 'row', gap: 14 }}>
+            {PARENT_CARDS.map(card => {
+              const active = selectedCard === card.id;
+              return (
+                <TouchableOpacity
+                  key={card.id}
+                  style={[s.parentCard, active && s.parentCardActive, { flex: 1 }]}
+                  onPress={() => selectCard(card.id)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={s.parentCardEmoji}>{card.emoji}</Text>
+                  <Text style={[s.parentCardLabel, active && s.parentCardLabelActive]}>{card.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* "Or pick another title" label */}
+          <Text style={s.orPickLabel}>Or pick another title</Text>
+
+          {/* Chip row */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: -10 }}>
+            {PARENT_CHIPS.map(chip => {
+              const active = selectedChip === chip.toLowerCase();
+              return (
+                <TouchableOpacity
+                  key={chip}
+                  style={[s.parentChip, active && s.parentChipActive]}
+                  onPress={() => selectChip(chip)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[s.parentChipLabel, active && s.parentChipLabelActive]}>{chip}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
+
+        <View style={s.footer}>
+          <Button label="Continue" onPress={onNext} />
+          <Button label="Back" onPress={onBack} variant="secondary" />
+        </View>
+      </SafeAreaView>
+    </CreamBg>
+  );
+}
+
+// ─── Step 3: Assign Chores ─────────────────────────────────────────────────
+
+function Step3AssignChores({
   children, setChildren, onNext, onBack,
 }: {
   children: OnboardingChild[];
@@ -376,7 +654,7 @@ function Step2AssignChores({
     if (!name) return;
     const id = `custom_${Date.now()}`;
     const { icon, bg } = CHORE_ICONS[selectedIconIdx];
-    const chore: SuggestedChore = { id, name, xp: 15, icon, iconBg: bg };
+    const chore: SuggestedChore = { id, name, xp: 15, difficulty: 'Easy', icon, iconBg: bg };
     setCustomChores(prev => ({ ...prev, [child.id]: [...(prev[child.id] ?? []), chore] }));
     setChildren(prev => prev.map((c, i) =>
       i === activeTab ? { ...c, selectedChoreIds: [...c.selectedChoreIds, id] } : c
@@ -386,48 +664,52 @@ function Step2AssignChores({
     closeAddSheet();
   };
 
+  // age display: e.g. "Maya, 9" — use midpoint of range
+  const ageLabel = (range: OnboardingChild['ageRange']) => {
+    const map: Record<OnboardingChild['ageRange'], string> = { '5-6': '5-6', '7-9': '7-9', '10-12': '10-12', '13+': '13+' };
+    return map[range];
+  };
+
   return (
     <CreamBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
         <View style={{ paddingHorizontal: 24, paddingTop: 48, paddingBottom: 4 }}>
-          <Text style={s.stepCounter}>2 OF 4</Text>
-          <Text style={s.heading}>Assign chores</Text>
-          <Text style={s.subtitle}>Tailored for each child's age.</Text>
-          {children.length > 1 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 12, alignItems: 'center' }}>
-              {children.map((c, i) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[s.childTab, i === activeTab && s.childTabActive]}
-                  onPress={() => setActiveTab(i)}
-                  activeOpacity={0.8}
-                >
-                  <View style={s.childTabAvatar}>
-                    <Image source={AVATARS[c.avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                  </View>
-                  <Text style={[s.childTabLabel, i === activeTab && s.childTabLabelActive]}>{c.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
+          <StepDots step={3} total={5} />
+          <Text style={s.heading}>Pick a few chores</Text>
+          <Text style={s.subtitle}>Age-appropriate picks — grab what fits. You can always add more later.</Text>
+          {/* Tab row per kid */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 12, alignItems: 'center' }}>
+            {children.map((c, i) => (
+              <TouchableOpacity
+                key={c.id}
+                style={[s.choreTab, i === activeTab && s.choreTabActive]}
+                onPress={() => setActiveTab(i)}
+                activeOpacity={0.8}
+              >
+                <Text style={[s.choreTabLabel, i === activeTab && s.choreTabLabelActive]}>
+                  {c.name || `Kid ${i + 1}`}{c.name ? `, ${ageLabel(c.ageRange)}` : ''}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
-          <Text style={s.sectionLabel}>Suggested for {child.name} ({child.ageRange})</Text>
-
-          <View style={{ gap: 10, marginTop: 8 }}>
+          <View style={{ gap: 10, marginTop: 4 }}>
             {[...suggested, ...extras].map(chore => {
               const checked = child.selectedChoreIds.includes(chore.id);
               return (
-                <TouchableOpacity key={chore.id} style={s.choreRow} onPress={() => toggleChore(chore.id)} activeOpacity={0.8}>
+                <TouchableOpacity
+                  key={chore.id}
+                  style={[s.choreRow, checked && s.choreRowChecked]}
+                  onPress={() => toggleChore(chore.id)}
+                  activeOpacity={0.8}
+                >
                   <View style={[s.checkbox, checked && s.checkboxChecked]}>
-                    {checked && <Text style={{ color: '#fff', fontSize: scale(12), fontFamily: 'Inter_700Bold' }}>✓</Text>}
-                  </View>
-                  <View style={[s.choreIconBox, { backgroundColor: chore.iconBg }]}>
-                    <Image source={chore.icon} style={{ width: 24, height: 24 }} resizeMode="contain" />
+                    {checked && <Text style={{ color: colors.white, fontSize: fontSize.sm, fontFamily: interFamily.bold }}>✓</Text>}
                   </View>
                   <Text style={s.choreName}>{chore.name}</Text>
-                  <Text style={s.choreXp}>+{chore.xp} XP</Text>
+                  <DifficultyBadge difficulty={chore.difficulty} />
                   <TouchableOpacity onPress={() => removeChore(chore.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.6}>
                     <Text style={s.choreRemove}>×</Text>
                   </TouchableOpacity>
@@ -482,7 +764,7 @@ function Step2AssignChores({
         </Modal>
 
         <View style={s.footer}>
-          <Button label="Continue →" onPress={onNext} />
+          <Button label="Continue" onPress={onNext} />
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
@@ -490,46 +772,88 @@ function Step2AssignChores({
   );
 }
 
-// ─── Step 3: Choose Reward ─────────────────────────────────────────────────
+// ─── Step 4: Set Payout ────────────────────────────────────────────────────
 
-function Step3ChooseReward({
-  rewardType, setRewardType, onNext, onBack,
+function Step4ChooseReward({
+  rewardType, setRewardType, onNext, onBack, children,
 }: {
   rewardType: string;
   setRewardType: (v: string) => void;
   onNext: () => void;
   onBack: () => void;
+  children: OnboardingChild[];
 }) {
+  // basePayIdx encodes the selected base pay step. We store it as the rewardType
+  // string so we don't need to add new state to the top-level.
+  // Format: "payout:N" where N is the step index. Fall back to index 1 ($0.50).
+  const parseIdx = () => {
+    const m = rewardType.match(/^payout:(\d+)$/);
+    return m ? Math.min(parseInt(m[1], 10), BASE_PAY_STEPS.length - 1) : 1;
+  };
+
+  const [baseIdx, setBaseIdx] = useState(parseIdx);
+  const amountPop = useRef(new Animated.Value(1)).current;
+
+  const handleChange = (idx: number) => {
+    setBaseIdx(idx);
+    setRewardType(`payout:${idx}`);
+    // Pop the amount display on each step change
+    Animated.sequence([
+      Animated.timing(amountPop, { toValue: 1.2, duration: 70, useNativeDriver: true }),
+      Animated.spring(amountPop, { toValue: 1, useNativeDriver: true, tension: 300, friction: 7 }),
+    ]).start();
+  };
+
+  const [liveDisplay, setLiveDisplay] = useState(BASE_PAY_STEPS[baseIdx]);
+  const [isDragging, setIsDragging] = useState(false);
+  const liveBase = liveDisplay; // raw during drag, snaps to 25¢ on release
+  const amounts = {
+    easy:   liveBase,
+    medium: parseFloat((liveBase * MEDIUM_MULTIPLIER).toFixed(2)),
+    hard:   parseFloat((liveBase * HARD_MULTIPLIER).toFixed(2)),
+  };
+
+  // Gather up to 3 example chores from across all kids (one per difficulty)
+  const exampleChores: { name: string; difficulty: 'Easy' | 'Medium' | 'Hard' }[] = [];
+  for (const diff of (['Easy', 'Medium', 'Hard'] as const)) {
+    for (const ageRange of Object.keys(CHORES_BY_AGE) as OnboardingChild['ageRange'][]) {
+      const c = CHORES_BY_AGE[ageRange].find(ch => ch.difficulty === diff);
+      if (c && !exampleChores.find(e => e.difficulty === diff)) {
+        exampleChores.push({ name: c.name, difficulty: diff });
+      }
+    }
+  }
+
   return (
     <CreamBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={3} total={4} title={'How do you\nreward them?'} subtitle="One setting for the whole household." />
+        <StepHeader step={4} total={5} title="Set your payout" subtitle="How much is a basic chore worth? Harder chores pay more automatically." />
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }} showsVerticalScrollIndicator={false}>
-          {REWARD_TYPES.map(r => {
-            const active = r.id === rewardType;
-            return (
-              <TouchableOpacity
-                key={r.id}
-                style={[s.rewardRow, active && s.rewardRowActive]}
-                onPress={() => setRewardType(r.id)}
-                activeOpacity={0.8}
-              >
-                <Text style={s.rewardIcon}>{r.icon}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.rewardLabel}>{r.label}</Text>
-                  <Text style={s.rewardDesc}>{r.desc}</Text>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }} showsVerticalScrollIndicator={false} scrollEnabled={!isDragging}>
+          {/* Slider card */}
+          <View style={s.payCard}>
+            <Text style={s.payCardLabel}>Base pay per chore</Text>
+            <Animated.Text style={[s.payAmount, { transform: [{ scale: amountPop }] }]}>{fmtDollar(liveBase)}</Animated.Text>
+            <PaySlider value={baseIdx} onChange={handleChange} onLiveChange={setLiveDisplay} onDragging={setIsDragging} />
+          </View>
+
+          {/* Example rows */}
+          <View style={{ gap: 10 }}>
+            {exampleChores.map(({ name, difficulty }) => {
+              const amt = difficulty === 'Easy' ? amounts.easy : difficulty === 'Medium' ? amounts.medium : amounts.hard;
+              return (
+                <View key={difficulty} style={s.exampleRow}>
+                  <Text style={s.exampleName}>{name}</Text>
+                  <DifficultyBadge difficulty={difficulty} />
+                  <Text style={s.exampleAmt}>{fmtDollar(amt)}</Text>
                 </View>
-                <View style={[s.radio, active && s.radioActive]}>
-                  {active && <View style={s.radioDot} />}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+              );
+            })}
+          </View>
         </ScrollView>
 
         <View style={s.footer}>
-          <Button label="Continue →" onPress={onNext} disabled={!rewardType} />
+          <Button label="Looks good!" onPress={onNext} />
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
@@ -537,9 +861,24 @@ function Step3ChooseReward({
   );
 }
 
-// ─── Step 4: All Set ───────────────────────────────────────────────────────
+// ─── Step 5: All Set ───────────────────────────────────────────────────────
 
-function Step4AllSet({
+const INFO_CHIPS = [
+  { emoji: '👧', text: 'Have your kids open Monstir and enter your **family code** to join.' },
+  { emoji: '✅', text: 'When they complete a chore, you\'ll get a **notification to approve** it.' },
+  { emoji: '⚔️', text: 'Every Sunday, your family fights a **boss battle** together.' },
+] as const;
+
+function renderBoldText(text: string, baseStyle: object, boldStyle: object) {
+  const parts = text.split(/\*\*(.*?)\*\*/g);
+  return parts.map((part, i) =>
+    i % 2 === 1
+      ? <Text key={i} style={boldStyle}>{part}</Text>
+      : <Text key={i} style={baseStyle}>{part}</Text>
+  );
+}
+
+function Step5AllSet({
   children, rewardType, onComplete, onBack, submitError,
 }: {
   children: OnboardingChild[];
@@ -548,47 +887,58 @@ function Step4AllSet({
   onBack: () => void;
   submitError?: string;
 }) {
-  const rewardLabel = REWARD_TYPES.find(r => r.id === rewardType)?.label ?? '';
+  const bounceAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounceAnim, { toValue: -16, duration: 400, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
+        Animated.timing(bounceAnim, { toValue: 0,   duration: 400, useNativeDriver: true, easing: Easing.in(Easing.quad) }),
+        Animated.delay(600),
+      ]),
+    ).start();
+  }, []);
 
   return (
     <CreamBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={4} total={4} title={"You're all set! 🎉"} subtitle="Each child will choose and name their Monstir when they first log in." />
+        <StepDots step={5} total={5} />
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
-          {children.map(child => (
-            <View key={child.id} style={s.summaryCard}>
-              <View style={{ width: 52, height: 52, borderRadius: 26, overflow: 'hidden', borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.08)' }}>
-                <Image source={AVATARS[child.avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-              </View>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={s.summaryName}>{child.name}</Text>
-                <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
-                  <Text style={s.summaryDetail}>✓ {child.selectedChoreIds.length} chores ready</Text>
-                  <Text style={s.summaryDetail}>🎁 {rewardLabel} rewards</Text>
-                </View>
-              </View>
-              <View style={s.monsterWaiting}>
-                <Text style={{ fontSize: scale(26) }}>?</Text>
-                <Text style={s.monsterWaitingLabel}>Monstir{'\n'}waiting...</Text>
-              </View>
-            </View>
-          ))}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ alignItems: 'center', paddingHorizontal: 24, paddingTop: 32, paddingBottom: 16, gap: 20 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Bouncing emoji */}
+          <Animated.Text style={[s.allSetEmoji, { transform: [{ translateY: bounceAnim }] }]}>
+            🎉
+          </Animated.Text>
 
-          <Image
-            source={require('../../assets/monstirs/robot monstir/robot_popout.png')}
-            style={{ width: 180, height: 180, alignSelf: 'center', marginTop: 16 }}
-            resizeMode="contain"
-          />
+          <Text style={[s.heading, { textAlign: 'center' }]}>You're all set!</Text>
+          <Text style={[s.subtitle, { textAlign: 'center', marginTop: -12 }]}>
+            Your monsters are waiting. Share your family code with your kids so they can join.
+          </Text>
+
+          {/* 3 info chips */}
+          <View style={{ width: '100%', gap: 12, marginTop: 8 }}>
+            {INFO_CHIPS.map((chip, i) => (
+              <View key={i} style={s.infoChip}>
+                <Text style={s.infoChipEmoji}>{chip.emoji}</Text>
+                <Text style={s.infoChipText}>
+                  {renderBoldText(chip.text, s.infoChipText, s.infoChipTextBold)}
+                </Text>
+              </View>
+            ))}
+          </View>
         </ScrollView>
 
         <View style={s.footer}>
           {!!submitError && (
-            <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontFamily: 'Inter_600SemiBold', marginBottom: 4 }}>
+            <Text style={{ fontSize: fontSize.md, color: SUBMIT_ERROR_COLOR, textAlign: 'center', fontFamily: interFamily.semibold, marginBottom: 4 }}>
               {submitError}
             </Text>
           )}
-          <Button label="Start Adventure! 🚀" onPress={onComplete} />
+          <Button label="Go to home" onPress={onComplete} />
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
@@ -599,21 +949,22 @@ function Step4AllSet({
 // ─── Main flow ─────────────────────────────────────────────────────────────
 
 export function ParentOnboarding({ onComplete }: Props) {
-  const [step, setStep]           = useState(0);
-  const [children, setChildren]   = useState<OnboardingChild[]>([makeChild(0)]);
-  const [rewardType, setRewardType] = useState('screen_time');
+  const [step, setStep]               = useState(0);
+  const [children, setChildren]       = useState<OnboardingChild[]>([makeChild(0)]);
+  const [rewardType, setRewardType]   = useState('payout:1');
+  const [parentRole, setParentRole]   = useState('');
   const [submitError, setSubmitError] = useState('');
 
   // ── Draft persistence ─────────────────────────────────────────────────────
-  // Restore draft on mount
   useEffect(() => {
     AsyncStorage.getItem(DRAFT_KEY)
       .then(raw => {
         if (!raw) return;
         try {
-          const draft = JSON.parse(raw) as { step: number; children: OnboardingChild[]; rewardType: string };
+          const draft = JSON.parse(raw) as { step: number; children: OnboardingChild[]; rewardType: string; parentRole?: string };
           if (draft.children?.length) setChildren(draft.children);
           if (draft.rewardType)       setRewardType(draft.rewardType);
+          if (draft.parentRole)       setParentRole(draft.parentRole);
           if (typeof draft.step === 'number') setStep(draft.step);
         } catch {
           // ignore corrupt drafts
@@ -622,10 +973,9 @@ export function ParentOnboarding({ onComplete }: Props) {
       .catch(() => undefined);
   }, []);
 
-  // Save draft whenever state changes
   useEffect(() => {
-    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ step, children, rewardType })).catch(() => undefined);
-  }, [step, children, rewardType]);
+    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ step, children, rewardType, parentRole })).catch(() => undefined);
+  }, [step, children, rewardType, parentRole]);
 
   const next = () => setStep(s => s + 1);
   const back = () => setStep(s => s - 1);
@@ -634,7 +984,7 @@ export function ParentOnboarding({ onComplete }: Props) {
     setSubmitError('');
     try {
       AsyncStorage.removeItem(DRAFT_KEY).catch(() => undefined);
-      onComplete({ children, rewardType });
+      onComplete({ children, rewardType, parentRole });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     }
@@ -642,9 +992,10 @@ export function ParentOnboarding({ onComplete }: Props) {
 
   switch (step) {
     case 0: return <Step1AddChildren children={children} setChildren={setChildren} onNext={next} />;
-    case 1: return <Step2AssignChores children={children} setChildren={setChildren} onNext={next} onBack={back} />;
-    case 2: return <Step3ChooseReward rewardType={rewardType} setRewardType={setRewardType} onNext={next} onBack={back} />;
-    case 3: return <Step4AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={back} submitError={submitError} />;
+    case 1: return <Step2ParentIdentity parentRole={parentRole} setParentRole={setParentRole} onNext={next} onBack={back} />;
+    case 2: return <Step3AssignChores children={children} setChildren={setChildren} onNext={next} onBack={back} />;
+    case 3: return <Step4ChooseReward rewardType={rewardType} setRewardType={setRewardType} onNext={next} onBack={back} children={children} />;
+    case 4: return <Step5AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={back} submitError={submitError} />;
     default: return null;
   }
 }
@@ -652,30 +1003,18 @@ export function ParentOnboarding({ onComplete }: Props) {
 // ─── Styles ────────────────────────────────────────────────────────────────
 
 const SOLID_SHADOW = Platform.select({
-  ios:     { shadowColor: '#1A1A1A', shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
+  ios:     { shadowColor: BLACK, shadowOffset: { width: 3, height: 4 }, shadowOpacity: 1, shadowRadius: 0 },
   android: { elevation: 4 },
   default: {},
 })!;
 
 const s = StyleSheet.create({
   // Header
-  stepCounter: {
-    fontSize: fontSize.sm,
-    fontFamily: 'Inter_700Bold',
-    color: PURPLE,
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
   heading: {
-    fontSize: scale(30),
-    fontFamily: 'Inter_900Black',
-    color: colors.black,
-    lineHeight: scale(36),
+    ...textStyles.screenTitle,
   },
   subtitle: {
-    fontSize: fontSize.base,
-    fontFamily: 'Inter_500Medium',
-    color: colors.muted,
+    ...textStyles.bodySecondary,
     marginTop: 4,
     marginBottom: 8,
   },
@@ -695,8 +1034,29 @@ const s = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.08)',
   },
   avatarInitial: {
-    fontFamily: 'Inter_900Black',
-    color: '#3A2080',
+    fontFamily: interFamily.black,
+    color: AVATAR_INITIAL_COLOR,
+  },
+
+  // Kid avatar in Step1
+  kidAvatarCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: BLACK,
+  },
+  kidAvatarInitial: {
+    fontSize: fontSize.xxxl,
+    fontFamily: interFamily.bold,
+    color: AVATAR_INITIAL_COLOR,
+  },
+  kidAgeLabel: {
+    fontSize: fontSize.sm,
+    fontFamily: interFamily.semibold,
+    color: colors.muted,
   },
 
   // Age range pill
@@ -712,38 +1072,38 @@ const s = StyleSheet.create({
     gap: 4,
     alignSelf: 'flex-start',
   },
-  selectPillLabel: { fontSize: fontSize.sm, fontFamily: 'Inter_600SemiBold', color: colors.black },
-  selectChevron:   { fontSize: scale(12), color: colors.muted },
+  selectPillLabel: { fontSize: fontSize.sm, fontFamily: interFamily.semibold, color: colors.black },
+  selectChevron:   { fontSize: fontSize.sm, color: colors.muted },
 
   // Bottom sheet
   sheetScrim:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet:        { backgroundColor: colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1.5, borderColor: colors.border, borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
-  sheetHandle:  { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
-  sheetHeading: { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
+  sheet:        { backgroundColor: colors.white, borderTopLeftRadius: radii.xxxl, borderTopRightRadius: radii.xxxl, borderWidth: 1.5, borderColor: colors.border, borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
+  sheetHandle:  { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.inputBorder, alignSelf: 'center', marginBottom: 8 },
+  sheetHeading: { fontSize: fontSize.sm, fontFamily: interFamily.bold, color: colors.muted, letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
   sheetRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16 },
-  sheetRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEE8' },
-  sheetRowLabel:  { flex: 1, fontSize: scale(17), fontFamily: 'Inter_600SemiBold', color: colors.black },
+  sheetRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
+  sheetRowLabel:  { flex: 1, fontSize: fontSize.xl, fontFamily: interFamily.semibold, color: colors.black },
   sheetRowLabelActive: { color: PURPLE },
-  sheetCheck:     { fontSize: scale(17), color: PURPLE, fontFamily: 'Inter_700Bold' },
+  sheetCheck:     { fontSize: fontSize.xl, color: PURPLE, fontFamily: interFamily.bold },
 
   // Add chore sheet
   addChoreBody:        { paddingHorizontal: 16, gap: 14 },
   iconPickerRow:       { gap: 10, paddingHorizontal: 2 },
-  iconPickerCell:      { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+  iconPickerCell:      { width: 52, height: 52, borderRadius: radii.lg, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   iconPickerCellActive: { borderColor: PURPLE },
-  addChoreInput:       { borderWidth: 1.5, borderColor: colors.border, borderRadius: radii.lg, paddingHorizontal: 16, paddingVertical: 14, fontSize: fontSize.lg, fontFamily: 'Inter_500Medium', color: colors.black, backgroundColor: colors.white },
+  addChoreInput:       { borderWidth: 1.5, borderColor: colors.border, borderRadius: radii.lg, paddingHorizontal: 16, paddingVertical: 14, fontSize: fontSize.lg, fontFamily: interFamily.medium, color: colors.black, backgroundColor: colors.white },
 
   // Avatar grid in sheet
   avatarGrid:         { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
-  avatarGridCell:     { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: 14, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: colors.bg },
+  avatarGridCell:     { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: radii.lg, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: colors.bg },
   avatarGridCellActive: { borderColor: PURPLE },
 
-  // Child card
+  // Child card (Step 1)
   childCard: {
     backgroundColor: colors.white,
-    borderRadius: radii.xl,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderRadius: radii.xxl,
+    borderWidth: 2,
+    borderColor: BLACK,
     padding: 16,
     gap: 12,
     ...SOLID_SHADOW,
@@ -751,83 +1111,115 @@ const s = StyleSheet.create({
   childCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
   },
   childNameInput: {
-    flex: 1,
     fontSize: fontSize.xl,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: interFamily.bold,
     color: colors.black,
     paddingVertical: 4,
   },
-  childCardRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  childCardField: {
-    flex: 1,
-    gap: 4,
-  },
-  fieldLabel: {
-    fontSize: fontSize.xs,
-    fontFamily: 'Inter_600SemiBold',
-    color: colors.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
 
-  // Add child button
+  // Add child/kid button
   addChildBtn: {
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: PURPLE,
     borderStyle: 'dashed',
-    borderRadius: radii.xl,
+    borderRadius: radii.xxl,
     paddingVertical: 16,
     alignItems: 'center',
   },
   addChildLabel: {
     fontSize: fontSize.base,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: interFamily.semibold,
     color: PURPLE,
   },
 
-  // Child tab
-  childTab: {
-    flexDirection: 'row',
+  // Parent card (Step 2)
+  parentCard: {
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    borderRadius: radii.xxl,
+    borderWidth: 2.5,
+    borderColor: BLACK,
+    paddingVertical: 28,
     gap: 8,
-    paddingHorizontal: 14,
+    ...SOLID_SHADOW,
+  },
+  parentCardActive: {
+    backgroundColor: LAVENDER,
+    borderColor: PURPLE,
+    ...Platform.select({
+      ios:     { shadowColor: PURPLE, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0 },
+      android: { elevation: 4 },
+      default: {},
+    }),
+  },
+  parentCardEmoji: {
+    fontSize: scale(40),
+  },
+  parentCardLabel: {
+    fontSize: fontSize.xl,
+    fontFamily: FREDOKA_BOLD,
+    color: BLACK,
+  },
+  parentCardLabelActive: {
+    color: PURPLE,
+  },
+  orPickLabel: {
+    fontSize: fontSize.sm,
+    fontFamily: interFamily.semibold,
+    color: colors.muted,
+    textAlign: 'center',
+    marginBottom: -6,
+  },
+
+  // Parent chips (Step 2)
+  parentChip: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: radii.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  parentChipActive: {
+    borderColor: PURPLE,
+    backgroundColor: LAVENDER,
+  },
+  parentChipLabel: {
+    fontSize: fontSize.base,
+    fontFamily: interFamily.semibold,
+    color: colors.black,
+  },
+  parentChipLabelActive: {
+    color: PURPLE,
+  },
+
+  // Chore tabs (Step 3)
+  choreTab: {
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: radii.full,
     borderWidth: 1.5,
     borderColor: colors.border,
     backgroundColor: colors.white,
   },
-  childTabActive: {
+  choreTabActive: {
     borderColor: PURPLE,
     backgroundColor: LAVENDER,
   },
-  childTabAvatar: {
-    width: 26, height: 26, borderRadius: 13, overflow: 'hidden',
-  },
-  childTabLabel: {
+  choreTabLabel: {
     fontSize: fontSize.base,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: interFamily.semibold,
     color: colors.muted,
   },
-  childTabLabelActive: {
+  choreTabLabelActive: {
     color: PURPLE,
   },
 
-  // Section label
-  sectionLabel: {
-    fontSize: fontSize.sm,
-    fontFamily: 'Inter_700Bold',
-    color: PURPLE,
-    marginBottom: 4,
-  },
-
-  // Chore row
+  // Chore row (Step 3)
   choreRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -836,7 +1228,11 @@ const s = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1.5,
     borderColor: colors.border,
-    padding: 12,
+    padding: 14,
+  },
+  choreRowChecked: {
+    borderColor: PURPLE,
+    backgroundColor: CHORE_ROW_CHECKED_BG,
   },
   checkbox: {
     width: 24,
@@ -851,23 +1247,11 @@ const s = StyleSheet.create({
     backgroundColor: PURPLE,
     borderColor: PURPLE,
   },
-  choreIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   choreName: {
     flex: 1,
     fontSize: fontSize.base,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: interFamily.semibold,
     color: colors.black,
-  },
-  choreXp: {
-    fontSize: fontSize.sm,
-    fontFamily: 'Inter_700Bold',
-    color: PURPLE,
   },
   choreRemove: {
     fontSize: scale(20),
@@ -876,72 +1260,143 @@ const s = StyleSheet.create({
     marginLeft: 4,
   },
 
-  // Reward row
-  rewardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    backgroundColor: colors.white,
-    borderRadius: radii.xl,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: 16,
+  // Difficulty badge
+  diffBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radii.full,
   },
-  rewardRowActive: {
-    borderColor: PURPLE,
-    backgroundColor: LAVENDER,
+  diffBadgeText: {
+    fontSize: fontSize.xs,
+    fontFamily: interFamily.bold,
+  },
+
+  // Pay card (Step 4)
+  payCard: {
+    backgroundColor: colors.white,
+    borderRadius: radii.xxl,
+    borderWidth: 2,
+    borderColor: BLACK,
+    padding: 20,
+    gap: 8,
     ...SOLID_SHADOW,
   },
-  rewardIcon:  { fontSize: scale(28) },
-  rewardLabel: { fontSize: fontSize.lg, fontFamily: 'Inter_700Bold', color: colors.black },
-  rewardDesc:  { fontSize: fontSize.sm, color: colors.muted, marginTop: 2 },
-  radio: {
+  payCardLabel: {
+    fontSize: fontSize.base,
+    fontFamily: interFamily.semibold,
+    color: colors.muted,
+    textAlign: 'center',
+  },
+  payAmount: {
+    fontSize: scale(42),
+    fontFamily: interFamily.semibold,
+    color: PURPLE,
+    textAlign: 'center',
+    lineHeight: scale(50),
+  },
+
+  // Slider
+  sliderTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.trackBg,
+    marginTop: 12,
+    marginBottom: 4,
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  sliderFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: PURPLE,
+  },
+  sliderThumb: {
+    position: 'absolute',
+    top: -8,
     width: 24,
     height: 24,
     borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: colors.white,
+    borderWidth: 2.5,
+    borderColor: PURPLE,
+    ...Platform.select({
+      ios:     { shadowColor: colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 2 },
+      android: { elevation: 3 },
+      default: {},
+    }),
   },
-  radioActive: { borderColor: PURPLE },
-  radioDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: PURPLE,
+  sliderLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  sliderLabelText: {
+    fontSize: fontSize.sm,
+    fontFamily: interFamily.semibold,
+    color: colors.muted,
+  },
+  sliderLabelAmt: {
+    fontSize: fontSize.lg,
+    fontFamily: interFamily.bold,
+    color: BLACK,
+    marginTop: 2,
   },
 
-  // Summary card
-  summaryCard: {
+  // Example row (Step 4)
+  exampleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
     backgroundColor: colors.white,
-    borderRadius: radii.xl,
+    borderRadius: radii.lg,
     borderWidth: 1.5,
     borderColor: colors.border,
+    padding: 14,
+  },
+  exampleName: {
+    flex: 1,
+    fontSize: fontSize.lg,
+    fontFamily: interFamily.semibold,
+    color: colors.black,
+  },
+  exampleAmt: {
+    fontSize: fontSize.lg,
+    fontFamily: interFamily.bold,
+    color: PURPLE,
+  },
+
+  // All set (Step 5)
+  allSetEmoji: {
+    fontSize: scale(64),
+    textAlign: 'center',
+  },
+  infoChip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+    backgroundColor: colors.white,
+    borderRadius: radii.xxl,
+    borderWidth: 2,
+    borderColor: BLACK,
     padding: 16,
     ...SOLID_SHADOW,
   },
-  summaryName:   { fontSize: fontSize.xl, fontFamily: 'Inter_900Black', color: colors.black },
-  summaryDetail: { fontSize: fontSize.sm, color: colors.muted, fontFamily: 'Inter_500Medium' },
-  monsterWaiting: {
-    width: 72,
-    height: 72,
-    borderRadius: radii.lg,
-    borderWidth: 2,
-    borderColor: PURPLE,
-    borderStyle: 'dashed',
-    backgroundColor: LAVENDER,
-    alignItems: 'center',
-    justifyContent: 'center',
+  infoChipEmoji: {
+    fontSize: scale(24),
+    lineHeight: scale(28),
   },
-  monsterWaitingLabel: {
-    fontSize: scale(9),
-    fontFamily: 'Inter_600SemiBold',
-    color: PURPLE,
-    textAlign: 'center',
-    lineHeight: scale(13),
+  infoChipText: {
+    flex: 1,
+    fontSize: fontSize.base,
+    fontFamily: interFamily.regular,
+    color: colors.black,
+    lineHeight: scale(21),
+  },
+  infoChipTextBold: {
+    fontFamily: interFamily.bold,
+    color: BLACK,
   },
 });
