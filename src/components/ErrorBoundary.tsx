@@ -1,6 +1,5 @@
 import React, { Component, type ReactNode, type ErrorInfo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import Bugsnag from '@bugsnag/react-native';
 import { colors, scale, radii, spacing } from '../design-system/tokens';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,12 +33,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (__DEV__) {
       console.error('[ErrorBoundary] Caught error:', error, info.componentStack);
     }
-    // Report to Bugsnag in production
-    if (!__DEV__) {
-      Bugsnag.notify(error, (event) => {
-        event.addMetadata('react', { componentStack: info.componentStack });
-      });
-    }
+
     this.props.onError?.(error, info);
   }
 
