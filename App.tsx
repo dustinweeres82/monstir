@@ -56,7 +56,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -8430,12 +8430,18 @@ function AppInner() {
     if (!chore) return;
     const choreStatus = getChoreStatus(chore, currentKidName);
     if (choreStatus !== 'active' && choreStatus !== 'rejected') return;
+    const kidDbId = getKidDbId(currentKidName);
+    const earnedCents = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
     if (requireApproval) {
       setManagedChores(prev => prev.map(c => c.id === id ? {
         ...c,
         childStatus: { ...c.childStatus, [currentKidName]: 'pending' as ChoreStatus },
         childRejectionNote: { ...c.childRejectionNote, [currentKidName]: '' },
       } : c));
+      // Save to Supabase
+      if (kidDbId) {
+        submitChoreCompletion({ choreId: id, kidId: kidDbId, requiresApproval: true }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
+      }
     } else {
       const newCompletions = (chore.weeklyCompletions ?? 0) + 1;
       setManagedChores(prev => prev.map(c => c.id === id ? {
@@ -8478,6 +8484,11 @@ function AppInner() {
           ],
         } : g);
       });
+      // Save to Supabase (auto-approved)
+      if (kidDbId) {
+        submitChoreCompletion({ choreId: id, kidId: kidDbId, requiresApproval: false, earnedCents }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
+        approveChoreCompletion({ choreId: id, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+      }
     }
   }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins]);
 
@@ -8619,6 +8630,12 @@ function AppInner() {
     }
     // Parent milestones
     checkMilestone('parent-first-approval');
+
+    // Save to Supabase
+    const kidDbId = getKidDbId(kidName);
+    if (kidDbId) {
+      approveChoreCompletion({ choreId: id, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+    }
   }, [managedChores, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins]);
 
   const rejectManagedChore = useCallback((id: string, note: string, kidName: string) => {
@@ -8627,6 +8644,11 @@ function AppInner() {
       childStatus: { ...c.childStatus, [kidName]: (note ? 'rejected' : 'active') as ChoreStatus },
       childRejectionNote: note ? { ...c.childRejectionNote, [kidName]: note } : c.childRejectionNote,
     } : c));
+    // Save to Supabase
+    const kidDbId = getKidDbId(kidName);
+    if (kidDbId) {
+      rejectChoreCompletion({ choreId: id, kidId: kidDbId, rejectionNote: note }).catch(e => console.warn('[DB] rejectChoreCompletion error:', e));
+    }
   }, [managedChores]);
 
   const confirmPayout = useCallback((kidName: string) => {
@@ -8790,6 +8812,9 @@ function AppInner() {
 
   // Avatar index for the currently active kid (0 = fallback)
   const currentKidAvatarIdx = setupChildren.find(c => c.name === currentKidName)?.avatarIdx ?? 0;
+
+  // DB ID for a kid by name (set after onboarding/load from Supabase)
+  const getKidDbId = (name: string): string | null => setupChildren.find(c => c.name === name)?.id ?? null;
 
   // Switch the active kid — shows KidWelcome the first time, otherwise goes straight to kid view
   const switchToKid = (name: string) => {

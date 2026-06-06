@@ -154,3 +154,115 @@ export async function saveOnboardingSetup(
 
   return { kidIdMap };
 }
+
+// ─── Chore Completions ─────────────────────────────────────────────────────
+
+function getWeekStart(): string {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun, 1=Mon...
+  const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diff);
+  return monday.toISOString().slice(0, 10);
+}
+
+export async function submitChoreCompletion(params: {
+  choreId: string;
+  kidId: string;
+  requiresApproval: boolean;
+  earnedCents?: number;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const weekStart = getWeekStart();
+  const now = new Date().toISOString();
+  const status = params.requiresApproval ? 'pending' : 'approved';
+
+  const { error } = await supabase.from('chore_completions').insert({
+    chore_id:     params.choreId,
+    kid_id:       params.kidId,
+    parent_id:    userId,
+    status,
+    week_start:   weekStart,
+    completed_at: now,
+    approved_at:  params.requiresApproval ? null : now,
+    earned_cents: params.requiresApproval ? null : params.earnedCents,
+  });
+
+  if (error) console.warn('[DB] submitChoreCompletion error:', error.message);
+}
+
+export async function approveChoreCompletion(params: {
+  choreId: string;
+  kidId: string;
+  earnedCents: number;
+  choreName: string;
+  kidName: string;
+  icon: string;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const weekStart = getWeekStart();
+  const now = new Date().toISOString();
+
+  // Update chore_completion to approved
+  await supabase
+    .from('chore_completions')
+    .update({ status: 'approved', approved_at: now, earned_cents: params.earnedCents })
+    .eq('chore_id', params.choreId)
+    .eq('kid_id', params.kidId)
+    .eq('week_start', weekStart)
+    .eq('status', 'pending');
+
+  // Write to chore_history audit log
+  await supabase.from('chore_history').insert({
+    parent_id:    userId,
+    kid_id:       params.kidId,
+    kid_name:     params.kidName,
+    chore_name:   params.choreName,
+    icon:         params.icon,
+    earned_cents: params.earnedCents,
+    approved_at:  now,
+  });
+}
+
+export async function rejectChoreCompletion(params: {
+  choreId: string;
+  kidId: string;
+  rejectionNote?: string;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const weekStart = getWeekStart();
+
+  await supabase
+    .from('chore_completions')
+    .update({ status: 'rejected', rejection_note: params.rejectionNote ?? null })
+    .eq('chore_id', params.choreId)
+    .eq('kid_id', params.kidId)
+    .eq('week_start', weekStart)
+    .eq('status', 'pending');
+}
+
+// ─── Kid XP / Coins ────────────────────────────────────────────────────────
+
+export async function updateKidStats(kidId: string, delta: {
+  xp?: number;
+  weekly_xp?: number;
+  coins?: number;
+  current_streak?: number;
+  last_chore_date?: string;
+}): Promise<void> {
+  if (!kidId) return;
+  // Use RPC increment to avoid race conditions
+  const updates: Record<string, unknown> = {};
+  if (delta.xp !== undefined)             updates.xp = delta.xp;
+  if (delta.weekly_xp !== undefined)      updates.weekly_xp = delta.weekly_xp;
+  if (delta.coins !== undefined)          updates.coins = delta.coins;
+  if (delta.current_streak !== undefined) updates.current_streak = delta.current_streak;
+  if (delta.last_chore_date !== undefined) updates.last_chore_date = delta.last_chore_date;
+  await supabase.from('kids').update(updates).eq('id', kidId);
+}
