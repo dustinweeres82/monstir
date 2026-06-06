@@ -7731,6 +7731,8 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
   const { scaleAnim: googleScale, pressIn: googlePI, pressOut: googlePO } = useScaleAnimation({ toScale: 0.96 });
 
   const handleLogin = async () => {
+    // Dev shortcut: empty fields → skip auth
+    if (!email.trim() && !password) { onSuccess(); return; }
     if (!email.trim() || !password) { setError('Please enter your email and password.'); return; }
     setError('');
     setLoading(true);
@@ -8786,12 +8788,47 @@ function AppInner() {
             setKidApprovalSettings(Object.fromEntries(names.map(k => [k, true])));
             if (names.length > 0) setCurrentKidName(names[0]);
             if (setup.parentRole) setParentRole(setup.parentRole);
+
+            // Build ManagedChore[] from selected chores — one row per unique choreId,
+            // with assignedTo listing every kid who selected it.
+            const choreKids: Record<string, { entry: import('./src/screens/ParentOnboarding').ChoreMapEntry; kidNames: string[] }> = {};
+            for (const child of setup.children) {
+              const name = child.name.trim();
+              if (!name) continue;
+              for (const choreId of child.selectedChoreIds) {
+                const entry = setup.choreMap[choreId];
+                if (!entry) continue;
+                if (!choreKids[choreId]) choreKids[choreId] = { entry, kidNames: [] };
+                if (!choreKids[choreId].kidNames.includes(name)) choreKids[choreId].kidNames.push(name);
+              }
+            }
+            const newChores: ManagedChore[] = Object.entries(choreKids).map(([choreId, { entry, kidNames }]) => ({
+              id: choreId,
+              name: entry.name,
+              description: '',
+              frequency: 'Every day',
+              icon: entry.icon,
+              bg: entry.iconBg,
+              status: 'active' as const,
+              difficulty: (entry.difficulty === 'Hard' ? 3 : entry.difficulty === 'Medium' ? 2 : 1) as 1 | 2 | 3,
+              assignedTo: kidNames,
+              weeklyCompletions: 0,
+            }));
+            setManagedChores(newChores.length > 0 ? newChores : DEFAULT_MANAGED_CHORES);
+            // Clear any stale chore data from a previous session
+            AsyncStorage.removeItem('monstir:managedChores').catch(() => {});
+            AsyncStorage.removeItem('monstir:choreHistory').catch(() => {});
+            AsyncStorage.removeItem('monstir:weekApprovalDays').catch(() => {});
+
             setViewMode('parent');
             setAppMode('app');
 
-            // Save to Supabase in background — app is usable immediately
+            // Save to Supabase in background
             try {
-              await saveOnboardingSetup(setup, {});
+              const choreIdToName = Object.fromEntries(
+                Object.entries(setup.choreMap).map(([id, e]) => [id, { name: e.name, icon: '', difficulty: e.difficulty }])
+              );
+              await saveOnboardingSetup(setup, choreIdToName);
             } catch (e) {
               console.warn('[DB] Failed to save onboarding setup:', e);
             }

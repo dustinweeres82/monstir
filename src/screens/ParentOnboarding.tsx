@@ -25,10 +25,18 @@ export interface OnboardingChild {
   selectedChoreIds: string[];
 }
 
+export interface ChoreMapEntry {
+  name: string;
+  icon: ReturnType<typeof require>;
+  iconBg: string;
+  difficulty: 'Easy' | 'Medium' | 'Hard';
+}
+
 export interface ParentSetupResult {
   children: OnboardingChild[];
   rewardType: string;
   parentRole: string;
+  choreMap: Record<string, ChoreMapEntry>;
 }
 
 interface Props {
@@ -984,7 +992,16 @@ export function ParentOnboarding({ onComplete }: Props) {
     setSubmitError('');
     try {
       AsyncStorage.removeItem(DRAFT_KEY).catch(() => undefined);
-      onComplete({ children, rewardType, parentRole });
+      // Build a flat lookup of every selected choreId → chore details
+      const choreMap: Record<string, ChoreMapEntry> = {};
+      for (const ageChores of Object.values(CHORES_BY_AGE)) {
+        for (const c of ageChores) {
+          if (!choreMap[c.id]) {
+            choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty };
+          }
+        }
+      }
+      onComplete({ children, rewardType, parentRole, choreMap });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     }
