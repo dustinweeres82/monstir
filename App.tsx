@@ -23,8 +23,8 @@ import { TrophyRoom } from './src/screens/TrophyRoom';
 import { saveBossCapture } from './src/storage/bossCaptures';
 import { getBossDisplay } from './src/data/bossLookup';
 import { getCollectibles, type CollectibleEntry } from './src/storage/collectibles';
-import { earnMilestone } from './src/storage/milestones';
-import { getMilestone, type MilestoneDef } from './src/data/milestones';
+import { earnMilestone, getEarnedMilestones, type EarnedMilestone } from './src/storage/milestones';
+import { getMilestone, MILESTONES, type MilestoneDef } from './src/data/milestones';
 import { MilestoneToast } from './src/components/MilestoneToast';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { ScreenHeading } from './src/design-system/components/ScreenHeading';
@@ -56,7 +56,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb, updateKidStats } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb, updateKidStats, saveMilestoneToDb } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -74,7 +74,7 @@ type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' |
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type ParentTab    = 'home' | 'chores' | 'money' | 'settings';
-type ParentScreen = 'parentHome' | 'chores' | 'choreLibrary' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings' | 'parentPayout' | 'moneyLedger';
+type ParentScreen = 'parentHome' | 'chores' | 'choreLibrary' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings' | 'parentPayout' | 'moneyLedger' | 'parentMilestones';
 type ViewMode     = 'kid' | 'parent';
 
 interface Chore   { id: ChoreId; name: string; icon: string | number; bg: string; xp: number; multiplier: number; }
@@ -950,7 +950,7 @@ function Header({ title, coins, showCoins = true }: { title: string; coins?: num
 
 const NAV_TABS: { id: Tab; label: string; icon: ReturnType<typeof require> }[] = [
   { id: 'home',   label: 'Monsters', icon: require('./assets/icons/Property 1=navHome.png')   },
-  { id: 'world',  label: 'World',    icon: require('./assets/icons/Property 1=navQuests.png') },
+  { id: 'world',  label: 'World',    icon: require('./assets/icons/navWorld.png') },
   { id: 'wallet', label: 'Wallet',   icon: require('./assets/icons/Property 1=navWallet.png') },
 ];
 
@@ -1013,10 +1013,13 @@ function ParentTabBar({ active, onNav }: { active: ParentTab; onNav: (t: ParentT
       <View style={s.tabBarInner}>
         {tabs.map(t => {
           const isActive = active === t;
-          const { src } = PARENT_NAV_ICONS[t];
+          const { src, label } = PARENT_NAV_ICONS[t];
           return (
-            <TouchableOpacity key={t} style={[{ flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, borderRadius: 32, paddingVertical: 6 }, isActive && s.tabIconWrapActive]} onPress={() => onNav(t)} activeOpacity={0.7}>
-              <Image source={src} style={s.tabIcon} resizeMode="contain" />
+            <TouchableOpacity key={t} style={s.tab} onPress={() => onNav(t)} activeOpacity={0.7}>
+              <View style={[s.tabIconWrap, isActive && s.tabIconWrapActive]}>
+                <Image source={src} style={s.tabIcon} resizeMode="contain" />
+                <Text style={[s.tabLabel, isActive && s.tabLabelActive]}>{label}</Text>
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -1591,7 +1594,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   return (
     <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
       {/* Texture overlay — mirrors CreamBg but with lime green */}
-      <Image source={require('./assets/appBG.png')} style={{ position: 'absolute', width: '100%', aspectRatio: 1024 / 1536, bottom: 0 }} resizeMode="contain" />
+      <Image source={require('./assets/appBG.png')} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }} resizeMode="cover" />
       {/* Header */}
       <View style={s.homeHeader}>
         <View style={s.homeHeaderLeft}>
@@ -1711,37 +1714,11 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
           </View>
         </View>
 
-        {/* ── Your Stats ── */}
-        <Text style={w.sectionHeader}>Your stats this week</Text>
-
-        {/* Readiness */}
-        <View style={w.sectionCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
-            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>YOUR READINESS</Text>
-          </View>
-          <View style={w.readinessRow}>
-            <Text style={w.readinessLabel}>Chores completed</Text>
-            <Text style={w.readinessValue}>{doneCount}/{totalWeeklyTarget}</Text>
-          </View>
-          <ProgressBar value={chorePct} max={100} fillColor="#6B35F0" style={{ marginVertical: 8 }} />
-          <View style={w.readinessRow}>
-            <Text style={w.readinessLabel}>Battle power</Text>
-            <Text style={[w.readinessValue, { fontSize: scale(28), color: '#6B35F0' }]}>{power}</Text>
-          </View>
-          <View style={[w.forecastPill, { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }]}>
-            <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#E0D4FF', alignItems: 'center', justifyContent: 'center' }}>
-              <Image source={require('./assets/icons/icon-graph.png')} style={{ width: 22, height: 22 }} resizeMode="contain" />
-            </View>
-            <Text style={[w.forecastText, { flex: 1, textAlign: 'left' }]}>{powerForecastMsg}</Text>
-          </View>
-        </View>
-
-        {/* What's at Stake */}
+        {/* What you'll get */}
         <View style={w.sectionCard}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
-            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>WHAT'S AT STAKE</Text>
+            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>WHAT YOU'LL GET</Text>
           </View>
           <View style={w.stakeRow}>
             <View style={w.stakeItem}>
@@ -1768,6 +1745,32 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
               </View>
             </View>
           )}
+        </View>
+
+        {/* ── Your Stats ── */}
+        <Text style={w.sectionHeader}>Your stats this week</Text>
+
+        {/* Readiness */}
+        <View style={w.sectionCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
+            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>YOUR READINESS</Text>
+          </View>
+          <View style={w.readinessRow}>
+            <Text style={w.readinessLabel}>Chores completed</Text>
+            <Text style={w.readinessValue}>{doneCount}/{totalWeeklyTarget}</Text>
+          </View>
+          <ProgressBar value={chorePct} max={100} fillColor="#6B35F0" style={{ marginVertical: 8 }} />
+          <View style={w.readinessRow}>
+            <Text style={w.readinessLabel}>Battle power</Text>
+            <Text style={[w.readinessValue, { fontSize: scale(28), color: '#6B35F0' }]}>{power}</Text>
+          </View>
+          <View style={[w.forecastPill, { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }]}>
+            <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#E0D4FF', alignItems: 'center', justifyContent: 'center' }}>
+              <Image source={require('./assets/icons/icon-graph.png')} style={{ width: 22, height: 22 }} resizeMode="contain" />
+            </View>
+            <Text style={[w.forecastText, { flex: 1, textAlign: 'left' }]}>{powerForecastMsg}</Text>
+          </View>
         </View>
 
         {/* 7-day dot row */}
@@ -4945,7 +4948,7 @@ function MoneyScreen({
     }
   }, [kidCoins, kidProfiles]);
 
-  // ── Activity filter ───────────────────────────────────────────────────────
+    // ── Activity filter ───────────────────────────────────────────────────────
   const [activityFilter, setActivityFilter] = useState<string>('all');
 
   const filteredHistory = activityFilter === 'all'
@@ -5115,13 +5118,11 @@ function MoneyScreen({
         {/* ── Kids Row ────────────────────────────────────────────────────── */}
         <View style={{ marginTop: 4 }}>
           {/* Section header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 }}>
             <Text style={{
-              fontFamily: 'Inter_900Black',
-              fontSize: scale(15),
+              fontFamily: 'Inter_800ExtraBold',
+              fontSize: scale(22),
               color: '#1A1A1A',
-              letterSpacing: 1.2,
-              textTransform: 'uppercase',
             }}>Kids</Text>
             <TouchableOpacity activeOpacity={0.7}>
               <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#6B35F0' }}>View All ›</Text>
@@ -5198,12 +5199,10 @@ function MoneyScreen({
         <View style={{ marginTop: 20, paddingHorizontal: 16 }}>
           {/* Section header */}
           <Text style={{
-            fontFamily: 'Inter_900Black',
-            fontSize: scale(15),
+            fontFamily: 'Inter_800ExtraBold',
+            fontSize: scale(22),
             color: '#1A1A1A',
-            letterSpacing: 1.2,
-            textTransform: 'uppercase',
-            marginBottom: 10,
+            marginBottom: 12,
           }}>Activity</Text>
 
           {/* Filter chips */}
@@ -5377,6 +5376,12 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   weekApprovalDays: string[];
 }) {
   const [reviewingChore, setReviewingChore] = useState<{ chore: ManagedChore; kidName: string } | null>(null);
+  const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
+  useEffect(() => { getEarnedMilestones().then(setEarnedMilestones); }, []);
+  const parentMilestoneDefs = MILESTONES.filter(m => m.audience === 'parent');
+  const earnedIds = new Set(earnedMilestones.map(m => m.id));
+  // Newest earned = show yellow dot
+  const newestEarnedId = earnedMilestones[0]?.id ?? null;
 
   // ── Burndown calculations ─────────────────────────────────────────────────
   const today      = new Date();
@@ -5584,7 +5589,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
 
         {/* ── 2. Family Status ─────────────────────────────────────────────── */}
         <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-          <Text style={{ fontSize: scale(13), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
+          <Text style={{ fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginBottom: 12 }}>
             Family Status
           </Text>
           <View style={{ gap: 10 }}>
@@ -5643,9 +5648,54 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
           </View>
         </View>
 
+        {/* ── 2b. Parent Milestones strip ──────────────────────────────────── */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, ...SOLID_SHADOW }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Your milestones</Text>
+              <TouchableOpacity onPress={() => onNav('parentMilestones')} activeOpacity={0.7}>
+                <Text style={{ fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: PURPLE }}>See all ›</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+              {[
+                // Earned first, sorted most-recently-earned → oldest
+                ...parentMilestoneDefs
+                  .filter(m => earnedIds.has(m.id))
+                  .sort((a, b) => {
+                    const aAt = earnedMilestones.find(e => e.id === a.id)?.earnedAt ?? '';
+                    const bAt = earnedMilestones.find(e => e.id === b.id)?.earnedAt ?? '';
+                    return bAt.localeCompare(aAt);
+                  }),
+                // Then locked ones
+                ...parentMilestoneDefs.filter(m => !earnedIds.has(m.id)),
+              ].slice(0, 10).map(m => {
+                const earned = earnedIds.has(m.id);
+                const isNewest = m.id === newestEarnedId;
+                return (
+                  <View key={m.id} style={{ alignItems: 'center', gap: 4, width: 56 }}>
+                    <View style={{
+                      width: 52, height: 52, borderRadius: 26,
+                      backgroundColor: earned ? PURPLE : '#ECEAE4',
+                      alignItems: 'center', justifyContent: 'center',
+                      borderWidth: 2, borderColor: earned ? '#1A1A1A' : '#D0CEC8',
+                    }}>
+                      <Text style={{ fontSize: scale(22), opacity: earned ? 1 : 0.35 }}>{m.icon}</Text>
+                      {isNewest && (
+                        <View style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A' }} />
+                      )}
+                    </View>
+                    <Text numberOfLines={2} style={{ fontSize: scale(10), fontFamily: 'Inter_600SemiBold', color: earned ? '#1A1A1A' : '#ABABAB', textAlign: 'center', lineHeight: 13 }}>{m.name}</Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+
         {/* ── 3. Needs Attention ───────────────────────────────────────────── */}
         <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-          <Text style={{ fontSize: scale(13), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
+          <Text style={{ fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginBottom: 12 }}>
             Needs Attention
           </Text>
 
@@ -6638,13 +6688,13 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidA
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
         {/* Family */}
-        <Text style={ps.sectionLabel}>FAMILY</Text>
+        <Text style={ps.sectionLabel}>Family</Text>
         <View style={ps.group}>
           <SettingsRow iconBg="#6B35F0" iconEmoji="👨‍👩‍👧" title="Kids" subtitle={kidProfiles.map(k => k.name).join(', ') || 'No kids yet'} badge={kidProfiles.length || undefined} onPress={() => setSub('kids')} />
         </View>
 
         {/* Chores */}
-        <Text style={ps.sectionLabel}>CHORES</Text>
+        <Text style={ps.sectionLabel}>Chores</Text>
         <View style={ps.group}>
           <SettingsRow iconBg="#F59E0B" iconEmoji="💰" title="Pay rates & economy" subtitle="Currency, base rate, earning cap" onPress={() => onNav('payRates')} />
           <View style={ps.divider} />
@@ -6654,13 +6704,19 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidA
         </View>
 
         {/* Battles */}
-        <Text style={ps.sectionLabel}>BATTLES</Text>
+        <Text style={ps.sectionLabel}>Battles</Text>
         <View style={ps.group}>
           <SettingsRow iconBg="#EF4444" iconEmoji="⚔️" title="Battle & bonuses" subtitle="Boss rewards, monetary bonuses" onPress={() => setSub('battle')} />
         </View>
 
+        {/* Progress */}
+        <Text style={ps.sectionLabel}>Progress</Text>
+        <View style={ps.group}>
+          <SettingsRow iconBg="#6B35F0" iconEmoji="🏅" title="Your milestones" subtitle="Badges you've earned as a parent" onPress={() => onNav('parentMilestones')} />
+        </View>
+
         {/* Account */}
-        <Text style={ps.sectionLabel}>ACCOUNT</Text>
+        <Text style={ps.sectionLabel}>Account</Text>
         <View style={ps.group}>
           <SettingsRow iconBg="#8B5CF6" iconEmoji="👤" title="Account" subtitle="Email, password, notifications" onPress={() => setSub('account')} />
           <View style={ps.divider} />
@@ -6668,6 +6724,86 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidA
           <View style={ps.divider} />
           <SettingsRow iconBg="#94A3B8" iconEmoji="ℹ️" title="About Monstir" />
         </View>
+      </ScrollView>
+    </CreamBg>
+  );
+}
+
+// ─── Parent Milestones Screen ─────────────────────────────────────────────────
+
+function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
+  const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
+  useEffect(() => { getEarnedMilestones().then(setEarnedMilestones); }, []);
+  const earnedMap = new Map(earnedMilestones.map(m => [m.id, m.earnedAt]));
+  const parentDefs = MILESTONES.filter(m => m.audience === 'parent');
+  const earned = parentDefs.filter(m => earnedMap.has(m.id));
+  const locked = parentDefs.filter(m => !earnedMap.has(m.id));
+
+  const renderRow = (m: MilestoneDef, earnedAt?: string) => (
+    <View key={m.id} style={{
+      flexDirection: 'row', alignItems: 'center', gap: 14,
+      backgroundColor: earnedAt ? '#FFFFFF' : '#F3F1EC',
+      borderRadius: 14, borderWidth: 2,
+      borderColor: earnedAt ? '#1A1A1A' : '#D0CEC8',
+      padding: 14, marginBottom: 10,
+      opacity: earnedAt ? 1 : 0.5,
+    }}>
+      <View style={{
+        width: 52, height: 52, borderRadius: 26,
+        backgroundColor: earnedAt ? PURPLE : '#ECEAE4',
+        alignItems: 'center', justifyContent: 'center',
+        borderWidth: 2, borderColor: earnedAt ? '#1A1A1A' : '#D0CEC8',
+        flexShrink: 0,
+      }}>
+        <Text style={{ fontSize: scale(24) }}>{m.icon}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(15), color: '#1A1A1A', marginBottom: 2 }}>{m.name}</Text>
+        <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(13), color: '#ABABAB', lineHeight: 17 }}>{m.tagline}</Text>
+        {earnedAt && (
+          <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(11), color: '#3B6D11', marginTop: 4 }}>
+            Earned {new Date(earnedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </Text>
+        )}
+      </View>
+      {earnedAt && (
+        <View style={{ backgroundColor: '#E8FBB4', borderRadius: 8, borderWidth: 1.5, borderColor: '#3B6D11', paddingHorizontal: 8, paddingVertical: 4 }}>
+          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(11), color: '#3B6D11' }}>✓</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  return (
+    <CreamBg>
+      <View style={p.screenHeader}>
+        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+          <Text style={p.backBtnText}>←</Text>
+        </TouchableOpacity>
+        <Text style={p.screenTitle}>Your Milestones</Text>
+        <View style={p.backBtn} />
+      </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60 }}>
+        {/* Summary */}
+        <View style={{ backgroundColor: PURPLE, borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, marginBottom: 24, alignItems: 'center' }}>
+          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(40), color: '#FFFFFF' }}>{earned.length}</Text>
+          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(14), color: 'rgba(255,255,255,0.75)', letterSpacing: 0.5 }}>of {parentDefs.length} milestones earned</Text>
+        </View>
+
+        {earned.length > 0 && (
+          <>
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>EARNED</Text>
+            {earned.map(m => renderRow(m, earnedMap.get(m.id)))}
+            <View style={{ height: 20 }} />
+          </>
+        )}
+
+        {locked.length > 0 && (
+          <>
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>LOCKED</Text>
+            {locked.map(m => renderRow(m))}
+          </>
+        )}
       </ScrollView>
     </CreamBg>
   );
@@ -6798,7 +6934,7 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBa
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-          <Text style={ps.sectionLabel}>PROFILES</Text>
+          <Text style={ps.sectionLabel}>Profiles</Text>
           <View style={ps.group}>
             {kidProfiles.map((k, i) => (
               <View key={i}>
@@ -6897,7 +7033,7 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
         </View>
 
         {/* Monetary bonus toggle */}
-        <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>MONETARY BONUS</Text>
+        <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>Monetary bonus</Text>
         <View style={p.sectionCard}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <View style={{ flex: 1 }}>
@@ -6940,7 +7076,7 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
         </View>
 
         {/* Cosmetic rewards */}
-        <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>ALWAYS UNLOCKED ON WIN</Text>
+        <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>Always unlocked on win</Text>
         <View style={[p.sectionCard, { backgroundColor: '#F3EEFF' }]}>
           <Text style={[ps.rowTitle, { color: '#6B35F0', marginBottom: 10 }]}>✨  Cosmetic rewards</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -8569,14 +8705,20 @@ function AppInner() {
   }, [debugDayOffset, lastWeekReset]);
 
   // ── Milestone helper ─────────────────────────────────────────────────────────
-  const checkMilestone = useCallback(async (id: string) => {
+  const checkMilestone = useCallback(async (id: string, kidName?: string) => {
     const wasNew = await earnMilestone(id);
     if (!wasNew) return;
     const def = getMilestone(id);
     if (!def) return;
     setToastMid(id);
     setActiveToast(def);
-  }, []);
+    // Save to Supabase
+    const name = kidName ?? currentKidName;
+    const kidDbId = setupChildren.find(c => c.name === name)?.id;
+    if (kidDbId) {
+      saveMilestoneToDb({ kidId: kidDbId, milestoneId: id }).catch(e => console.warn('[DB] saveMilestoneToDb error:', e));
+    }
+  }, [currentKidName, setupChildren]);
 
   const approveManagedChore = useCallback((id: string, kidName: string) => {
     const chore = managedChores.find(c => c.id === id);
@@ -9168,7 +9310,8 @@ function AppInner() {
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
             {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
-            {parentScreen === 'settings'  && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
+            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
+            {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={() => navParent('settings')} /></ErrorBoundary>}
             {parentScreen !== 'parentPayout' && (
               <ParentTabBar active={parentTab} onNav={navParentTab} />
             )}
@@ -9969,7 +10112,7 @@ const p = StyleSheet.create({
 // ─── Settings Styles (ps prefix) ─────────────────────────────────────────────
 
 const ps = StyleSheet.create({
-  sectionLabel:   { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
+  sectionLabel:   { fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   group:          { marginHorizontal: 16, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   divider:        { height: 1, backgroundColor: '#F0EEE8', marginLeft: 68 },
   row:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16, gap: 12 },

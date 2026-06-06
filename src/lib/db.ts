@@ -356,6 +356,38 @@ export async function loadPayouts() {
   return data ?? [];
 }
 
+// ─── Milestones ────────────────────────────────────────────────────────────
+
+export async function saveMilestoneToDb(params: {
+  kidId: string;
+  milestoneId: string;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  // The unique index on (kid_id, milestone_id) prevents duplicates
+  const { error } = await supabase.from('milestones').insert({
+    kid_id:       params.kidId,
+    parent_id:    userId,
+    milestone_id: params.milestoneId,
+    earned_at:    new Date().toISOString(),
+  });
+
+  // Ignore unique constraint violations (already earned)
+  if (error && !error.message.includes('unique')) {
+    console.warn('[DB] saveMilestoneToDb error:', error.message);
+  }
+}
+
+export async function loadMilestones(kidId: string) {
+  const { data } = await supabase
+    .from('milestones')
+    .select('*')
+    .eq('kid_id', kidId)
+    .order('earned_at', { ascending: false });
+  return data ?? [];
+}
+
 // ─── Kid XP / Coins ────────────────────────────────────────────────────────
 
 export async function updateKidStats(kidId: string, delta: {
