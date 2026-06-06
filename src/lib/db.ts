@@ -324,6 +324,38 @@ export async function loadCollectibles(kidId: string) {
   return data ?? [];
 }
 
+// ─── Payouts ───────────────────────────────────────────────────────────────
+
+export async function savePayoutToDb(params: {
+  kidId: string;
+  kidName: string;
+  amountCents: number;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const { error } = await supabase.from('payouts').insert({
+    parent_id:    userId,
+    kid_id:       params.kidId,
+    kid_name:     params.kidName,
+    amount_cents: params.amountCents,
+    paid_at:      new Date().toISOString(),
+  });
+
+  if (error) console.warn('[DB] savePayoutToDb error:', error.message);
+}
+
+export async function loadPayouts() {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+  const { data } = await supabase
+    .from('payouts')
+    .select('*')
+    .eq('parent_id', userId)
+    .order('paid_at', { ascending: false });
+  return data ?? [];
+}
+
 // ─── Kid XP / Coins ────────────────────────────────────────────────────────
 
 export async function updateKidStats(kidId: string, delta: {

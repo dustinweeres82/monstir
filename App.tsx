@@ -56,7 +56,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -8657,6 +8657,12 @@ function AppInner() {
     setPayoutLog(prev => [{ kidName, amount, paidAt: new Date().toISOString() }, ...prev]);
     setKidPayoutPending(prev => ({ ...prev, [kidName]: true }));
     showParentToast(`Paid ${kidName} ${fmtCoins(amount)} ✓`);
+
+    // Save to Supabase
+    const kidDbId = getKidDbId(kidName);
+    if (kidDbId) {
+      savePayoutToDb({ kidId: kidDbId, kidName, amountCents: amount }).catch(e => console.warn('[DB] savePayoutToDb error:', e));
+    }
   }, [kidCoins, resetKidCoins]);
 
   const openPayout = useCallback(() => {
