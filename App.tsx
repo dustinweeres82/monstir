@@ -58,7 +58,7 @@ import {
 import { shadows, scale, fontSize } from './src/design-system/tokens';
 import { useScaleAnimation } from './src/design-system/hooks';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { useAudioMode } from 'expo-audio';
+import { setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
@@ -8293,7 +8293,7 @@ function AppInner() {
   }, [viewMode, kidPayoutPending, currentKidName]);
 
   // Allow audio to play through iOS silent switch
-  useAudioMode({ playsInSilentModeIOS: true });
+  useEffect(() => { setAudioModeAsync({ playsInSilentModeIOS: true }); }, []);
   const openDebug = () => { if (__DEV__) setDebugOpen(true); };
 
   const completeChore = useCallback((c: Chore) => {
