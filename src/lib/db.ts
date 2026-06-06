@@ -247,6 +247,52 @@ export async function rejectChoreCompletion(params: {
     .eq('status', 'pending');
 }
 
+// ─── Boss Captures ─────────────────────────────────────────────────────────
+
+export async function saveBossCaptureToDb(params: {
+  kidId: string;
+  bossName: string;
+  xpEarned: number;
+  coinsEarned: number;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const weekStart = getWeekStart();
+
+  // Prevent duplicate for same boss/kid/week
+  const { data: existing } = await supabase
+    .from('boss_captures')
+    .select('id')
+    .eq('kid_id', params.kidId)
+    .eq('boss_name', params.bossName)
+    .eq('week_start', weekStart)
+    .maybeSingle();
+
+  if (existing) return; // already saved
+
+  const { error } = await supabase.from('boss_captures').insert({
+    kid_id:       params.kidId,
+    parent_id:    userId,
+    boss_name:    params.bossName,
+    xp_earned:    params.xpEarned,
+    coins_earned: params.coinsEarned,
+    week_start:   weekStart,
+    captured_at:  new Date().toISOString(),
+  });
+
+  if (error) console.warn('[DB] saveBossCaptureToDb error:', error.message);
+}
+
+export async function loadBossCaptures(kidId: string) {
+  const { data } = await supabase
+    .from('boss_captures')
+    .select('*')
+    .eq('kid_id', kidId)
+    .order('captured_at', { ascending: false });
+  return data ?? [];
+}
+
 // ─── Kid XP / Coins ────────────────────────────────────────────────────────
 
 export async function updateKidStats(kidId: string, delta: {

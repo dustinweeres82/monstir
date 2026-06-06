@@ -56,7 +56,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -8729,6 +8729,12 @@ function AppInner() {
         coinsEarned,
         xpEarned:      xpSnapshot,
       }).catch(() => {});
+
+      // Also save to Supabase
+      const kidDbId = getKidDbId(currentKidName);
+      if (kidDbId) {
+        saveBossCaptureToDb({ kidId: kidDbId, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned }).catch(e => console.warn('[DB] saveBossCaptureToDb error:', e));
+      }
 
       setScreen('chestReveal');
     } else {
