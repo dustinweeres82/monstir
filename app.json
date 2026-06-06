@@ -34,7 +34,8 @@
     "plugins": [
       "expo-font",
       "expo-audio",
-      "expo-video"
+      "expo-video",
+      "expo-asset"
     ],
     "extra": {
       "eas": {
