@@ -57,7 +57,8 @@ import {
 } from '@expo-google-fonts/inter';
 import { shadows, scale, fontSize } from './src/design-system/tokens';
 import { useScaleAnimation } from './src/design-system/hooks';
-import { Video, ResizeMode, Audio } from 'expo-av'; // TODO MON-76: migrate to expo-video + expo-audio before SDK 54
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { useAudioMode } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
@@ -1556,6 +1557,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   const chorePct    = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
   const winOdds     = calcWinOdds(weeklyXp, monster.needed);
   const power       = weeklyXp;
+  const bossVideoPlayer = useVideoPlayer(boss.video, p => { p.loop = true; p.muted = true; p.play(); });
   const countdownMs = useCountdown();
   const days         = daysUntilSunday(debugDayOffset);
   const simDayOfWeek = new Date(Date.now() + debugDayOffset * 86_400_000).getDay(); // 0=Sun,6=Sat
@@ -1623,7 +1625,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
         <View>
           <View style={w.bossCard}>
             {/* Video always plays as the card background */}
-            <Video source={boss.video} style={StyleSheet.absoluteFill} resizeMode={ResizeMode.COVER} shouldPlay isLooping isMuted />
+            <VideoView player={bossVideoPlayer} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
             {/* Gradient for readability */}
             <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.65)']} style={StyleSheet.absoluteFill} />
             {/* Boss image fades in as reveal level increases */}
@@ -1865,6 +1867,7 @@ function BossIntroScreen({ monsterIdx, onReady, bossOverride }: {
   const sizeFromWidth = Math.floor(availableW / (longestWord.length * 0.75));
   const bossNameSize  = Math.min(scale(68), sizeFromWidth);
 
+  const introVideoPlayer = useVideoPlayer(boss.video, p => { p.loop = true; p.play(); });
   const screenOpacity = useRef(new Animated.Value(0)).current;
   const nameY         = useRef(new Animated.Value(-28)).current;
   const nameOpacity   = useRef(new Animated.Value(0)).current;
@@ -1927,13 +1930,7 @@ function BossIntroScreen({ monsterIdx, onReady, bossOverride }: {
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
       {/* Full-bleed video */}
-      <Video
-        source={boss.video}
-        style={StyleSheet.absoluteFill}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay
-        isLooping
-      />
+      <VideoView player={introVideoPlayer} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
 
       {/* Gradient: strong at top and bottom, clear in the middle */}
       <LinearGradient
@@ -8296,9 +8293,7 @@ function AppInner() {
   }, [viewMode, kidPayoutPending, currentKidName]);
 
   // Allow audio to play through iOS silent switch
-  useEffect(() => {
-    Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-  }, []);
+  useAudioMode({ playsInSilentModeIOS: true });
   const openDebug = () => { if (__DEV__) setDebugOpen(true); };
 
   const completeChore = useCallback((c: Chore) => {
