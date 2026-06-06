@@ -739,7 +739,7 @@ const sw = StyleSheet.create({
 // ─── Avatar picker + age range ────────────────────────────────────────────────
 
 const AGE_RANGES = ['Ages 4–6', 'Ages 7–9', 'Ages 10–12', 'Ages 13+'];
-const AVATAR_INDICES = [0, 1, 2, 3, 4, 5, 6, 7] as const;
+const AVATAR_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const;
 
 function useSheet(initialY = 300) {
   const [open, setOpen] = useState(false);
@@ -781,18 +781,18 @@ function AvatarPickerSheet({ selected, onSelect }: {
           <Animated.View style={[av.sheet, { transform: [{ translateY: sheetY }] }]} onStartShouldSetResponder={() => true}>
             <View style={av.handle} />
             <Text style={av.title}>Choose avatar</Text>
-            <View style={av.grid}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={av.avatarRow}>
               {AVATAR_INDICES.map(idx => (
                 <TouchableOpacity
                   key={idx}
-                  style={[av.cell, selected === idx && av.cellActive]}
+                  style={[av.avatarCell, selected === idx && av.cellActive]}
                   onPress={() => { onSelect(idx); closeSheet(); }}
                   activeOpacity={0.8}
                 >
                   <Image source={getAvatarImage(idx)} style={av.cellImg} resizeMode="cover" />
                 </TouchableOpacity>
               ))}
-            </View>
+            </ScrollView>
             <View style={{ height: Platform.OS === 'ios' ? 28 : 12 }} />
           </Animated.View>
         </Animated.View>
@@ -914,7 +914,10 @@ const av = StyleSheet.create({
   sheet:      { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
   title:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
-  // Avatar grid
+  // Avatar horizontal row
+  avatarRow:  { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 16, gap: 10 },
+  avatarCell: { width: 90, height: 90, borderRadius: 16, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
+  // Legacy grid (used by chore icon picker)
   grid:       { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
   cell:       { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: 14, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
   cellActive: { borderColor: PURPLE },
@@ -5034,46 +5037,58 @@ function MoneyScreen({
               {/* Paid */}
               <View style={{
                 flex: 1,
-                backgroundColor: 'rgba(255,255,255,0.15)',
-                borderRadius: 10,
-                padding: 10,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: '#1A1A1A',
+                paddingVertical: 12,
+                paddingHorizontal: 8,
                 alignItems: 'center',
+                gap: 4,
               }}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#86EF86' }}>
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(20), color: '#86EF86' }}>
                   {fmtCoins(totalPaidCents)}
                 </Text>
-                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 2 }}>
-                  ✓ Paid
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(11), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase' }}>
+                  ✓ PAID
                 </Text>
               </View>
               {/* Unpaid */}
               <View style={{
                 flex: 1,
-                backgroundColor: 'rgba(255,255,255,0.15)',
-                borderRadius: 10,
-                padding: 10,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: '#1A1A1A',
+                paddingVertical: 12,
+                paddingHorizontal: 8,
                 alignItems: 'center',
+                gap: 4,
               }}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#FCD34D' }}>
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(20), color: '#FCD34D' }}>
                   {fmtCoins(totalUnpaidCents)}
                 </Text>
-                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 2 }}>
-                  ⏳ Unpaid
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(11), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase' }}>
+                  ⏳ UNPAID
                 </Text>
               </View>
               {/* Kids count */}
               <View style={{
                 flex: 1,
-                backgroundColor: 'rgba(255,255,255,0.15)',
-                borderRadius: 10,
-                padding: 10,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: '#1A1A1A',
+                paddingVertical: 12,
+                paddingHorizontal: 8,
                 alignItems: 'center',
+                gap: 4,
               }}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#FFFFFF' }}>
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(20), color: '#1A1A1A' }}>
                   {numKids}
                 </Text>
-                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 2 }}>
-                  👧 Kids
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(11), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase' }}>
+                  👧 KIDS
                 </Text>
               </View>
             </View>
@@ -5803,16 +5818,6 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
                   <Text style={{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{chore.weeklyCompletions} / {frequencyToWeeklyTarget(chore.frequency)}</Text>
                 </View>
               </View>
-
-              {/* Photo proof section */}
-              <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>Photo Proof</Text>
-              <View style={{ backgroundColor: '#ECECEC', borderRadius: 14, height: 130, alignItems: 'center', justifyContent: 'center', marginBottom: 6, gap: 8 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: '#C0BEB8', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: scale(20) }}>📷</Text>
-                </View>
-                <Text style={{ fontSize: scale(13), color: '#ABABAB', fontFamily: 'Inter_600SemiBold' }}>No photo submitted</Text>
-              </View>
-              <Text style={{ fontSize: scale(12), color: '#ABABAB', marginBottom: 16 }}>Submitted today at 8:47 am</Text>
 
               {/* Note field */}
               <View style={{ marginBottom: 16 }}>
@@ -6728,10 +6733,10 @@ function AddEditKidModal({
                 {/* Avatar picker */}
                 <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>CHOOSE AVATAR</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 4, marginBottom: 20 }}>
-                  {[0,1,2,3,4,5,6,7].map(i => (
+                  {AVATAR_INDICES.map(i => (
                     <TouchableOpacity key={i} onPress={() => setAvatarIdx(i)} activeOpacity={0.8}
-                      style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: KID_AVATAR_COLORS[i % KID_AVATAR_COLORS.length], alignItems: 'center', justifyContent: 'center', borderWidth: avatarIdx === i ? 3 : 2, borderColor: avatarIdx === i ? '#6B35F0' : '#E0DDD6' }}>
-                      <Image source={getAvatarImage(i)} style={{ width: 50, height: 50, borderRadius: 25 }} resizeMode="cover" />
+                      style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: KID_AVATAR_COLORS[i % KID_AVATAR_COLORS.length], alignItems: 'center', justifyContent: 'center', borderWidth: avatarIdx === i ? 3 : 2, borderColor: avatarIdx === i ? '#6B35F0' : '#E0DDD6' }}>
+                      <Image source={getAvatarImage(i)} style={{ width: 64, height: 64, borderRadius: 32 }} resizeMode="cover" />
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -7643,10 +7648,23 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
 
 // ─── Landing Screen ───────────────────────────────────────────────────────────
 
-function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCreateAccount: () => void }) {
+function LandingScreen({ onLogin, onCreateAccount }: { onLogin: (email?: string, password?: string) => void; onCreateAccount: () => void }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw]     = useState(false);
+  const [error, setError]       = useState('');
+  const [loading, setLoading]   = useState(false);
+
+  const handleLogin = async () => {
+    if (!email.trim() && !password) { onLogin(); return; }
+    if (!email.trim() || !password) { setError('Please enter your email and password.'); return; }
+    setError('');
+    setLoading(true);
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+    setLoading(false);
+    if (authError) { setError(authError.message); return; }
+    onLogin(email, password);
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
@@ -7696,15 +7714,18 @@ function LandingScreen({ onLogin, onCreateAccount }: { onLogin: () => void; onCr
             placeholderTextColor="#C0BEB8"
             secureTextEntry={!showPw}
             returnKeyType="done"
-            onSubmitEditing={onLogin}
+            onSubmitEditing={handleLogin}
           />
           <TouchableOpacity onPress={() => setShowPw(v => !v)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Text style={{ fontSize: scale(16), color: '#ABABAB' }}>{showPw ? '🙈' : '👁'}</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Error */}
+        {!!error && <Text style={{ color: '#ef4444', fontSize: scale(13), textAlign: 'center', fontFamily: 'Inter_400Regular', marginBottom: 8 }}>{error}</Text>}
+
         {/* Log in */}
-        <Button label="Log in" onPress={onLogin} style={{ marginBottom: 14 }} />
+        <Button label={loading ? 'Logging in…' : 'Log in'} onPress={handleLogin} style={{ marginBottom: 14 }} />
 
         {/* Create an account */}
         <Button label="Create an account" onPress={onCreateAccount} variant="secondary" />
@@ -8231,19 +8252,89 @@ function AppInner() {
     amount: number; completedCount: number; battleWon: boolean | null; battleBonus: number | null;
   } | null>(null);
 
-  // ── Persist managedChores + choreHistory across app restarts ────────────────
+  // ── Load data on startup — Supabase if logged in, AsyncStorage fallback ──
   useEffect(() => {
-    // Load on mount
-    Promise.all([
-      AsyncStorage.getItem('monstir:managedChores'),
-      AsyncStorage.getItem('monstir:choreHistory'),
-      AsyncStorage.getItem('monstir:weekApprovalDays'),
-    ]).then(([choreSaved, historySaved, approvalDaysSaved]) => {
-      if (choreSaved)       { try { setManagedChores(JSON.parse(choreSaved)); } catch {} }
-      if (historySaved)     { try { setChoreHistory(JSON.parse(historySaved)); } catch {} }
-      if (approvalDaysSaved){ try { setWeekApprovalDays(JSON.parse(approvalDaysSaved)); } catch {} }
-      setAppDataLoaded(true);
-    }).catch(() => setAppDataLoaded(true));
+    async function bootstrap() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          // Not logged in — load AsyncStorage and let splash → onboarding flow handle navigation
+          const [choreSaved, historySaved, approvalDaysSaved] = await Promise.all([
+            AsyncStorage.getItem('monstir:managedChores'),
+            AsyncStorage.getItem('monstir:choreHistory'),
+            AsyncStorage.getItem('monstir:weekApprovalDays'),
+          ]);
+          if (choreSaved)        { try { setManagedChores(JSON.parse(choreSaved)); } catch {} }
+          if (historySaved)      { try { setChoreHistory(JSON.parse(historySaved)); } catch {} }
+          if (approvalDaysSaved) { try { setWeekApprovalDays(JSON.parse(approvalDaysSaved)); } catch {} }
+          setAppDataLoaded(true);
+          return;
+        }
+
+        // Logged in — load from Supabase
+        setSessionUser({ name: session.user.user_metadata?.name ?? '', email: session.user.email ?? '' });
+
+        const [profile, dbKids, dbChores] = await Promise.all([
+          loadProfile(),
+          loadKids(),
+          loadChores(),
+        ]);
+
+        if (profile) {
+          if (profile.parent_role)                             setParentRole(profile.parent_role);
+          if (profile.base_rate)                               setBaseRate((profile.base_rate / 100).toFixed(2));
+          if (profile.battle_coin_bonus_enabled !== undefined) setBattleCoinBonusEnabled(profile.battle_coin_bonus_enabled);
+          if (profile.battle_coin_bonus_multiplier)            setBattleCoinBonusMultiplier(Number(profile.battle_coin_bonus_multiplier));
+          if (profile.weekly_cap_enabled !== undefined)        setWeeklyCap(profile.weekly_cap_enabled);
+        }
+
+        if (dbKids && dbKids.length > 0) {
+          const names = dbKids.map((k: { name: string }) => k.name);
+          setKids(names);
+          setCurrentKidName(names[0]);
+          setSetupChildren(dbKids.map((k: { id: string; name: string; avatar_color: string; avatar_idx: number; age_range: string }) => ({
+            id:               k.id,
+            name:             k.name,
+            avatarColor:      k.avatar_color ?? '#EAE4FF',
+            avatarIdx:        k.avatar_idx ?? 0,
+            ageRange:         (k.age_range ?? '7-9') as '5-6' | '7-9' | '10-12' | '13+',
+            difficulty:       'Easy' as const,
+            selectedChoreIds: [],
+          })));
+          setKidApprovalSettings(Object.fromEntries(names.map((n: string) => [n, profile?.require_approval ?? false])));
+        }
+
+        if (dbChores && dbChores.length > 0) {
+          const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[] }) => ({
+            id:         c.id,
+            name:       c.name,
+            icon:       c.icon ?? '✅',
+            iconBg:     '#EAE4FF',
+            frequency:  (c.frequency ?? 'daily') as ManagedChore['frequency'],
+            difficulty: c.difficulty === 3 ? 'Hard' : c.difficulty === 2 ? 'Medium' : 'Easy',
+            assignedTo: c.assigned_to ?? [],
+            status:     'active' as const,
+          }));
+          setManagedChores(mapped);
+        }
+
+        setAppDataLoaded(true);
+        setAppMode('app');
+      } catch (e) {
+        console.warn('[DB] Startup load failed, falling back to AsyncStorage:', e);
+        const [choreSaved, historySaved, approvalDaysSaved] = await Promise.all([
+          AsyncStorage.getItem('monstir:managedChores'),
+          AsyncStorage.getItem('monstir:choreHistory'),
+          AsyncStorage.getItem('monstir:weekApprovalDays'),
+        ]);
+        if (choreSaved)        { try { setManagedChores(JSON.parse(choreSaved)); } catch {} }
+        if (historySaved)      { try { setChoreHistory(JSON.parse(historySaved)); } catch {} }
+        if (approvalDaysSaved) { try { setWeekApprovalDays(JSON.parse(approvalDaysSaved)); } catch {} }
+        setAppDataLoaded(true);
+      }
+    }
+    bootstrap();
   }, []);
 
   useEffect(() => {

@@ -86,6 +86,19 @@ const AVATARS = [
   require('../../assets/icons/kidProfile6.png'),
   require('../../assets/icons/kidProfile7.png'),
   require('../../assets/icons/kidProfile8.png'),
+  require('../../assets/icons/kidProfile9.png'),
+  require('../../assets/icons/kidProfile10.png'),
+  require('../../assets/icons/kidProfile11.png'),
+  require('../../assets/icons/kidProfile12.png'),
+  require('../../assets/icons/kidProfile13.png'),
+  require('../../assets/icons/kidProfile14.png'),
+  require('../../assets/icons/kidProfile15.png'),
+  require('../../assets/icons/kidProfile16.png'),
+  require('../../assets/icons/kidProfile17.png'),
+  require('../../assets/icons/kidProfile18.png'),
+  require('../../assets/icons/kidProfile19.png'),
+  require('../../assets/icons/kidProfile20.png'),
+  require('../../assets/icons/kidProfile21.png'),
 ];
 
 interface SuggestedChore {
