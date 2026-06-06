@@ -55,6 +55,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from './src/lib/supabase';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -7724,7 +7725,19 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError]               = useState('');
+  const [loading, setLoading]           = useState(false);
   const { scaleAnim: googleScale, pressIn: googlePI, pressOut: googlePO } = useScaleAnimation({ toScale: 0.96 });
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password) { setError('Please enter your email and password.'); return; }
+    setError('');
+    setLoading(true);
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+    setLoading(false);
+    if (authError) { setError(authError.message); return; }
+    onSuccess();
+  };
 
   return (
     <CreamBg>
@@ -7780,8 +7793,11 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
             <Text style={{ fontSize: scale(14), color: '#6B35F0', fontFamily: 'Inter_600SemiBold' }}>Forgot password?</Text>
           </TouchableOpacity>
 
+          {/* Error message */}
+          {!!error && <Text style={{ color: '#ef4444', fontSize: scale(13), textAlign: 'center', fontFamily: 'Inter_400Regular' }}>{error}</Text>}
+
           {/* Log in button */}
-          <Button label="Log in" onPress={onSuccess} />
+          <Button label={loading ? 'Logging in…' : 'Log in'} onPress={handleLogin} />
 
           {/* Divider */}
           <View style={auth.dividerRow}>
@@ -7830,7 +7846,9 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
   const [showConfirm, setShowConfirm]         = useState(false);
   const [error, setError]                     = useState('');
 
-  const handleSubmit = () => {
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
     if (!name.trim() || !email.trim() || !password || !confirmPassword) {
       setError('Please fill in all fields.'); return;
     }
@@ -7841,6 +7859,14 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
       setError('Password must be at least 6 characters.'); return;
     }
     setError('');
+    setLoading(true);
+    const { error: authError } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+      options: { data: { name: name.trim() } },
+    });
+    setLoading(false);
+    if (authError) { setError(authError.message); return; }
     onSuccess({ name: name.trim(), email: email.trim().toLowerCase() });
   };
 
@@ -7965,7 +7991,7 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
             )}
 
             {/* Create account button */}
-            <Button label="Create an account" onPress={handleSubmit} style={{ marginTop: 8 }} />
+            <Button label={loading ? 'Creating account…' : 'Create an account'} onPress={handleSubmit} style={{ marginTop: 8 }} />
 
             {/* Log in link */}
             <Button label="Log in" onPress={onLogin} variant="secondary" />
