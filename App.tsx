@@ -1,11 +1,3 @@
-// ─── Bugsnag ──────────────────────────────────────────────────────────────────
-// TODO: Set EXPO_PUBLIC_BUGSNAG_API_KEY in your .env file and rotate the old key
-import Bugsnag from '@bugsnag/react-native';
-
-if (!__DEV__) {
-  const bugsnagKey = process.env.EXPO_PUBLIC_BUGSNAG_API_KEY;
-  if (bugsnagKey) Bugsnag.start(bugsnagKey);
-}
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
