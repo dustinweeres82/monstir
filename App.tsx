@@ -56,6 +56,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -8778,7 +8779,7 @@ function AppInner() {
       <SafeAreaProvider>
         <StatusBar barStyle="dark-content" />
         <ParentOnboarding
-          onComplete={(setup) => {
+          onComplete={async (setup) => {
             const names = setup.children.map(c => c.name.trim()).filter(Boolean);
             setSetupChildren(setup.children);
             setKids(names);
@@ -8787,6 +8788,13 @@ function AppInner() {
             if (setup.parentRole) setParentRole(setup.parentRole);
             setViewMode('parent');
             setAppMode('app');
+
+            // Save to Supabase in background — app is usable immediately
+            try {
+              await saveOnboardingSetup(setup, {});
+            } catch (e) {
+              console.warn('[DB] Failed to save onboarding setup:', e);
+            }
           }}
         />
       </SafeAreaProvider>
