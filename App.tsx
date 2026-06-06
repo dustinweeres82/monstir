@@ -56,7 +56,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb, updateKidStats } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -8303,6 +8303,28 @@ function AppInner() {
             selectedChoreIds: [],
           })));
           setKidApprovalSettings(Object.fromEntries(names.map((n: string) => [n, profile?.require_approval ?? false])));
+
+          // Hydrate XP, coins, streak from DB
+          const kidMonsterInit: Record<string, KidMonsterState> = {};
+          const kidCoinsInit: Record<string, number> = {};
+          for (const k of dbKids as { name: string; xp: number; weekly_xp: number; coins: number; current_streak: number; last_chore_date: string | null; monster_idx: number; monster_id: string | null; monster_name: string | null; kid_onboarding_done: boolean }[]) {
+            kidMonsterInit[k.name] = {
+              ...DEFAULT_KID_MONSTER_STATE,
+              xp:                  k.xp ?? 0,
+              weeklyXp:            k.weekly_xp ?? 0,
+              currentStreak:       k.current_streak ?? 0,
+              lastChoreDate:       k.last_chore_date ?? '',
+              monsterIdx:          (k.monster_idx ?? 0) as MonsterIdx,
+              selectedMonsterId:   (k.monster_id ?? 'slime') as MonsterId,
+              selectedMonsterName: k.monster_name ?? '',
+            };
+            kidCoinsInit[k.name] = k.coins ?? 0;
+            if (k.kid_onboarding_done) {
+              setKidOnboardingDone(prev => ({ ...prev, [k.name]: true }));
+            }
+          }
+          setKidMonsterState(kidMonsterInit);
+          setKidCoins(kidCoinsInit);
         }
 
         if (dbChores && dbChores.length > 0) {
@@ -8351,6 +8373,28 @@ function AppInner() {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:weekApprovalDays', JSON.stringify(weekApprovalDays)).catch(() => {});
   }, [weekApprovalDays, appDataLoaded]);
+
+  // ── Sync kid XP / coins to Supabase (debounced) ──────────────────────────
+  const kidSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    if (kidSyncTimer.current) clearTimeout(kidSyncTimer.current);
+    kidSyncTimer.current = setTimeout(() => {
+      for (const name of Object.keys(kidMonsterState)) {
+        const kidDbId = setupChildren.find(c => c.name === name)?.id;
+        if (!kidDbId) continue;
+        const km = kidMonsterState[name];
+        updateKidStats(kidDbId, {
+          xp:              km.xp,
+          weekly_xp:       km.weeklyXp,
+          coins:           kidCoins[name] ?? 0,
+          current_streak:  km.currentStreak,
+          last_chore_date: km.lastChoreDate || undefined,
+        }).catch(e => console.warn('[DB] updateKidStats error:', e));
+      }
+    }, 2000); // 2s debounce — avoids hammering DB on rapid updates
+    return () => { if (kidSyncTimer.current) clearTimeout(kidSyncTimer.current); };
+  }, [kidMonsterState, kidCoins, appDataLoaded]);
 
   // ── Daily chore reset ─────────────────────────────────────────────────────
   const [lastResetDate,  setLastResetDate]  = useState<string>('');
