@@ -9053,6 +9053,7 @@ function AppInner() {
                   collectible={chestCollectible}
                   weekLabel={new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   onDone={() => { setTrophyOrigin('home'); setScreen('trophyRoom'); }}
+                  kidDbId={getKidDbId(currentKidName)}
                 />
               </ErrorBoundary>
             )}

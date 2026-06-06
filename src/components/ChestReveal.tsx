@@ -8,6 +8,7 @@ import { ScreenHeading } from '../design-system/components/ScreenHeading';
 import { Button } from '../design-system/components/Button';
 import { textStyles, scale } from '../design-system/tokens';
 import { saveCollectible, type CollectibleEntry } from '../storage/collectibles';
+import { saveCollectibleToDb } from '../lib/db';
 
 const { width: W, height: H } = Dimensions.get('window');
 
@@ -30,6 +31,7 @@ export interface ChestRevealProps {
   collectible: CollectibleItem;
   weekLabel: string;
   onDone: () => void;
+  kidDbId?: string | null;     // Supabase kid ID for DB persistence
 }
 
 // ─── Chest frame sequences ────────────────────────────────────────────────────
@@ -134,7 +136,7 @@ function TierMeter({ activeTier }: { activeTier: ChestTier }) {
 
 // ─── ChestReveal component ────────────────────────────────────────────────────
 
-export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone }: ChestRevealProps) {
+export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidDbId }: ChestRevealProps) {
   const [phase, setPhase]       = useState<Phase>('preOpen');
   const [tapCount, setTapCount] = useState(0);
   const [saved, setSaved]       = useState(false);
@@ -227,7 +229,12 @@ export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDon
       weekLabel,
     };
     saveCollectible(entry).catch(() => {});
-  }, [phase, saved, collectible, weekLabel]);
+
+    // Also save to Supabase
+    if (kidDbId) {
+      saveCollectibleToDb({ kidId: kidDbId, collectibleId: collectible.key, rarity: collectible.rarity }).catch(e => console.warn('[DB] saveCollectibleToDb error:', e));
+    }
+  }, [phase, saved, collectible, weekLabel, kidDbId]);
 
   const tierColor = TIER_COLORS[tier];
   const insets = useSafeAreaInsets();

@@ -293,6 +293,37 @@ export async function loadBossCaptures(kidId: string) {
   return data ?? [];
 }
 
+// ─── Collectibles ──────────────────────────────────────────────────────────
+
+export async function saveCollectibleToDb(params: {
+  kidId: string;
+  collectibleId: string;
+  rarity: string;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const { error } = await supabase.from('collectibles').insert({
+    kid_id:         params.kidId,
+    parent_id:      userId,
+    collectible_id: params.collectibleId,
+    rarity:         params.rarity.toLowerCase(),
+    week_start:     getWeekStart(),
+    earned_at:      new Date().toISOString(),
+  });
+
+  if (error) console.warn('[DB] saveCollectibleToDb error:', error.message);
+}
+
+export async function loadCollectibles(kidId: string) {
+  const { data } = await supabase
+    .from('collectibles')
+    .select('*')
+    .eq('kid_id', kidId)
+    .order('earned_at', { ascending: false });
+  return data ?? [];
+}
+
 // ─── Kid XP / Coins ────────────────────────────────────────────────────────
 
 export async function updateKidStats(kidId: string, delta: {
