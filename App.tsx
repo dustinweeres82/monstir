@@ -1,10 +1,10 @@
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  StatusBar, Platform, Image, TextInput, Switch, Modal, KeyboardAvoidingView,
+  StatusBar, Platform, Image, TextInput, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
-  LogBox,
+  LogBox, type LayoutChangeEvent,
 } from 'react-native';
 
 // Suppress spurious dev-mode RN warning — not a real bug in this codebase
@@ -17,13 +17,20 @@ import { pickForTier, COLLECTIBLES } from './src/data/collectibles';
 import { MascotBanner } from './src/components/MascotBanner';
 import { CreamBg } from './src/components/CreamBg';
 import { KidProfileCreation, getAvatarImage } from './src/screens/KidProfileCreation';
+
+const PARENT_AVATAR_DAD = require('./assets/icons/Avatars/parentProfileDad.png');
+const PARENT_AVATAR_MOM = require('./assets/icons/Avatars/parentProfileMom.png');
+function getParentAvatar(role: string) {
+  return role === 'dad' ? PARENT_AVATAR_DAD : PARENT_AVATAR_MOM;
+}
 import { ParentOnboarding } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
 import { TrophyRoom } from './src/screens/TrophyRoom';
-import { saveBossCapture } from './src/storage/bossCaptures';
+import { ParentMilestoneDetail } from './src/screens/ParentMilestoneDetail';
+import { saveBossCapture, mergeBossCaptures, type BossCaptureEntry } from './src/storage/bossCaptures';
 import { getBossDisplay } from './src/data/bossLookup';
-import { getCollectibles, type CollectibleEntry } from './src/storage/collectibles';
-import { earnMilestone, getEarnedMilestones, type EarnedMilestone } from './src/storage/milestones';
+import { getCollectibles, mergeCollectibles, type CollectibleEntry } from './src/storage/collectibles';
+import { earnMilestone, getEarnedMilestones, mergeMilestones, PARENT_OWNER, type EarnedMilestone } from './src/storage/milestones';
 import { getMilestone, MILESTONES, type MilestoneDef } from './src/data/milestones';
 import { MilestoneToast } from './src/components/MilestoneToast';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -31,6 +38,8 @@ import { ScreenHeading } from './src/design-system/components/ScreenHeading';
 import { Card } from './src/design-system/components/Card';
 import { Button } from './src/design-system/components/Button';
 import { ListCell } from './src/design-system/components/ListCell';
+import { Toggle } from './src/design-system/components/Toggle';
+import { FormField } from './src/design-system/components/FormField';
 import { ProgressBar } from './src/design-system/components/ProgressBar';
 import { PressableShadow } from './src/design-system/components/PressableShadow';
 import { ScreenState } from './src/design-system/components/ScreenState';
@@ -47,7 +56,7 @@ import {
   Inter_800ExtraBold,
   Inter_900Black,
 } from '@expo-google-fonts/inter';
-import { shadows, scale, fontSize } from './src/design-system/tokens';
+import { shadows, scale, fontSize, interFamily, nunitoFamily } from './src/design-system/tokens';
 import { useScaleAnimation } from './src/design-system/hooks';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { setAudioModeAsync } from 'expo-audio';
@@ -56,7 +65,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb, updateKidStats, saveMilestoneToDb } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb, updateKidStats, updateKid, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -69,7 +78,7 @@ TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ChoreId = 'dishes' | 'trash' | 'bed' | 'vacuum' | 'laundry' | 'sweep' | 'wipe' | 'mop' | 'plants' | 'recycling' | 'windows' | 'bathroom';
-type Tab     = 'home' | 'world' | 'wallet';
+type Tab     = 'home' | 'world' | 'wallet' | 'trophies';
 type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' | 'kidPayout' | 'chestReveal' | 'trophyRoom';
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -114,33 +123,178 @@ interface ManagedChore {
   childStatus?: Record<string, ChoreStatus>;
   /** Per-child rejection notes */
   childRejectionNote?: Record<string, string>;
+  /**
+   * How a multi-kid ("Everyone") chore is completed:
+   *  - 'shared'      → one household task; first kid to finish earns it (global weeklyCompletions)
+   *  - 'independent' → each kid has their own copy and own count (childCompletions)
+   * Undefined / single-assignee chores behave as 'shared'.
+   */
+  completionMode?: 'shared' | 'independent';
+  /** Per-child weekly completion counts — used when completionMode === 'independent'. */
+  childCompletions?: Record<string, number>;
+  /** ISO timestamp of when each child submitted (set to pending). Used to show submission time in review sheet. */
+  childSubmittedAt?: Record<string, string>;
+  /**
+   * Backlog of submissions awaiting approval that carried over from PREVIOUS days,
+   * keyed by child name. This does NOT include today's live `pending` status — the
+   * total awaiting approval for a kid is this backlog plus (today pending ? 1 : 0).
+   * Lets daily chores accumulate in the approval queue instead of blocking the kid.
+   */
+  childPendingCount?: Record<string, number>;
+  /**
+   * FIFO of cent amounts snapshotted at submit time, one entry per pending unit
+   * (oldest first — backlog before today's live pending), keyed by child name.
+   * Approval/rejection consumes the head. This pins pay to the rate/difficulty
+   * in effect when the kid DID the work, so later edits can't change what's owed.
+   * Entries can be missing for submissions made before this field existed —
+   * consumers fall back to recomputing from the current rate.
+   */
+  childPendingCents?: Record<string, number[]>;
+  /**
+   * FIFO of XP amounts snapshotted at submit time, parallel to childPendingCents.
+   * The streak bonus is applied here (first chore of a new day only — same rule
+   * as the auto-approve path), so approval timing and batch size can't change
+   * how much bonus XP a submission earns.
+   */
+  childPendingXp?: Record<string, number[]>;
 }
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
 const CHORES: Chore[] = [
-  { id: 'dishes',   name: 'Wash the dishes',          icon: require('./assets/icons/chore=iconDishes.png'),  bg: '#FFF9E6', xp: 10, multiplier: 1.0 },
-  { id: 'trash',    name: 'Take out the trash',        icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 10, multiplier: 1.0 },
-  { id: 'bed',      name: 'Make your bed',              icon: require('./assets/icons/chore=iconBed.png'),     bg: '#EAF3FB', xp: 10, multiplier: 0.5 },
-  { id: 'vacuum',   name: 'Vacuum the living room',    icon: require('./assets/icons/chore=iconVacuum.png'),  bg: '#F5F0FB', xp: 25, multiplier: 2.0 },
-  { id: 'laundry',  name: 'Put away laundry',           icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF0F0', xp: 10, multiplier: 1.0 },
-  { id: 'sweep',    name: 'Sweep the kitchen',          icon: require('./assets/icons/chore=iconBroom.png'),   bg: '#FFF9E6', xp: 10, multiplier: 1.0 },
-  { id: 'wipe',     name: 'Wipe down counters',         icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
-  { id: 'mop',      name: 'Mop the floor',              icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', xp: 25, multiplier: 1.5 },
+  { id: 'dishes',   name: 'Wash the dishes',          icon: require('./assets/icons/chores/chore=iconDishes.png'),  bg: '#FFF9E6', xp: 10, multiplier: 1.0 },
+  { id: 'trash',    name: 'Take out the trash',        icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 10, multiplier: 1.0 },
+  { id: 'bed',      name: 'Make your bed',              icon: require('./assets/icons/chores/chore=iconBed.png'),     bg: '#EAF3FB', xp: 10, multiplier: 0.5 },
+  { id: 'vacuum',   name: 'Vacuum the living room',    icon: require('./assets/icons/chores/chore=iconVacuum.png'),  bg: '#F5F0FB', xp: 25, multiplier: 2.0 },
+  { id: 'laundry',  name: 'Put away laundry',           icon: require('./assets/icons/chores/chore=iconLaundry.png'), bg: '#FFF0F0', xp: 10, multiplier: 1.0 },
+  { id: 'sweep',    name: 'Sweep the kitchen',          icon: require('./assets/icons/chores/chore=iconBroom.png'),   bg: '#FFF9E6', xp: 10, multiplier: 1.0 },
+  { id: 'wipe',     name: 'Wipe down counters',         icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
+  { id: 'mop',      name: 'Mop the floor',              icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#EAF3FB', xp: 25, multiplier: 1.5 },
   { id: 'plants',   name: 'Water the plants',           icon: '🪴',                                            bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
-  { id: 'recycling',name: 'Sort the recycling',         icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
+  { id: 'recycling',name: 'Sort the recycling',         icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#F0F7F0', xp: 10, multiplier: 0.5 },
   { id: 'windows',  name: 'Clean the windows',          icon: '🪟',                                            bg: '#EAF3FB', xp: 10, multiplier: 1.0 },
-  { id: 'bathroom', name: 'Clean the bathroom',         icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#F5F0FB', xp: 25, multiplier: 2.5 },
+  { id: 'bathroom', name: 'Clean the bathroom',         icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#F5F0FB', xp: 25, multiplier: 2.5 },
 ];
 
+/** Base-rate dollars (free-text settings input) → cents. NaN-safe: an empty or
+ *  malformed rate reads as 0 instead of poisoning every balance with NaN. */
+const baseRateCents = (baseRate: string): number => {
+  const v = parseFloat(baseRate);
+  return Number.isFinite(v) && v > 0 ? Math.round(v * 100) : 0;
+};
+
 const choreCoins = (chore: Chore, baseRate: string): number =>
-  Math.round(parseFloat(baseRate) * 100 * chore.multiplier);
+  Math.round(baseRateCents(baseRate) * chore.multiplier);
 
 /** Get the effective status for a chore for a specific child */
 const getChoreStatus = (chore: ManagedChore, kidName: string): ChoreStatus => {
   if (chore.childStatus && kidName in chore.childStatus) return chore.childStatus[kidName];
   return chore.status;
 };
+
+/** Whether a chore tracks completions independently per child.
+ *  - Everyone chores: governed by the explicit completionMode toggle.
+ *  - Chores assigned to several specific kids (no toggle): each kid does their
+ *    own copy, so they're independent by default. */
+const isIndependentChore = (chore: ManagedChore): boolean =>
+  chore.completionMode === 'independent' ||
+  (chore.completionMode == null && chore.assignedTo.length > 1);
+
+/** Effective weekly completion count for a chore, for a specific child. */
+const getChoreCompletions = (chore: ManagedChore, kidName: string): number =>
+  isIndependentChore(chore)
+    ? chore.childCompletions?.[kidName] ?? 0
+    : chore.weeklyCompletions ?? 0;
+
+/** Names of the kids a chore applies to. Empty assignedTo means "everyone". */
+const choreEligibleKids = (chore: ManagedChore, allKidNames: string[]): string[] =>
+  chore.assignedTo.length === 0 ? allKidNames : chore.assignedTo;
+
+/**
+ * Total number of submissions awaiting parent approval for a kid:
+ * the carried-over backlog plus today's live `pending` status (if any).
+ */
+const getPendingCount = (chore: ManagedChore, kidName: string): number =>
+  (chore.childPendingCount?.[kidName] ?? 0) + (getChoreStatus(chore, kidName) === 'pending' ? 1 : 0);
+
+/**
+ * How many times a kid has "claimed" a chore this week across ALL states —
+ * approved completions plus everything awaiting approval (today's pending +
+ * carried-over backlog). A chore must never be doable more than its weekly
+ * target times, counting every state, so this is what the weekly cap checks.
+ */
+const getClaimedCount = (chore: ManagedChore, kidName: string): number =>
+  getChoreCompletions(chore, kidName) + getPendingCount(chore, kidName);
+
+/** Bumps a kid's weekly completion count by one WITHOUT touching their status.
+ *  Used when approving a backlog item (a prior day's submission) so today's
+ *  fresh instance is left untouched. */
+function bumpCompletionCount(chore: ManagedChore, kidName: string): ManagedChore {
+  if (isIndependentChore(chore)) {
+    return { ...chore, childCompletions: { ...chore.childCompletions, [kidName]: (chore.childCompletions?.[kidName] ?? 0) + 1 } };
+  }
+  return { ...chore, weeklyCompletions: (chore.weeklyCompletions ?? 0) + 1 };
+}
+
+/** Drop the oldest snapshotted pending amounts (cents + XP) for a kid (no-op when empty). */
+function shiftPendingCents(chore: ManagedChore, kidName: string): ManagedChore {
+  const cents = chore.childPendingCents?.[kidName];
+  const xp    = chore.childPendingXp?.[kidName];
+  if ((!cents || cents.length === 0) && (!xp || xp.length === 0)) return chore;
+  return {
+    ...chore,
+    childPendingCents: cents && cents.length > 0 ? { ...chore.childPendingCents, [kidName]: cents.slice(1) } : chore.childPendingCents,
+    childPendingXp:    xp    && xp.length > 0    ? { ...chore.childPendingXp,    [kidName]: xp.slice(1) }    : chore.childPendingXp,
+  };
+}
+
+/** Decrement a kid's carried-over pending backlog by one (floored at 0). */
+function decPendingBacklog(chore: ManagedChore, kidName: string): ManagedChore {
+  const cur = chore.childPendingCount?.[kidName] ?? 0;
+  if (cur <= 0) return chore;
+  return { ...chore, childPendingCount: { ...chore.childPendingCount, [kidName]: cur - 1 } };
+}
+
+/** Household-wide weekly chore totals. Independent chores count once per
+ *  eligible kid (each must do their own); shared chores count once. */
+function householdChoreTotals(chores: ManagedChore[], allKidNames: string[]): { target: number; done: number } {
+  let target = 0, done = 0;
+  for (const c of chores) {
+    if (isIndependentChore(c)) {
+      const kids = choreEligibleKids(c, allKidNames);
+      target += frequencyToWeeklyTarget(c.frequency) * kids.length;
+      done   += kids.reduce((s, k) => s + (c.childCompletions?.[k] ?? 0), 0);
+    } else {
+      target += frequencyToWeeklyTarget(c.frequency);
+      done   += c.weeklyCompletions ?? 0;
+    }
+  }
+  return { target, done };
+}
+
+/**
+ * Returns a copy of `chore` with one completion applied for `kidName`.
+ *  - independent → bumps that kid's own count, marks only that kid approved
+ *  - shared / single-assignee → bumps the single household count and marks all
+ *    eligible kids approved (first to finish "earns it" for everyone that day)
+ */
+function applyChoreCompletion(chore: ManagedChore, kidName: string, allKidNames: string[]): ManagedChore {
+  if (isIndependentChore(chore)) {
+    return {
+      ...chore,
+      childStatus:      { ...chore.childStatus, [kidName]: 'approved' as ChoreStatus },
+      childCompletions: { ...chore.childCompletions, [kidName]: (chore.childCompletions?.[kidName] ?? 0) + 1 },
+    };
+  }
+  const childStatus: Record<string, ChoreStatus> = { ...chore.childStatus };
+  for (const k of choreEligibleKids(chore, allKidNames)) childStatus[k] = 'approved';
+  return {
+    ...chore,
+    status: 'approved' as ChoreStatus,
+    weeklyCompletions: (chore.weeklyCompletions ?? 0) + 1,
+    childStatus,
+  };
+}
 
 /** Get the effective rejection note for a chore for a specific child */
 const getChoreRejectionNote = (chore: ManagedChore, kidName: string): string | undefined => {
@@ -155,8 +309,13 @@ const MONSTER_FALLBACK_NAMES = [
   'Zorp','Gloop','Fizzle','Blorp','Snuggz','Wumbo','Glitch','Zappy',
   'Munchie','Wobble','Boing','Squigg','Noodlz','Chompy','Flapz','Zumi',
 ];
-const randomFallbackName = () =>
-  MONSTER_FALLBACK_NAMES[Math.floor(Math.random() * MONSTER_FALLBACK_NAMES.length)];
+/** Deterministic fallback monster name per kid: stable across restarts (no
+ *  surprise renames) and different siblings get different names. */
+const fallbackNameForKid = (kidName: string): string => {
+  let h = 0;
+  for (let i = 0; i < kidName.length; i++) h = (h * 31 + kidName.charCodeAt(i)) >>> 0;
+  return MONSTER_FALLBACK_NAMES[h % MONSTER_FALLBACK_NAMES.length];
+};
 
 const MONSTERS: Monster[] = [
   { name: 'Grumble',  level: 1, needed: 100 },  // 0 → 100
@@ -355,22 +514,24 @@ const BOSSES: Boss[] = [
 ];
 
 /** Returns this week's boss for the child's current evolution tier.
- *  Rotates through the eligible pool by ISO week number so siblings
- *  on the same tier face different bosses in different weeks. */
-function getWeeklyBoss(monsterIdx: MonsterIdx): Boss {
+ *  Rotates through the eligible pool once per app week. The index derives from
+ *  the local Monday week key — NOT raw epoch weeks, whose buckets flip on
+ *  Thursdays UTC and would swap the boss mid-week between the Mon–Sat teaser
+ *  and the Sunday battle. Honors debug day-scrubbing via offsetDays. */
+function getWeeklyBoss(monsterIdx: MonsterIdx, offsetDays = 0): Boss {
   const pool = BOSSES.filter(b => b.tiers.includes(monsterIdx));
   if (!pool.length) return BOSSES[0];
-  const week = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000)); // ms → weeks
+  const week = Math.floor(new Date(getWeekMondayKey(offsetDays)).getTime() / (7 * 24 * 60 * 60 * 1000));
   return pool[week % pool.length];
 }
 
 /** Returns the locked boss if one escaped, otherwise falls back to the weekly rotation. */
-function resolveCurrentBoss(monsterIdx: MonsterIdx, lockedBossName: string | null): Boss {
+function resolveCurrentBoss(monsterIdx: MonsterIdx, lockedBossName: string | null, offsetDays = 0): Boss {
   if (lockedBossName) {
     const locked = BOSSES.find(b => b.name === lockedBossName);
     if (locked) return locked;
   }
-  return getWeeklyBoss(monsterIdx);
+  return getWeeklyBoss(monsterIdx, offsetDays);
 }
 
 /** Days (0–6) until the next Sunday. 0 = today IS Sunday. */
@@ -389,6 +550,53 @@ function getWeekMondayKey(offsetDays = 0): string {
   return d.toDateString();
 }
 
+/** Monday date-string (toDateString) for the week containing an arbitrary date. */
+function weekMondayKeyForDate(date: Date): string {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day; // Mon of this week
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d.toDateString();
+}
+
+/** "Week of Jun 2" label from a Monday date-string. */
+function weekOfLabel(mondayKey: string): string {
+  return 'Week of ' + new Date(mondayKey).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+type UnpaidWeek = { weekKey: string; label: string; choreCount: number; earnedCents: number };
+
+/**
+ * Per-week breakdown of a kid's unpaid chore earnings — everything approved
+ * since their most recent payout (payouts zero the balance, so anything after
+ * the last payAt is still owed). Weeks with zero chores never appear because
+ * the map is built only from chore-history entries.
+ */
+function getUnpaidWeeks(
+  kidName: string,
+  choreHistory: { kidName: string; earnedCents: number; approvedAt: string }[],
+  payoutLog: { kidName: string; paidAt: string }[],
+): UnpaidWeek[] {
+  const lastPaidAt = payoutLog
+    .filter(p => p.kidName === kidName)
+    .reduce<string | null>((latest, p) => (!latest || p.paidAt > latest ? p.paidAt : latest), null);
+  const byWeek = new Map<string, { count: number; cents: number }>();
+  choreHistory.forEach(e => {
+    if (e.kidName !== kidName) return;
+    if (lastPaidAt && e.approvedAt <= lastPaidAt) return;
+    const key = weekMondayKeyForDate(new Date(e.approvedAt));
+    const cur = byWeek.get(key) ?? { count: 0, cents: 0 };
+    cur.count += 1;
+    cur.cents += e.earnedCents;
+    byWeek.set(key, cur);
+  });
+  return [...byWeek.entries()]
+    .filter(([, v]) => v.count > 0)
+    .map(([key, v]) => ({ weekKey: key, label: weekOfLabel(key), choreCount: v.count, earnedCents: v.cents }))
+    .sort((a, b) => new Date(a.weekKey).getTime() - new Date(b.weekKey).getTime());
+}
+
 /** Ms remaining until next Sunday midnight. */
 function msUntilSunday(): number {
   const now = new Date();
@@ -403,10 +611,15 @@ const FREQUENCY_OPTIONS = ['Every day', '2 times per week', '3 times per week', 
 
 function frequencyToWeeklyTarget(frequency: string): number {
   switch (frequency) {
-    case 'Every day':        return 7;
-    case '3 times per week': return 3;
-    case '2 times per week': return 2;
-    case 'Once a week':      return 1;
+    case 'Every day':
+    case 'daily':            return 7;
+    case '3 times per week':
+    case '3x':               return 3;
+    case '2 times per week':
+    case '2x':               return 2;
+    case 'Once a week':
+    case 'weekly':
+    case '1x':               return 1;
     case 'As needed':        return 1;
     default:                 return 1;
   }
@@ -418,16 +631,54 @@ function getSimulatedToday(offsetDays: number = 0): string {
   return new Date(Date.now() + offsetDays * 86_400_000).toDateString();
 }
 
+/** Whole calendar days from one toDateString() to another (today - prev).
+ *  Returns null if `prevDateStr` is empty/unparseable (e.g. first ever chore). */
+function daysBetween(prevDateStr: string, todayStr: string): number | null {
+  if (!prevDateStr) return null;
+  const prev = new Date(prevDateStr);
+  const today = new Date(todayStr);
+  if (isNaN(prev.getTime()) || isNaN(today.getTime())) return null;
+  prev.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  return Math.round((today.getTime() - prev.getTime()) / 86_400_000);
+}
+
+/** Next streak value when a chore is completed.
+ *  - same day as last activity → unchanged
+ *  - exactly the day after → +1 (streak continues)
+ *  - first ever, or a gap of 2+ days → resets to 1 (a single missed day breaks it) */
+function nextStreak(currentStreak: number, lastChoreDate: string, today: string): number {
+  if (lastChoreDate === today) return currentStreak;      // already counted today
+  return daysBetween(lastChoreDate, today) === 1 ? currentStreak + 1 : 1;
+}
+
+/** The streak as it stands *right now*, for display and battle mechanics.
+ *  A stored streak only stays "alive" if the last activity was today or
+ *  yesterday; once a full day is missed it reads as 0 immediately — without
+ *  waiting for the next chore to recompute it. */
+function liveStreak(currentStreak: number, lastChoreDate: string, today: string): number {
+  const gap = daysBetween(lastChoreDate, today);
+  if (gap === null) return 0;
+  return gap === 0 || gap === 1 ? currentStreak : 0;
+}
+
 /** Resets eligible chores to 'active' at the start of a new day.
- *  A chore is eligible if its weeklyCompletions is below the weekly target
- *  and it is currently 'approved' or 'rejected'. 'pending' chores are left
- *  alone — the parent still needs to act on them. */
+ *  A chore reappears for a kid only while they're still under the weekly target,
+ *  counting EVERY state — approved, pending, and carried-over backlog. So a
+ *  2×/week chore never exists as more than 2 instances in a week, no matter how
+ *  approvals are timed. 'pending' chores roll into the backlog so the parent can
+ *  still approve them. */
 function applyDailyReset(chores: ManagedChore[]): ManagedChore[] {
   return chores.map(c => {
     const target      = frequencyToWeeklyTarget(c.frequency);
-    const completions = c.weeklyCompletions ?? 0;
-    const stillNeeded = completions < target;
-    if (!stillNeeded) return c;
+    const independent = isIndependentChore(c);
+    // Shared chores gate on the single household count — including anything still
+    // awaiting approval — so the board doesn't reappear past the weekly target.
+    if (!independent) {
+      const sharedPending = Object.values(c.childPendingCount ?? {}).reduce((a, b) => a + b, 0)
+        + Object.values(c.childStatus ?? {}).filter(s => s === 'pending').length;
+      if ((c.weeklyCompletions ?? 0) + sharedPending >= target) return c;
+    }
 
     let updated: ManagedChore = { ...c };
 
@@ -436,19 +687,31 @@ function applyDailyReset(chores: ManagedChore[]): ManagedChore[] {
       updated = { ...updated, status: 'active' as const, rejectionNote: undefined };
     }
 
-    // Reset per-child status so recurring chores reappear for each kid each day
+    // Reset per-child status so recurring chores reappear for each kid each day,
+    // but only while that kid is under the weekly target across all states.
     if (c.childStatus) {
       const newChildStatus: Record<string, ChoreStatus> = {};
       const newChildRejectionNote: Record<string, string> = { ...(c.childRejectionNote ?? {}) };
+      const newPendingCount: Record<string, number> = { ...(c.childPendingCount ?? {}) };
       for (const [kid, st] of Object.entries(c.childStatus)) {
-        if (st === 'approved' || st === 'rejected') {
+        // Claimed = approved + backlog + today's pending (the one being rolled over).
+        const approved = independent ? (c.childCompletions?.[kid] ?? 0) : (c.weeklyCompletions ?? 0);
+        const claimed  = approved + (c.childPendingCount?.[kid] ?? 0) + (st === 'pending' ? 1 : 0);
+        const kidDone  = claimed >= target;
+        if (st === 'pending') {
+          // Waiting-for-approval submission rolls into the backlog (stays in the
+          // parent's queue). A fresh instance reopens only if still under target;
+          // otherwise the kid has met their weekly quota and sees it as done.
+          newPendingCount[kid] = (newPendingCount[kid] ?? 0) + 1;
+          newChildStatus[kid] = kidDone ? 'approved' : 'active';
+        } else if ((st === 'approved' || st === 'rejected') && !kidDone) {
           newChildStatus[kid] = 'active';
           delete newChildRejectionNote[kid];
         } else {
           newChildStatus[kid] = st as ChoreStatus;
         }
       }
-      updated = { ...updated, childStatus: newChildStatus, childRejectionNote: newChildRejectionNote };
+      updated = { ...updated, childStatus: newChildStatus, childRejectionNote: newChildRejectionNote, childPendingCount: newPendingCount };
     }
 
     return updated;
@@ -459,30 +722,106 @@ const DIFFICULTY_MULTIPLIERS: Record<1 | 2 | 3, number> = { 1: 1.0, 2: 1.5, 3: 2
 const XP_BY_DIFFICULTY:      Record<1 | 2 | 3, number> = { 1: 10,  2: 25,  3: 50  };
 const DIFFICULTY_LABELS: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
 
+// bg colors are sampled from each PNG icon's own background so the tile blends
+// seamlessly with the artwork. Emoji entries keep a hand-picked pastel.
 const CHORE_ICONS: { icon: string | number; bg: string }[] = [
-  { icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7' },
-  { icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6' },
+  { icon: require('./assets/icons/chores/chore=iconBed.png'),     bg: '#FEF1D4' },
+  { icon: require('./assets/icons/chores/chore=iconLaundry.png'), bg: '#E5F3FD' },
   { icon: '☕',                                             bg: '#FFF0E6' },
-  { icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0' },
+  { icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#FEE1E9' },
   { icon: '🐾',                                             bg: '#FFF9E6' },
   { icon: '🪴',                                             bg: '#F0F7F0' },
-  { icon: require('./assets/icons/chore=iconDishes.png'),  bg: '#FFF9E6' },
-  { icon: require('./assets/icons/chore=iconBroom.png'),   bg: '#F5F0FB' },
-  { icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB' },
-  { icon: require('./assets/icons/chore=iconVacuum.png'),  bg: '#F5F0FB' },
+  { icon: require('./assets/icons/chores/chore=iconDishes.png'),  bg: '#FEEDD8' },
+  { icon: require('./assets/icons/chores/chore=iconBroom.png'),   bg: '#FDEBE5' },
+  { icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#E3F5DD' },
+  { icon: require('./assets/icons/chores/chore=iconVacuum.png'),  bg: '#EDE4F7' },
+  // New icons — appended so existing saved icons (idx:0–9) keep their meaning.
+  { icon: require('./assets/icons/chores/chore=iconBag.png'),         bg: '#E4F1FB' },
+  { icon: require('./assets/icons/chores/chore=iconBook.png'),        bg: '#FFF0D2' },
+  { icon: require('./assets/icons/chores/chore=iconDishwasher.png'),  bg: '#FDE3E9' },
+  { icon: require('./assets/icons/chores/chore=iconDuster.png'),      bg: '#FEF2D8' },
+  { icon: require('./assets/icons/chores/chore=iconGroceries.png'),   bg: '#EFE7FA' },
+  { icon: require('./assets/icons/chores/chore=iconLights.png'),      bg: '#E8F5E1' },
+  { icon: require('./assets/icons/chores/chore=iconMicrowave.png'),   bg: '#FEF1D5' },
+  { icon: require('./assets/icons/chores/chore=iconPetfood.png'),     bg: '#E8F5E1' },
+  { icon: require('./assets/icons/chores/chore=iconRecycling.png'),   bg: '#F0E9F6' },
+  { icon: require('./assets/icons/chores/chore=iconSink.png'),        bg: '#E1EFFB' },
+  { icon: require('./assets/icons/chores/chore=iconSpraybottle.png'), bg: '#E3F0FC' },
+  { icon: require('./assets/icons/chores/chore=iconToothbrush.png'),  bg: '#EFE6FA' },
+  { icon: require('./assets/icons/chores/chore=iconToys.png'),        bg: '#FDE9DB' },
+  { icon: require('./assets/icons/chores/chore=iconWashmachine.png'), bg: '#E8F5E1' },
+  { icon: require('./assets/icons/chores/chore=iconWateringcan.png'), bg: '#E8F5E1' },
+  { icon: require('./assets/icons/chores/chore=iconWindows.png'),     bg: '#FDEDE0' },
 ];
 
+// Serialize a chore icon for Supabase storage (icon is require() number or emoji string).
+function serializeChoreIcon(icon: string | number): string {
+  if (typeof icon === 'string') return icon; // emoji — store as-is
+  const idx = CHORE_ICONS.findIndex(c => c.icon === icon);
+  return idx >= 0 ? `idx:${idx}` : '';
+}
+
+// Maps chore-ID strings (stored in Supabase) → require() image sources.
+const CHORE_ICON_BY_ID: Record<string, ReturnType<typeof require>> = {
+  make_bed:      require('./assets/icons/chores/chore=iconBed.png'),
+  tidy_room:     require('./assets/icons/chores/chore=iconBroom.png'),
+  put_clothes:   require('./assets/icons/chores/chore=iconLaundry.png'),
+  water_plants:  require('./assets/icons/chores/chore=iconSoap.png'),
+  set_table:     require('./assets/icons/chores/chore=iconDishes.png'),
+  unload_dishes: require('./assets/icons/chores/chore=iconDishes.png'),
+  take_trash:    require('./assets/icons/chores/chore=iconGarbage.png'),
+  pack_bag:      require('./assets/icons/chores/chore=iconBroom.png'),
+  vacuum:        require('./assets/icons/chores/chore=iconVacuum.png'),
+  laundry:       require('./assets/icons/chores/chore=iconLaundry.png'),
+  wash_dishes:   require('./assets/icons/chores/chore=iconDishes.png'),
+  clean_bath:    require('./assets/icons/chores/chore=iconSoap.png'),
+  sweep:         require('./assets/icons/chores/chore=iconBroom.png'),
+};
+
+// Fallback: match by display name for records saved before the ID-based icon scheme.
+const CHORE_ICON_BY_NAME: Record<string, ReturnType<typeof require>> = {
+  'Make bed':           require('./assets/icons/chores/chore=iconBed.png'),
+  'Tidy room':          require('./assets/icons/chores/chore=iconBroom.png'),
+  'Put away clothes':   require('./assets/icons/chores/chore=iconLaundry.png'),
+  'Water plants':       require('./assets/icons/chores/chore=iconSoap.png'),
+  'Help set table':     require('./assets/icons/chores/chore=iconDishes.png'),
+  'Unload dishwasher':  require('./assets/icons/chores/chore=iconDishes.png'),
+  'Take out trash':     require('./assets/icons/chores/chore=iconGarbage.png'),
+  'Pack school bag':    require('./assets/icons/chores/chore=iconBroom.png'),
+  'Vacuum':             require('./assets/icons/chores/chore=iconVacuum.png'),
+  'Do laundry':         require('./assets/icons/chores/chore=iconLaundry.png'),
+  'Wash dishes':        require('./assets/icons/chores/chore=iconDishes.png'),
+  'Clean bathroom':     require('./assets/icons/chores/chore=iconSoap.png'),
+  'Sweep floors':       require('./assets/icons/chores/chore=iconBroom.png'),
+  'Make your bed':      require('./assets/icons/chores/chore=iconBed.png'),
+  'Fold the laundry':   require('./assets/icons/chores/chore=iconLaundry.png'),
+  'Clean the bathroom': require('./assets/icons/chores/chore=iconSoap.png'),
+  'Take out the trash': require('./assets/icons/chores/chore=iconGarbage.png'),
+  'Vacuum the floors':  require('./assets/icons/chores/chore=iconVacuum.png'),
+  'Sweep & mop':        require('./assets/icons/chores/chore=iconBroom.png'),
+  'Wash the dishes':    require('./assets/icons/chores/chore=iconDishes.png'),
+  'Tidy your room':     require('./assets/icons/chores/chore=iconBroom.png'),
+};
+
+function resolveChoreIcon(icon: string, name: string): ReturnType<typeof require> | string {
+  if (icon.startsWith('idx:')) {
+    const idx = parseInt(icon.slice(4), 10);
+    return CHORE_ICONS[idx]?.icon ?? '✅';
+  }
+  return CHORE_ICON_BY_ID[icon] ?? CHORE_ICON_BY_NAME[name] ?? (icon || '✅');
+}
+
 const DEFAULT_MANAGED_CHORES: ManagedChore[] = [
-  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active', weeklyCompletions: 0 },
-  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
-  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
-  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
+  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active', weeklyCompletions: 0 },
+  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
+  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
   { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
   { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
-  { id: '7', name: 'Vacuum the floors',  description: 'Vacuum all carpeted rooms.',           frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconVacuum.png'), bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
-  { id: '8', name: 'Sweep & mop',        description: 'Sweep and mop the kitchen floor.',     frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconBroom.png'),  bg: '#F5F0FB', status: 'active', weeklyCompletions: 0 },
-  { id: '9', name: 'Wash the dishes',    description: 'Wash, dry, and put away dishes.',      frequency: 'Every day',        difficulty: 2, assignedTo: [], icon: require('./assets/icons/chore=iconDishes.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
-  { id: '10', name: 'Tidy your room',   description: 'Put everything back in its place.',    frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chore=iconBroom.png'),  bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
+  { id: '7', name: 'Vacuum the floors',  description: 'Vacuum all carpeted rooms.',           frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconVacuum.png'), bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
+  { id: '8', name: 'Sweep & mop',        description: 'Sweep and mop the kitchen floor.',     frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBroom.png'),  bg: '#F5F0FB', status: 'active', weeklyCompletions: 0 },
+  { id: '9', name: 'Wash the dishes',    description: 'Wash, dry, and put away dishes.',      frequency: 'Every day',        difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconDishes.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '10', name: 'Tidy your room',   description: 'Put everything back in its place.',    frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBroom.png'),  bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
 ];
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -651,11 +990,24 @@ function BossVorthak({ size = 90 }: { size?: number }) {
 function monsterImgSrc(kind: MonsterId, idx: MonsterIdx) {
   return MONSTER_IMAGES_BY_KIND[kind][idx];
 }
+
+/** Clamp an untrusted (DB/legacy) value to a valid evolution index.
+ *  An out-of-range monster_idx would make MONSTERS[idx] undefined and crash
+ *  every screen that reads `.needed`. */
+function toMonsterIdx(v: unknown): MonsterIdx {
+  const n = typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : 0;
+  return Math.min(Math.max(n, 0), MONSTERS.length - 1) as MonsterIdx;
+}
+
+/** Coerce an untrusted (DB/legacy) value to a known monster kind. */
+function toMonsterId(v: unknown): MonsterId {
+  return typeof v === 'string' && v in MONSTER_IMAGES_BY_KIND ? (v as MonsterId) : 'slime';
+}
 const BOSS_SVGS = [BossGrumbloth, BossMireflax, BossVorthak];
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
-interface SwitcherOption { label: string; emoji: string; bg: string; image?: number; }
+interface SwitcherOption { label: string; emoji?: string; bg: string; image?: number | ReturnType<typeof require>; }
 
 function ViewSwitcher({ selected, options, onSelect, dark = false }: {
   selected: string;
@@ -740,6 +1092,8 @@ const sw = StyleSheet.create({
 
 const AGE_RANGES = ['Ages 4–6', 'Ages 7–9', 'Ages 10–12', 'Ages 13+'];
 const AVATAR_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const;
+// Carousel cell pitch for the chore icon picker: avatarCell width (90) + row gap (10).
+const ICON_CELL_STRIDE = 100;
 
 function useSheet(initialY = 300) {
   const [open, setOpen] = useState(false);
@@ -806,6 +1160,17 @@ function ChoreIconPickerSheet({ selected, onSelect }: {
   onSelect: (item: { icon: string | number; bg: string }) => void;
 }) {
   const { open, openSheet, closeSheet, scrimOpacity, sheetY } = useSheet();
+  const scrollRef = useRef<ScrollView>(null);
+  const selectedIdx = CHORE_ICONS.findIndex(i => i.icon === selected.icon);
+
+  // Land the carousel on the current icon each time it opens.
+  useEffect(() => {
+    if (open && selectedIdx >= 0) {
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollTo({ x: Math.max(0, selectedIdx * ICON_CELL_STRIDE - ICON_CELL_STRIDE), animated: false })
+      );
+    }
+  }, [open, selectedIdx]);
 
   return (
     <>
@@ -826,25 +1191,26 @@ function ChoreIconPickerSheet({ selected, onSelect }: {
           <Animated.View style={[av.sheet, { transform: [{ translateY: sheetY }] }]} onStartShouldSetResponder={() => true}>
             <View style={av.handle} />
             <Text style={av.title}>Choose icon</Text>
-            <View style={av.grid}>
+            <ScrollView
+              ref={scrollRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={av.avatarRow}
+            >
               {CHORE_ICONS.map((item, idx) => {
-                const isSelected = item.icon === selected.icon;
+                const isSelected = idx === selectedIdx;
                 return (
                   <TouchableOpacity
                     key={idx}
-                    style={[
-                      av.cell,
-                      { backgroundColor: item.bg, alignItems: 'center', justifyContent: 'center', borderRadius: 16, padding: 10 },
-                      isSelected && av.cellActive,
-                    ]}
+                    style={[av.avatarCell, { backgroundColor: item.bg, alignItems: 'center', justifyContent: 'center' }, isSelected && av.cellActive]}
                     onPress={() => { onSelect(item); closeSheet(); }}
                     activeOpacity={0.8}
                   >
-                    <ChoreIcon icon={item.icon} size={44} />
+                    <ChoreIcon icon={item.icon} size={52} />
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
             <View style={{ height: Platform.OS === 'ios' ? 28 : 12 }} />
           </Animated.View>
         </Animated.View>
@@ -914,12 +1280,9 @@ const av = StyleSheet.create({
   sheet:      { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', borderBottomWidth: 0, paddingTop: 12, overflow: 'hidden' },
   handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#D0CEC8', alignSelf: 'center', marginBottom: 8 },
   title:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 },
-  // Avatar horizontal row
+  // Horizontal carousel row — shared by the avatar picker and chore icon picker
   avatarRow:  { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 16, gap: 10 },
   avatarCell: { width: 90, height: 90, borderRadius: 16, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
-  // Legacy grid (used by chore icon picker)
-  grid:       { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
-  cell:       { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: 14, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
   cellActive: { borderColor: PURPLE },
   cellImg:    { width: '100%', height: '100%' },
   // Age range rows
@@ -949,34 +1312,101 @@ function Header({ title, coins, showCoins = true }: { title: string; coins?: num
 }
 
 const NAV_TABS: { id: Tab; label: string; icon: ReturnType<typeof require> }[] = [
-  { id: 'home',   label: 'Monsters', icon: require('./assets/icons/Property 1=navHome.png')   },
-  { id: 'world',  label: 'World',    icon: require('./assets/icons/navWorld.png') },
-  { id: 'wallet', label: 'Wallet',   icon: require('./assets/icons/Property 1=navWallet.png') },
+  { id: 'home',     label: 'Monsters', icon: require('./assets/icons/Property 1=navHome.png')   },
+  { id: 'world',    label: 'World',    icon: require('./assets/icons/navWorld.png') },
+  { id: 'wallet',   label: 'Wallet',   icon: require('./assets/icons/Property 1=navWallet.png') },
+  { id: 'trophies', label: 'Trophies', icon: require('./assets/icons/navTrophy.png') },
 ];
 
-function TabBar({ active, onNav }: { active: Tab; onNav: (t: Tab) => void }) {
+// ─── Animated nav bar ─────────────────────────────────────────────────────────
+// Keeps the floating white-pill chrome but adds (a) a lavender pill that springs
+// to the active tab, replacing the old static active background, and (b) an icon
+// wiggle the moment a tab becomes active. Built on RN's Animated (the rest of the
+// app's animation layer); the spring uses the same physics as the design spec.
+
+const PILL_SPRING = { damping: 20, stiffness: 290, mass: 1 } as const; // ~250ms, subtle overshoot
+
+function NavTabItem({ icon, label, isActive, onPress, onLayout }: {
+  icon: number; label: string; isActive: boolean;
+  onPress: () => void; onLayout: (e: LayoutChangeEvent) => void;
+}) {
+  return (
+    <TouchableOpacity style={s.tab} onPress={onPress} onLayout={onLayout} activeOpacity={0.7}>
+      <View style={s.tabIconWrap}>
+        <Image source={icon} style={s.tabIcon} resizeMode="contain" />
+        <Text style={[s.tabLabel, isActive && s.tabLabelActive]}>{label}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function AnimatedNavBar<T extends string>({ tabs, active, onNav }: {
+  tabs: { id: T; label: string; icon: number }[];
+  active: T;
+  onNav: (id: T) => void;
+}) {
+  const activeIdx = Math.max(0, tabs.findIndex(t => t.id === active));
+  const layouts   = useRef<({ x: number; width: number } | undefined)[]>([]);
+  const pillX     = useRef(new Animated.Value(0)).current;
+  // Tabs are flex:1 (equal widths), so the pill width is a constant measured at
+  // layout — only translateX animates. Keeping the spring on the NATIVE driver
+  // matters: the tab tap also mounts the newly selected screen, and a JS-driven
+  // layout animation (the old width+x springs) competes with that mount work on
+  // the JS thread, making every page switch stutter for the spring's duration.
+  const [pillWidth, setPillWidth] = useState(0);
+  const [ready, setReady] = useState(false);
+
+  const movePill = useCallback((idx: number, animate: boolean) => {
+    const l = layouts.current[idx];
+    if (!l) return;
+    if (animate) {
+      Animated.spring(pillX, { toValue: l.x, useNativeDriver: true, ...PILL_SPRING }).start();
+    } else {
+      pillX.setValue(l.x);
+    }
+  }, [pillX]);
+
+  useEffect(() => { if (ready) movePill(activeIdx, true); }, [activeIdx, ready, movePill]);
+
+  const handleItemLayout = (idx: number, e: LayoutChangeEvent) => {
+    const { x, width } = e.nativeEvent.layout;
+    layouts.current[idx] = { x, width };
+    if (ready) {
+      // Re-measure (rotation/resize): snap the pill to the active tab's new frame.
+      if (idx === activeIdx) { setPillWidth(width); pillX.setValue(x); }
+      return;
+    }
+    if (tabs.every((_, i) => layouts.current[i])) {
+      movePill(activeIdx, false);
+      setPillWidth(layouts.current[activeIdx]!.width);
+      setReady(true);
+    }
+  };
+
   return (
     <View style={s.tabBar} pointerEvents="box-none">
       <View style={s.tabBarInner}>
-        {NAV_TABS.map(t => {
-          const isActive = active === t.id;
-          return (
-            <TouchableOpacity
-              key={t.id}
-              style={s.tab}
-              onPress={() => onNav(t.id)}
-              activeOpacity={0.7}
-            >
-              <View style={[s.tabIconWrap, isActive && s.tabIconWrapActive]}>
-                <Image source={t.icon} style={s.tabIcon} resizeMode="contain" />
-                <Text style={[s.tabLabel, isActive && s.tabLabelActive]}>{t.label}</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+        <Animated.View
+          pointerEvents="none"
+          style={[s.tabPill, { opacity: ready ? 1 : 0, width: pillWidth, transform: [{ translateX: pillX }] }]}
+        />
+        {tabs.map((t, idx) => (
+          <NavTabItem
+            key={t.id}
+            icon={t.icon}
+            label={t.label}
+            isActive={active === t.id}
+            onPress={() => onNav(t.id)}
+            onLayout={(e) => handleItemLayout(idx, e)}
+          />
+        ))}
       </View>
     </View>
   );
+}
+
+function TabBar({ active, onNav }: { active: Tab; onNav: (t: Tab) => void }) {
+  return <AnimatedNavBar tabs={NAV_TABS} active={active} onNav={onNav} />;
 }
 
 function ChoreRow({ chore, done, onPress, baseRate }: { chore: Chore; done: boolean; onPress: () => void; baseRate: string }) {
@@ -1006,26 +1436,13 @@ const PARENT_NAV_ICONS: Record<ParentTab, { src: number; label: string }> = {
   settings: { src: require('./assets/icons/navHomeSettings.png'),  label: 'Settings' },
 };
 
+const PARENT_NAV_TABS: { id: ParentTab; label: string; icon: number }[] =
+  (['home', 'chores', 'money', 'settings'] as ParentTab[]).map(id => ({
+    id, label: PARENT_NAV_ICONS[id].label, icon: PARENT_NAV_ICONS[id].src,
+  }));
+
 function ParentTabBar({ active, onNav }: { active: ParentTab; onNav: (t: ParentTab) => void }) {
-  const tabs: ParentTab[] = ['home', 'chores', 'money', 'settings'];
-  return (
-    <View style={s.tabBar} pointerEvents="box-none">
-      <View style={s.tabBarInner}>
-        {tabs.map(t => {
-          const isActive = active === t;
-          const { src, label } = PARENT_NAV_ICONS[t];
-          return (
-            <TouchableOpacity key={t} style={s.tab} onPress={() => onNav(t)} activeOpacity={0.7}>
-              <View style={[s.tabIconWrap, isActive && s.tabIconWrapActive]}>
-                <Image source={src} style={s.tabIcon} resizeMode="contain" />
-                <Text style={[s.tabLabel, isActive && s.tabLabelActive]}>{label}</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
+  return <AnimatedNavBar tabs={PARENT_NAV_TABS} active={active} onNav={onNav} />;
 }
 
 // ─── Kid Screens ──────────────────────────────────────────────────────────────
@@ -1124,7 +1541,7 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
     }
   }, [status]);
 
-  const coinsAmt = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+  const coinsAmt = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
   const isPending  = status === 'pending';
   const isApproved = status === 'approved';
   const isRejected = status === 'rejected';
@@ -1324,7 +1741,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
       showPop('Submitted! ✋', 'xp');
     } else {
       showPop(`+${XP_BY_DIFFICULTY[c.difficulty]} XP`, 'xp');
-      showPop(`+${fmtCoins(Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[c.difficulty]))}`, 'coin', 120);
+      showPop(`+${fmtCoins(Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[c.difficulty]))}`, 'coin', 120);
     }
     onCompleteManaged(c.id);
   }, [pulseMonster, showPop, onCompleteManaged, baseRate, requireApproval]);
@@ -1345,7 +1762,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
               selected={currentKidName || 'Kid view'}
               options={[
                 ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
-                { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
+                { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
@@ -1357,7 +1774,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={s.homeScroll}>
+      <ScrollView style={{ flex: 1, overflow: 'visible' }} showsVerticalScrollIndicator={false} contentContainerStyle={s.homeScroll}>
         {/* Character Card — long press opens debug menu */}
         <View style={s.homeCharCard}>
           <TouchableOpacity
@@ -1366,9 +1783,9 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
             delayLongPress={600}
             style={{ overflow: 'visible' }}
           >
-            <View style={s.homeCharImage}>
+            <View style={s.homeCharImage} pointerEvents="box-none">
               {/* Outer bob wraps both monster + platform so they float together */}
-              <Animated.View style={{ alignItems: 'center', transform: [{ translateY: bobTranslate }, { scale: monsterScale }] }}>
+              <Animated.View style={{ alignItems: 'center', transform: [{ translateY: bobTranslate }, { scale: monsterScale }] }} pointerEvents="none">
                 {/* Monster — independent Y offset */}
                 <View style={{ transform: [{ translateY: dbgMonsterY }], zIndex: 2 }}>
                   <Image
@@ -1399,7 +1816,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
                 width: xpWidthAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
               }]} />
             </View>
-            <Text style={s.homeXpText}>{xp}/{need}xp</Text>
+            <Text style={s.homeXpText}>{Math.min(xp, need)}/{need}xp</Text>
           </View>
         </View>
 
@@ -1530,7 +1947,7 @@ function countdownParts(ms: number): [string, string, string, string] {
   return [pad(d), pad(h), pad(m), pad(s)];
 }
 
-function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays }: {
+function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays, parentRole = '', battleCoinBonusEnabled, captureCoins }: {
   monsterIdx: MonsterIdx; coins: number; xp: number; weeklyXp: number;
   done: Partial<Record<ChoreId, boolean>>; managedChores: ManagedChore[];
   onStartBattle: () => void;
@@ -1542,18 +1959,23 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   currentKidName: string;
   initialAvatarIdx: number;
   currentBoss: Boss;
+  parentRole?: string;
   debugDayOffset: number;
   weekApprovalDays: string[];
+  battleCoinBonusEnabled: boolean;
+  captureCoins: number;
 }) {
   const boss        = currentBoss;
+  const bossJar     = getBossDisplay(boss.name)?.jar;
   const monster     = MONSTERS[monsterIdx];
   const [kidAvatarIdx, setKidAvatarIdx] = useState(initialAvatarIdx);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
   const dollars = (coins / 100).toFixed(2);
-  const totalChores = managedChores.length || 1;
-  const totalWeeklyTarget = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
-  const totalWeeklyDone   = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
-  const doneCount   = totalWeeklyDone;   // total completions this week (accounts for recurring chores)
+  const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
+  const totalChores = myChores.length || 1;
+  const totalWeeklyTarget = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
+  const totalWeeklyDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
+  const doneCount   = totalWeeklyDone;   // this kid's completions this week (accounts for recurring chores)
   const chorePct    = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
   const winOdds     = calcWinOdds(weeklyXp, monster.needed);
   const power       = weeklyXp;
@@ -1604,7 +2026,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
               selected={currentKidName || 'Kid view'}
               options={[
                 ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
-                { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
+                { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
@@ -1721,30 +2143,29 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
             <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>WHAT YOU'LL GET</Text>
           </View>
           <View style={w.stakeRow}>
+            {/* Boss jar — always */}
             <View style={w.stakeItem}>
-              <Image source={require('./assets/icons/icon-coin.png')} style={w.stakeIcon} resizeMode="contain" />
-              <Text style={w.stakeVal}>{boss.captureCoins}</Text>
-              <Text style={w.stakeLbl}>coins</Text>
-            </View>
-            <View style={w.stakeItem}>
-              <Image source={require('./assets/icons/icon-star.png')} style={w.stakeIcon} resizeMode="contain" />
-              <Text style={w.stakeVal}>50xp</Text>
-              <Text style={w.stakeLbl}>XP</Text>
-            </View>
-            <View style={w.stakeItem}>
-              <Image source={require('./assets/icons/icon-gem.png')} style={w.stakeIcon} resizeMode="contain" />
+              {bossJar
+                ? <Image source={bossJar} style={w.stakeIcon} resizeMode="contain" />
+                : <Image source={require('./assets/icons/icon-trophy.png')} style={w.stakeIcon} resizeMode="contain" />}
               <Text style={w.stakeVal}>1</Text>
-              <Text style={w.stakeLbl}>shard</Text>
+              <Text style={w.stakeLbl}>boss jar</Text>
             </View>
-          </View>
-          {monsterIdx < 7 && (
-            <View style={w.evolutionHint}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <Image source={require('./assets/icons/IconStar.png')} style={{ width: 20, height: 20 }} resizeMode="contain" />
-                <Text style={w.evolutionHintText}>Win this battle and {monsterName} could evolve!</Text>
+            {/* Relic — always */}
+            <View style={w.stakeItem}>
+              <Image source={require('./assets/icons/IconChest.png')} style={w.stakeIcon} resizeMode="contain" />
+              <Text style={w.stakeVal}>1</Text>
+              <Text style={w.stakeLbl}>relic</Text>
+            </View>
+            {/* Coins — only if parent has capture bonus on */}
+            {battleCoinBonusEnabled && (
+              <View style={w.stakeItem}>
+                <Image source={require('./assets/icons/icon-coin.png')} style={w.stakeIcon} resizeMode="contain" />
+                <Text style={w.stakeVal}>{captureCoins}</Text>
+                <Text style={w.stakeLbl}>coins</Text>
               </View>
-            </View>
-          )}
+            )}
+          </View>
         </View>
 
         {/* ── Your Stats ── */}
@@ -3732,8 +4153,8 @@ const CONF_DATA = [
 
 // ─── KidPayoutScreen ─────────────────────────────────────────────────────────
 
-function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monsterImg, monsterName, onDismiss }: {
-  amount: number; completedCount: number; battleWon: boolean | null;
+function KidPayoutScreen({ amount, completedCount, weeks, battleWon, battleBonus, monsterImg, monsterName, onDismiss }: {
+  amount: number; completedCount: number; weeks: UnpaidWeek[]; battleWon: boolean | null;
   battleBonus: number | null; monsterImg: number; monsterName: string;
   onDismiss: () => void;
 }) {
@@ -3784,6 +4205,9 @@ function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monst
     return () => anims.forEach(a => a.stop());
   }, []);
 
+  // Multiple unpaid weeks → switch headline + show one pill per week.
+  const isMultiWeek = weeks.length >= 2;
+  const headline = isMultiWeek ? `earned across ${weeks.length} weeks!` : 'earned this week!';
   const breakdownBase = completedCount + ' chores ✓';
   const breakdownSuffix = battleWon === true ? ' + Boss Battle' : battleWon === false ? ' + Better luck next week!' : '';
 
@@ -3829,17 +4253,35 @@ function KidPayoutScreen({ amount, completedCount, battleWon, battleBonus, monst
             <Text style={{ fontSize: scale(72), fontWeight: '900', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular', letterSpacing: -2 }}>
               ${(amount / 100).toFixed(2)}
             </Text>
-            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>earned this week!</Text>
+            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{headline}</Text>
           </>
         ) : (
           <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center' }}>Great work this week! 🎉</Text>
         )}
 
-        {/* Breakdown pill */}
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 4, ...SOLID_SHADOW }}>
-          <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{breakdownBase}{breakdownSuffix}</Text>
-          {battleWon === true && <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />}
-        </View>
+        {/* Breakdown pills — one per unpaid week when multiple weeks accumulated,
+            otherwise the original single chore-count pill (unchanged). */}
+        {isMultiWeek ? (
+          <View style={{ width: '100%', maxWidth: 360, gap: 8 }}>
+            {weeks.map(w => (
+              <View key={w.weekKey} style={{ backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', ...SOLID_SHADOW }}>
+                <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{w.label}</Text>
+                <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{w.choreCount} chores ✓</Text>
+              </View>
+            ))}
+            {battleBonus != null && battleBonus > 0 && (
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', ...SOLID_SHADOW }}>
+                <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>Boss Battle bonus 🏆</Text>
+                <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>+{fmtCoins(battleBonus)}</Text>
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 4, ...SOLID_SHADOW }}>
+            <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{breakdownBase}{breakdownSuffix}</Text>
+            {battleWon === true && <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />}
+          </View>
+        )}
 
         {/* Bank counter */}
         {amount > 0 && (
@@ -3877,7 +4319,7 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
   const targetCents    = Math.round(parseFloat(goal.amount || '0') * 100);
   const pct            = targetCents > 0 ? Math.min(1, goal.savedCents / targetCents) : 0;
   const leftCents      = Math.max(0, targetCents - goal.savedCents);
-  const weeklyEarnings = Math.max(1, parseFloat(baseRate) * 100 * 5);
+  const weeklyEarnings = Math.max(1, baseRateCents(baseRate) * 5);
   const weeksToGo      = leftCents > 0 ? Math.ceil(leftCents / weeklyEarnings) : 0;
   const weeksSaving    = Math.round(goal.savedCents / weeklyEarnings);
   const totalWeeks     = Math.round(targetCents / weeklyEarnings);
@@ -4068,7 +4510,7 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60, gap: 16 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120, gap: 16 }}>
 
         {/* ── Hero card ── */}
         <View style={{ backgroundColor: heroBg, borderRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 32, alignItems: 'center', ...SOLID_SHADOW }}>
@@ -4138,7 +4580,7 @@ function Toast({ message, bgColor, textColor }: { message: string; bgColor?: str
   );
 }
 
-function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, onOpenTrophyRoom, onOpenRelicDetail }: {
+function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, onOpenTrophyRoom, onOpenRelicDetail, parentRole = '' }: {
   coins: number;
   done: Partial<Record<ChoreId, boolean>>;
   battleResult: 'captured' | 'got-away' | null;
@@ -4160,6 +4602,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
   initialAvatarIdx: number;
   onOpenTrophyRoom: () => void;
   onOpenRelicDetail: (itemKey: string) => void;
+  parentRole?: string;
 }) {
   const completedChoresCount = managedChores.filter(c => c.status === 'approved').length;
   const [showGoalModal, setShowGoalModal]           = useState(false);
@@ -4170,14 +4613,14 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
   const [recentTrophies, setRecentTrophies]         = useState<CollectibleEntry[]>([]);
   const [trophiesLoadState, setTrophiesLoadState]   = useState<'loading' | 'error' | 'idle'>('loading');
   useEffect(() => {
-    getCollectibles()
+    getCollectibles(currentKidName)
       .then(all => {
         const seen = new Set<string>();
         setRecentTrophies(all.filter(e => { if (seen.has(e.itemKey)) return false; seen.add(e.itemKey); return true; }).slice(0, 3));
         setTrophiesLoadState('idle');
       })
       .catch(() => setTrophiesLoadState('error'));
-  }, []);
+  }, [currentKidName]);
   const [toastMsg, setToastMsg]           = useState<string | null>(null);
   const toastTimer                        = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (msg: string) => {
@@ -4212,7 +4655,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
               selected={currentKidName || 'Kid view'}
               options={[
                 ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
-                { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
+                { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
             />
@@ -4338,7 +4781,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
         {(trophiesLoadState !== 'idle' || recentTrophies.length > 0) && (
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Recent trophies</Text>
+              <Text style={{ fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Recent trophies</Text>
               <TouchableOpacity onPress={onOpenTrophyRoom} activeOpacity={0.7}>
                 <Text style={{ fontSize: fontSize.base, fontFamily: 'Inter_700Bold', color: '#6B35F0' }}>See all →</Text>
               </TouchableOpacity>
@@ -4457,7 +4900,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
             onCancel={() => { setShowGoalModal(false); setEditingGoal(null); }}
             onGoalCreated={(data) => {
               if (editingGoal) {
-                onEditGoal({ ...editingGoal, name: data.name, amount: data.amount, color: data.color, icon: data.icon, category: data.category });
+                onEditGoal({ ...editingGoal, name: data.name, amount: data.amount, color: data.color, iconKey: data.iconKey, icon: data.icon, category: data.category });
                 showToast('Goal updated! ✅');
               } else {
                 onAddGoal(data);
@@ -4476,7 +4919,7 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
               }
             }}
             savedCents={editingGoal?.savedCents}
-            initialData={editingGoal ? { name: editingGoal.name, amount: editingGoal.amount, category: editingGoal.category, color: editingGoal.color, icon: editingGoal.icon } : undefined}
+            initialData={editingGoal ? { name: editingGoal.name, amount: editingGoal.amount, category: editingGoal.category, color: editingGoal.color, iconKey: editingGoal.iconKey, icon: editingGoal.icon } : undefined}
             monsterName={monsterName}
           />
         </SafeAreaProvider>
@@ -4896,6 +5339,7 @@ function MoneyScreen({
   payoutLog,
   baseRate,
   onConfirm,
+  debugDayOffset = 0,
 }: {
   kidCoins: Record<string, number>;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
@@ -4903,17 +5347,14 @@ function MoneyScreen({
   payoutLog: { kidName: string; amount: number; paidAt: string }[];
   baseRate: string;
   onConfirm: (kidName: string) => void;
+  debugDayOffset?: number;
 }) {
   const insets = useSafeAreaInsets();
 
-  // ── Derive week start (Sunday midnight local) ──────────────────────────────
-  const weekStart = (() => {
-    const now = new Date();
-    const d = new Date(now);
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - d.getDay());
-    return d;
-  })();
+  // ── Week start = Monday 00:00 of the (simulated) current week ───────────────
+  // Anchored to Monday so it matches the weekly chore reset, and derived from the
+  // simulated date so "This Week" rolls over correctly when debug-scrubbing days.
+  const weekStart = new Date(getWeekMondayKey(debugDayOffset));
 
   const isThisWeek = (iso: string) => new Date(iso) >= weekStart;
 
@@ -4951,28 +5392,40 @@ function MoneyScreen({
     // ── Activity filter ───────────────────────────────────────────────────────
   const [activityFilter, setActivityFilter] = useState<string>('all');
 
-  const filteredHistory = activityFilter === 'all'
-    ? choreHistory
-    : choreHistory.filter(e => e.kidName === activityFilter);
+  // Lazy render: the history is unbounded (one entry per approval, never
+  // trimmed), and mounting every row synchronously is what made this screen
+  // slow to open. Render the newest chunk and grow on demand via "Show more".
+  const ACTIVITY_CHUNK = 30;
+  const [visibleCount, setVisibleCount] = useState(ACTIVITY_CHUNK);
 
-  // ── Group by date ─────────────────────────────────────────────────────────
-  const grouped: { date: string; entries: ChoreHistoryEntry[] }[] = [];
-  const seenDates: Record<string, number> = {};
-  filteredHistory.forEach(e => {
-    const d = new Date(e.approvedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    if (seenDates[d] === undefined) {
-      seenDates[d] = grouped.length;
-      grouped.push({ date: d, entries: [] });
-    }
-    grouped[seenDates[d]].entries.push(e);
-  });
+  const filteredHistory = useMemo(() => (
+    activityFilter === 'all'
+      ? choreHistory
+      : choreHistory.filter(e => e.kidName === activityFilter)
+  ), [choreHistory, activityFilter]);
+
+  // ── Group by date — only the visible slice (history is newest-first) ───────
+  const grouped = useMemo(() => {
+    const out: { date: string; entries: ChoreHistoryEntry[] }[] = [];
+    const seenDates: Record<string, number> = {};
+    filteredHistory.slice(0, visibleCount).forEach(e => {
+      const d = new Date(e.approvedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      if (seenDates[d] === undefined) {
+        seenDates[d] = out.length;
+        out.push({ date: d, entries: [] });
+      }
+      out[seenDates[d]].entries.push(e);
+    });
+    return out;
+  }, [filteredHistory, visibleCount]);
+  const hiddenCount = Math.max(0, filteredHistory.length - visibleCount);
 
   // ── Derived for selected kid ──────────────────────────────────────────────
   const selectedBalance = selectedKid ? (kidCoins[selectedKid] ?? 0) : 0;
 
   // ── Next payday (next Sunday) ─────────────────────────────────────────────
   const nextSunday = (() => {
-    const now = new Date();
+    const now = new Date(Date.now() + debugDayOffset * 86_400_000);
     const daysUntil = (7 - now.getDay()) % 7 || 7;
     const d = new Date(now);
     d.setDate(d.getDate() + daysUntil);
@@ -5212,7 +5665,7 @@ function MoneyScreen({
               return (
                 <TouchableOpacity
                   key={f}
-                  onPress={() => setActivityFilter(f)}
+                  onPress={() => { setActivityFilter(f); setVisibleCount(ACTIVITY_CHUNK); }}
                   activeOpacity={0.75}
                   style={{
                     borderRadius: 20,
@@ -5317,6 +5770,27 @@ function MoneyScreen({
               })}
             </View>
           ))}
+
+          {/* Reveal the next chunk of older history on demand */}
+          {hiddenCount > 0 && (
+            <TouchableOpacity
+              onPress={() => setVisibleCount(c => c + ACTIVITY_CHUNK)}
+              activeOpacity={0.75}
+              style={{
+                alignItems: 'center',
+                paddingVertical: 14,
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: '#1A1A1A',
+                backgroundColor: '#FFFFFF',
+                marginTop: 4,
+              }}
+            >
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(15), color: '#1A1A1A' }}>
+                Show {Math.min(ACTIVITY_CHUNK, hiddenCount)} more · {hiddenCount} older
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
 
@@ -5357,13 +5831,14 @@ function MoneyScreen({
   );
 }
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, weekApprovalDays }: {
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: (name: string) => void;
   onAddKid: () => void;
   onEditKid: (k: { name: string; avatarColor: string; avatarIdx: number }) => void;
   managedChores: ManagedChore[];
   onApprove: (id: string, kidName: string) => void;
+  onApproveAll: (id: string, kidName: string) => void;
   onReject: (id: string, note: string, kidName: string) => void;
   baseRate: string;
   onPayKid: () => void;
@@ -5373,11 +5848,13 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   kidCoins: Record<string, number>;
   choreHistory: { id: string; choreName: string; kidName: string; earnedCents: number; approvedAt: string; icon: string | number; bg: string }[];
+  payoutLog: { kidName: string; amount: number; paidAt: string }[];
   weekApprovalDays: string[];
 }) {
   const [reviewingChore, setReviewingChore] = useState<{ chore: ManagedChore; kidName: string } | null>(null);
+  const [payingKid, setPayingKid] = useState<string | null>(null);
   const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
-  useEffect(() => { getEarnedMilestones().then(setEarnedMilestones); }, []);
+  useEffect(() => { getEarnedMilestones(PARENT_OWNER).then(setEarnedMilestones); }, []);
   const parentMilestoneDefs = MILESTONES.filter(m => m.audience === 'parent');
   const earnedIds = new Set(earnedMilestones.map(m => m.id));
   // Newest earned = show yellow dot
@@ -5389,8 +5866,9 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   // Monday=0 ... Saturday=5, Sunday treated as 6 for elapsed calc
   const daysElapsed = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 0-6 within week
 
-  const totalWeeklyTarget = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0);
-  const totalCompleted    = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
+  const allKidNames = kidProfiles.map(k => k.name);
+  // Independent "Everyone" chores count once per eligible kid toward the household total.
+  const { target: totalWeeklyTarget, done: totalCompleted } = householdChoreTotals(managedChores, allKidNames);
   const choresLeft        = Math.max(0, totalWeeklyTarget - totalCompleted);
   const daysLeft          = daysUntilSunday();
 
@@ -5442,12 +5920,12 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
 
   const kidStats: KidStats[] = kidProfiles.map(k => {
     const assignedChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(k.name));
-    const completed  = assignedChores.reduce((s, c) => s + (c.weeklyCompletions ?? 0), 0);
+    const completed  = assignedChores.reduce((s, c) => s + getChoreCompletions(c, k.name), 0);
     const target     = assignedChores.reduce((s, c) => s + frequencyToWeeklyTarget(c.frequency), 0);
-    const pendingCount = assignedChores.filter(c => getChoreStatus(c, k.name) === 'pending').length;
+    const pendingCount = assignedChores.reduce((s, c) => s + getPendingCount(c, k.name), 0);
     const earningsCents = assignedChores.reduce((s, c) => {
-      const approved = c.weeklyCompletions ?? 0;
-      return s + approved * Math.round(parseFloat(baseRate || '0') * 100 * DIFFICULTY_MULTIPLIERS[c.difficulty]);
+      const approved = getChoreCompletions(c, k.name);
+      return s + approved * Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[c.difficulty]);
     }, 0);
     return { profile: k, completed, target, pendingCount, earningsCents };
   });
@@ -5456,7 +5934,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   const allPendingItems: { chore: ManagedChore; kidName: string }[] = [];
   kidProfiles.forEach(k => {
     managedChores.forEach(c => {
-      if ((c.assignedTo.length === 0 || c.assignedTo.includes(k.name)) && getChoreStatus(c, k.name) === 'pending') {
+      if ((c.assignedTo.length === 0 || c.assignedTo.includes(k.name)) && getPendingCount(c, k.name) > 0) {
         allPendingItems.push({ chore: c, kidName: k.name });
       }
     });
@@ -5499,7 +5977,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
         </TouchableOpacity>
       </ScrollView>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100, paddingTop: 8 }}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120, paddingTop: 8 }}>
 
         {/* ── 1. Burndown Card ─────────────────────────────────────────────── */}
         <Card variant="hero" style={{ marginHorizontal: 16, marginBottom: 16, padding: 0 }}>
@@ -5680,7 +6158,9 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                       alignItems: 'center', justifyContent: 'center',
                       borderWidth: 2, borderColor: earned ? '#1A1A1A' : '#D0CEC8',
                     }}>
-                      <Text style={{ fontSize: scale(22), opacity: earned ? 1 : 0.35 }}>{m.icon}</Text>
+                      {m.image
+                        ? <Image source={m.image} style={{ width: 32, height: 32, opacity: earned ? 1 : 0.35 }} resizeMode="contain" />
+                        : <Text style={{ fontSize: scale(22), opacity: earned ? 1 : 0.35 }}>{m.icon}</Text>}
                       {isNewest && (
                         <View style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A' }} />
                       )}
@@ -5709,7 +6189,9 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
             <View style={{ gap: 10 }}>
               {/* Pending approvals — one card per chore */}
               {allPendingItems.map(({ chore, kidName: cKid }, i) => {
-                const earnAmt = (parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2);
+                const pendingCents = chore.childPendingCents?.[cKid]?.[0]
+                  ?? Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+                const earnAmt = (pendingCents / 100).toFixed(2);
                 return (
                   <TouchableOpacity
                     key={`${chore.id}-${cKid}`}
@@ -5745,7 +6227,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                   <TouchableOpacity
                     key={i}
                     activeOpacity={0.8}
-                    onPress={() => onConfirmPayout(k.name)}
+                    onPress={() => setPayingKid(k.name)}
                     style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#E6A817', padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW }}
                   >
                     <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF8E6', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -5776,8 +6258,17 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
         kidProfiles={kidProfiles}
         baseRate={baseRate}
         onApprove={(id) => reviewingChore && onApprove(id, reviewingChore.kidName)}
+        onApproveAll={(id) => reviewingChore && onApproveAll(id, reviewingChore.kidName)}
         onReject={(id, note) => reviewingChore && onReject(id, note, reviewingChore.kidName)}
         onClose={() => setReviewingChore(null)}
+      />
+
+      <PayoutSheet
+        target={payingKid ? kidProfiles.find(k => k.name === payingKid) ?? null : null}
+        weeks={payingKid ? getUnpaidWeeks(payingKid, choreHistory, payoutLog) : []}
+        totalCents={payingKid ? (kidCoins[payingKid] ?? 0) : 0}
+        onConfirm={onConfirmPayout}
+        onClose={() => setPayingKid(null)}
       />
     </CreamBg>
   );
@@ -5785,12 +6276,13 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
 
 // ─── Chore Review Bottom Sheet ────────────────────────────────────────────────
 
-function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprove, onReject, onClose }: {
+function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprove, onApproveAll, onReject, onClose }: {
   chore: ManagedChore | null;
   kidName?: string;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   baseRate: string;
   onApprove: (id: string) => void;
+  onApproveAll: (id: string) => void;
   onReject: (id: string, note: string) => void;
   onClose: () => void;
 }) {
@@ -5811,11 +6303,33 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
 
   if (!chore) return null;
 
-  const childName = chore.assignedTo.length === 1 ? chore.assignedTo[0] : (chore.assignedTo.length > 1 ? chore.assignedTo.join(', ') : 'Everyone');
-  const earnAmt = (parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2);
+  const assignedLabel = chore.assignedTo.length === 1 ? chore.assignedTo[0] : (chore.assignedTo.length > 1 ? chore.assignedTo.join(', ') : 'Everyone');
+  // childName is used for the note field — always the specific kid being reviewed.
+  const childName = kidName || assignedLabel;
+  // metaLabel is the assignment line in the header card:
+  //   • "Everyone + first to finish" → show scope + mode so the parent knows
+  //     approving this clears it for the whole household, not just one kid.
+  //   • "Everyone + independent" or specific kid → show who submitted.
+  const isSharedEveryone = chore.assignedTo.length === 0 && chore.completionMode === 'shared';
+  const metaLabel = isSharedEveryone ? 'Everyone · first to finish' : childName;
 
+  const submittedAt = chore.childSubmittedAt?.[kidName];
+  const submittedLabel = submittedAt
+    ? new Date(submittedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : '—';
+  // Show what the NEXT approval will actually pay: the amount snapshotted at
+  // submit (oldest unit first), falling back to the current rate for legacy items.
+  const nextUnitCents = chore.childPendingCents?.[kidName]?.[0]
+    ?? Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+  const earnAmt = (nextUnitCents / 100).toFixed(2);
+
+  // How many submissions are waiting (today's + any carried over from prior days).
+  const pendingCount = getPendingCount(chore, kidName);
   const handleApprove = () => {
     closeSheet(() => { onApprove(chore.id); onClose(); });
+  };
+  const handleApproveAll = () => {
+    closeSheet(() => { onApproveAll(chore.id); onClose(); });
   };
   const handleReject = () => {
     closeSheet(() => { onReject(chore.id, note.trim()); onClose(); });
@@ -5848,7 +6362,7 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
                   <ChoreIcon icon={chore.icon} size={34} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{childName} · {chore.frequency}</Text>
+                  <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{metaLabel} · {chore.frequency}</Text>
                   <Text style={{ fontSize: scale(13), fontFamily: 'Inter_600SemiBold', marginTop: 2 }}>
                     <Text style={{ color: '#ABABAB' }}>Earns </Text>
                     <Text style={{ color: '#6B35F0' }}>${earnAmt}</Text>
@@ -5861,11 +6375,11 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                 <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', gap: 4 }}>
                   <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', textTransform: 'uppercase', letterSpacing: 0.8 }}>Submitted</Text>
-                  <Text style={{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>8:47 am</Text>
+                  <Text style={{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{submittedLabel}</Text>
                 </View>
                 <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', gap: 4 }}>
                   <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', textTransform: 'uppercase', letterSpacing: 0.8 }}>This Week</Text>
-                  <Text style={{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{chore.weeklyCompletions} / {frequencyToWeeklyTarget(chore.frequency)}</Text>
+                  <Text style={{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{getChoreCompletions(chore, kidName)} / {frequencyToWeeklyTarget(chore.frequency)}</Text>
                 </View>
               </View>
 
@@ -5886,6 +6400,16 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
                 />
               </View>
 
+              {/* Backlog banner — shown when more than one day is waiting */}
+              {pendingCount > 1 && (
+                <View style={{ backgroundColor: '#FFF4D6', borderRadius: 12, borderWidth: 2, borderColor: '#E6A817', paddingHorizontal: 14, paddingVertical: 10, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ fontSize: scale(16) }}>⏳</Text>
+                  <Text style={{ flex: 1, fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#A0660A' }}>
+                    {pendingCount} days waiting for approval
+                  </Text>
+                </View>
+              )}
+
               {/* Action buttons */}
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <TouchableOpacity
@@ -5900,9 +6424,20 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
                   onPress={handleApprove}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>✓ Approve</Text>
+                  <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>{pendingCount > 1 ? '✓ Approve 1' : '✓ Approve'}</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Approve all — only when a backlog has accumulated */}
+              {pendingCount > 1 && (
+                <TouchableOpacity
+                  style={{ marginTop: 10, backgroundColor: '#27AE60', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 15, alignItems: 'center' }}
+                  onPress={handleApproveAll}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>✓✓ Approve all {pendingCount} days</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </Animated.View>
         </Animated.View>
@@ -5911,10 +6446,116 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
   );
 }
 
+// ─── Payout Bottom Sheet ──────────────────────────────────────────────────────
+// Confirms a payout for one child, surfacing a per-week breakdown of what's owed
+// (especially when multiple unpaid weeks have accumulated). Driven by a non-null
+// `target`; opens itself on mount, mirrors ChoreReviewSheet's slide-up chrome.
+
+function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
+  target: { name: string; avatarColor: string; avatarIdx: number } | null;
+  weeks: UnpaidWeek[];
+  totalCents: number;
+  onConfirm: (kidName: string) => void;
+  onClose: () => void;
+}) {
+  const { open, openSheet, closeSheet, scrimOpacity, sheetY } = useSheet(600);
+  const insets = useSafeAreaInsets();
+  const prevName = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (target && target.name !== prevName.current) {
+      prevName.current = target.name;
+      openSheet();
+    }
+    if (!target) prevName.current = null;
+  }, [target]);
+
+  if (!target) return null;
+
+  const handlePay = () => closeSheet(() => { onConfirm(target.name); onClose(); });
+
+  return (
+    <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet(() => onClose())}>
+      <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', opacity: scrimOpacity }}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => closeSheet(() => onClose())} />
+        <Animated.View
+          style={{ backgroundColor: '#FAF9F5', borderTopLeftRadius: 28, borderTopRightRadius: 28, transform: [{ translateY: sheetY }] }}
+          onStartShouldSetResponder={() => true}
+        >
+          <ScrollView bounces={false} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 24 }}>
+            {/* Handle */}
+            <View style={{ width: 40, height: 4, backgroundColor: '#D0CEC8', borderRadius: 2, alignSelf: 'center', marginBottom: 16 }} />
+
+            {/* Header — avatar + name */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <Image source={getAvatarImage(target.avatarIdx)} style={{ width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: '#1A1A1A' }} resizeMode="cover" />
+              <Text style={{ flex: 1, fontSize: scale(24), fontFamily: 'FredokaOne_400Regular', color: '#1A1A1A' }}>{target.name}</Text>
+              <TouchableOpacity onPress={() => closeSheet(() => onClose())} style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+                <View style={{ width: 12, height: 12, backgroundColor: '#1A1A1A', borderRadius: 2 }} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Per-week rows */}
+            <View style={{ gap: 10, marginBottom: 14 }}>
+              {weeks.map(w => (
+                <View key={w.weekKey} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{w.label}</Text>
+                    <Text style={{ fontSize: scale(13), fontFamily: 'Inter_500Medium', color: '#ABABAB', marginTop: 2 }}>
+                      {w.choreCount} chore{w.choreCount !== 1 ? 's' : ''} completed
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>{fmtCoins(w.earnedCents)}</Text>
+                </View>
+              ))}
+              {/* Coins beyond the chore-history weeks (boss-capture bonuses) — shown
+                  so the rows visibly add up to the total owed below. */}
+              {(() => {
+                const weeksCents = weeks.reduce((s, w) => s + w.earnedCents, 0);
+                const bonus = weeks.length > 0 ? totalCents - weeksCents : 0;
+                if (bonus <= 0) return null;
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, gap: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>Boss Battle bonus 🏆</Text>
+                    </View>
+                    <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>{fmtCoins(bonus)}</Text>
+                  </View>
+                );
+              })()}
+            </View>
+
+            {/* Divider */}
+            <View style={{ height: 1, backgroundColor: '#E2DFD7', marginBottom: 14 }} />
+
+            {/* Total owed */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Total owed</Text>
+              <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{fmtCoins(totalCents)}</Text>
+            </View>
+
+            {/* CTA */}
+            <TouchableOpacity
+              style={{ backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
+              onPress={handlePay}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>Mark as paid</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={{ padding: 14, alignItems: 'center', marginTop: 4 }} onPress={() => closeSheet(() => onClose())} activeOpacity={0.7}>
+              <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#ABABAB' }}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+}
+
 // ─── Parent Chores Screen (daily status view) ─────────────────────────────────
 
 
-function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, baseRate, onApprove, onReject, kidProfiles }: {
+function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, baseRate, onApprove, onApproveAll, onReject, kidProfiles }: {
   chores: ManagedChore[];
   history: ChoreHistoryEntry[];
   onBack: () => void;
@@ -5923,6 +6564,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
   onEdit: (c: ManagedChore) => void;
   baseRate: string;
   onApprove: (id: string, kidName: string) => void;
+  onApproveAll: (id: string, kidName: string) => void;
   onReject: (id: string, note: string, kidName: string) => void;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
 }) {
@@ -5950,7 +6592,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
   const choresByKid = kidNames.map(name => ({
     name,
     profile: kidProfiles.find(k => k.name === name),
-    chores: chores.filter(c => (c.assignedTo.length === 0 || c.assignedTo.includes(name)) && getChoreStatus(c, name) !== 'approved'),
+    chores: chores.filter(c => (c.assignedTo.length === 0 || c.assignedTo.includes(name)) && (getChoreStatus(c, name) !== 'approved' || getPendingCount(c, name) > 0)),
   })).filter(g => g.chores.length > 0);
 
   // If no kids yet, show unassigned chores under a generic group so they're visible
@@ -5960,7 +6602,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
 
   // Stat counts use per-child status so shared chores count separately per kid
   const approvedCount = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => getChoreStatus(c, g.name) === 'approved').length, 0);
-  const pendingCount  = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => getChoreStatus(c, g.name) === 'pending').length, 0);
+  const pendingCount  = choresByKid.reduce((acc, g) => acc + g.chores.reduce((s, c) => s + getPendingCount(c, g.name), 0), 0);
   const todoCount     = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => { const s = getChoreStatus(c, g.name); return s === 'active' || s === 'rejected'; }).length, 0);
 
   // History: group entries by day
@@ -5983,6 +6625,12 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
     onApprove(id, kidName);
     setReviewingChore(null);
     showLocalToast(`✓ Approved for ${kidName}!`, '#E1F5EE');
+  };
+
+  const handleApproveAll = (id: string, kidName: string) => {
+    onApproveAll(id, kidName);
+    setReviewingChore(null);
+    showLocalToast(`✓ Approved all for ${kidName}!`, '#E1F5EE');
   };
 
   const handleReject = (id: string, note: string, kidName: string) => {
@@ -6028,7 +6676,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
         <View style={{ flex: 1 }} />
       </View>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 100 }}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 }}>
         {activeTab === 'today' ? (
           choresByKid.length === 0 && unassignedGroup.length === 0 ? (
             <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
@@ -6060,16 +6708,17 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                   <View style={{ gap: 8 }}>
                     {group.chores.map(chore => {
                       const choreStatus = getChoreStatus(chore, group.name);
-                      const isApproved = choreStatus === 'approved';
-                      const isPending  = choreStatus === 'pending';
+                      const pending    = getPendingCount(chore, group.name); // today's + carried-over backlog
+                      const reviewable = pending > 0;
+                      const isApproved = choreStatus === 'approved' && !reviewable;
                       const isRejected = choreStatus === 'rejected';
                       const rejNote    = getChoreRejectionNote(chore, group.name);
                       const hasNote    = isRejected && !!rejNote;
-                      const earnAmt    = (parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2);
+                      const earnAmt    = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty] / 100).toFixed(2);
                       return (
-                        <View key={chore.id} style={[s.homeQuestCard, isPending && s.homeQuestCardPending, { flexDirection: 'column', overflow: 'hidden' }]}>
+                        <View key={chore.id} style={[s.homeQuestCard, reviewable && s.homeQuestCardPending, { flexDirection: 'column', overflow: 'hidden' }]}>
                           {isApproved && <View style={s.homeQuestSweep} />}
-                          {isPending  && <View style={s.homeQuestSweepPending} />}
+                          {reviewable && <View style={s.homeQuestSweepPending} />}
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                             <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
                               <ChoreIcon icon={chore.icon} size={45} />
@@ -6078,18 +6727,23 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                               <Text style={[s.homeQuestTitle, isApproved && s.homeQuestTitleDone]}>{chore.name}</Text>
                               <Text style={{ fontSize: scale(13), fontFamily: 'Inter_500Medium', color: '#ABABAB', marginTop: 2 }}>{chore.frequency} · ${earnAmt}</Text>
                             </View>
-                            {isApproved ? (
-                              <View style={{ borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1.5, borderColor: '#27AE60', backgroundColor: '#FFFFFF' }}>
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#27AE60' }}>✓ Approved</Text>
-                              </View>
-                            ) : isPending ? (
+                            {reviewable ? (
                               <TouchableOpacity
-                                style={{ borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1.5, borderColor: '#E6A817', backgroundColor: '#FFFFFF' }}
+                                style={{ borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1.5, borderColor: '#E6A817', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 5 }}
                                 onPress={() => setReviewingChore({ chore, kidName: group.name })}
                                 activeOpacity={0.7}
                               >
                                 <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>⏱ Review</Text>
+                                {pending > 1 && (
+                                  <View style={{ minWidth: scale(18), height: scale(18), borderRadius: scale(9), backgroundColor: '#E6A817', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
+                                    <Text style={{ fontSize: scale(11), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>{pending}</Text>
+                                  </View>
+                                )}
                               </TouchableOpacity>
+                            ) : isApproved ? (
+                              <View style={{ borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1.5, borderColor: '#27AE60', backgroundColor: '#FFFFFF' }}>
+                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#27AE60' }}>✓ Approved</Text>
+                              </View>
                             ) : hasNote ? (
                               <View style={{ borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1.5, borderColor: '#E6A817', backgroundColor: '#FFFFFF' }}>
                                 <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>💬 Note</Text>
@@ -6155,6 +6809,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
         kidProfiles={kidProfiles}
         baseRate={baseRate}
         onApprove={(id) => reviewingChore && handleApprove(id, reviewingChore.kidName)}
+        onApproveAll={(id) => reviewingChore && handleApproveAll(id, reviewingChore.kidName)}
         onReject={(id, note) => reviewingChore && handleReject(id, note, reviewingChore.kidName)}
         onClose={() => setReviewingChore(null)}
       />
@@ -6179,6 +6834,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
   const [frequency, setFrequency]     = useState(existing?.frequency ?? FREQUENCY_OPTIONS[0]);
   const [difficulty, setDifficulty]   = useState<1 | 2 | 3>(existing?.difficulty ?? 1);
   const [assignedTo, setAssignedTo]   = useState<string[]>(existing?.assignedTo ?? []);
+  const [completionMode, setCompletionMode] = useState<'shared' | 'independent'>(existing?.completionMode ?? 'shared');
   const [selectedIcon, setSelectedIcon] = useState<{ icon: string | number; bg: string }>(
     existing ? { icon: existing.icon, bg: existing.bg } : CHORE_ICONS[0]
   );
@@ -6223,6 +6879,12 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         bg: selectedIcon.bg,
         status: existing?.status ?? 'active' as const,
         weeklyCompletions: existing?.weeklyCompletions ?? 0,
+        // "How" only applies to Everyone chores; single-assignee behaves as shared.
+        completionMode: assignedTo.length === 0 ? completionMode : undefined,
+        // Preserve per-child progress when editing an existing chore.
+        childStatus:         existing?.childStatus,
+        childRejectionNote:  existing?.childRejectionNote,
+        childCompletions:    existing?.childCompletions,
       };
       onSave(chore);
     } catch (err) {
@@ -6295,7 +6957,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {([1, 2, 3] as const).map(level => {
               const active = difficulty === level;
-              const pay = (parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[level]).toFixed(2);
+              const pay = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[level] / 100).toFixed(2);
               return (
                 <TouchableOpacity
                   key={level}
@@ -6346,6 +7008,43 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
             })}
           </View>
         </View>
+
+        {/* Completion mode — only meaningful for "Everyone" with 2+ kids */}
+        {assignedTo.length === 0 && kids.length > 1 && (
+          <View style={p.formCard}>
+            <Text style={p.formLabel}>How it's completed</Text>
+            <View style={p.modeCard}>
+              {([
+                { mode: 'shared',      title: 'First to finish earns it',     desc: 'One task. Whoever completes it first gets the credit and the allowance.' },
+                { mode: 'independent', title: 'Each completes independently', desc: 'Each child has their own copy. Each can earn credit.' },
+              ] as const).map((opt, i) => {
+                const active = completionMode === opt.mode;
+                return (
+                  <TouchableOpacity
+                    key={opt.mode}
+                    style={[p.modeRow, i > 0 && p.modeRowDivider, active && p.modeRowActive]}
+                    onPress={() => setCompletionMode(opt.mode)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[p.modeRadio, active && p.modeRadioActive]}>
+                      {active && <View style={p.modeRadioDot} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[p.modeTitle, active && p.modeTitleActive]}>{opt.title}</Text>
+                      <Text style={p.modeDesc}>{opt.desc}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, paddingHorizontal: 2 }}>
+              <Text style={{ fontSize: scale(13), color: C.muted }}>ⓘ</Text>
+              <Text style={{ flex: 1, fontSize: scale(13), lineHeight: scale(18), color: C.muted, fontFamily: 'Inter_500Medium' }}>
+                Good for shared household tasks — dishes, vacuuming, taking out the bins.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Buttons */}
         {!!saveError && (
@@ -6404,7 +7103,7 @@ function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate 
           <Text style={{ fontSize: scale(28), color: '#6B35F0' }}>+</Text>
         </TouchableOpacity>
       </View>
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 100 }}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 120 }}>
         {chores.length === 0 ? (
           <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
             <Text style={{ fontSize: scale(36) }}>🧹</Text>
@@ -6413,7 +7112,7 @@ function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate 
             <Button label="+ Add a chore" onPress={onAdd} style={{ marginTop: 8 }} />
           </View>
         ) : chores.map(chore => {
-          const earnAmt = (parseFloat(baseRate || '0') * DIFFICULTY_MULTIPLIERS[chore.difficulty]).toFixed(2);
+          const earnAmt = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty] / 100).toFixed(2);
           return (
             <TouchableOpacity
               key={chore.id}
@@ -6439,13 +7138,11 @@ function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate 
   );
 }
 
-function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapEnabled, setWeeklyCap, battleCoinBonusEnabled, setBattleCoinBonusEnabled, battleCoinBonusMultiplier, setBattleCoinBonusMultiplier }: {
+function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, battleCoinBonusEnabled, setBattleCoinBonusEnabled, battleCoinBonusMultiplier, setBattleCoinBonusMultiplier }: {
   onBack: () => void;
   onRateGuide: () => void;
   baseRate: string;
   setBaseRate: (v: string) => void;
-  weeklyCapEnabled: boolean;
-  setWeeklyCap: (v: boolean) => void;
   battleCoinBonusEnabled: boolean;
   setBattleCoinBonusEnabled: (v: boolean) => void;
   battleCoinBonusMultiplier: number;
@@ -6464,7 +7161,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 100 }}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 120 }}>
         {/* Default currency */}
         <View style={p.sectionCard}>
           <Text style={p.sectionCardTitle}>Default currency</Text>
@@ -6489,23 +7186,16 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
               <TextInput
                 style={p.rateInput}
                 value={baseRate}
-                onChangeText={setBaseRate}
+                // Digits and a single decimal point only — pasted text or locale
+                // commas would otherwise parse to NaN downstream.
+                onChangeText={(v) => {
+                  const cleaned = v.replace(',', '.').replace(/[^0-9.]/g, '');
+                  const firstDot = cleaned.indexOf('.');
+                  setBaseRate(firstDot === -1 ? cleaned : cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, ''));
+                }}
                 keyboardType="decimal-pad"
               />
             </View>
-          </View>
-
-          <View style={[p.settingsRow, { borderTopWidth: 1, borderTopColor: C.border, marginTop: 12, paddingTop: 12 }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={p.settingsRowLabel}>Weekly earning cap (optional)</Text>
-              <Text style={p.settingsRowSub}>Limit the max amount your kid can earn in a week.</Text>
-            </View>
-            <Switch
-              value={weeklyCapEnabled}
-              onValueChange={setWeeklyCap}
-              trackColor={{ false: '#D0CEC8', true: '#C5F215' }}
-              thumbColor={weeklyCapEnabled ? '#1A1A1A' : '#F4F3F4'}
-            />
           </View>
 
         </View>
@@ -6520,12 +7210,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
               <Text style={p.settingsRowLabel}>Enable capture payout</Text>
               <Text style={p.settingsRowSub}>Pay out the boss's capture value on win.</Text>
             </View>
-            <Switch
-              value={battleCoinBonusEnabled}
-              onValueChange={setBattleCoinBonusEnabled}
-              trackColor={{ false: '#D0CEC8', true: '#C5F215' }}
-              thumbColor={battleCoinBonusEnabled ? '#1A1A1A' : '#F4F3F4'}
-            />
+            <Toggle value={battleCoinBonusEnabled} onValueChange={setBattleCoinBonusEnabled} />
           </View>
 
           {battleCoinBonusEnabled && (
@@ -6561,14 +7246,6 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
           )}
         </View>
 
-        {/* History row */}
-        <TouchableOpacity style={p.sectionCard} activeOpacity={0.7}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={p.sectionCardTitle}>View economy history</Text>
-            <Text style={{ fontSize: scale(18), color: C.muted }}>›</Text>
-          </View>
-        </TouchableOpacity>
-
         {/* Rate guide link */}
         <TouchableOpacity onPress={onRateGuide} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 8 }}>
           <Text style={p.rateGuideLink}>Rate guide ›</Text>
@@ -6580,16 +7257,15 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate, weeklyCapE
 
 function RateGuideScreen({ onBack }: { onBack: () => void }) {
   const rates = [
-    { effort: 'Very easy', time: '< 5 min',     range: '$0.10 – $0.25', dot: '#3B8A3A' },
-    { effort: 'Easy',      time: '5 – 15 min',  range: '$0.25 – $0.75', dot: '#3B8A3A' },
-    { effort: 'Medium',    time: '15 – 30 min', range: '$0.75 – $1.50', dot: '#F5A623' },
-    { effort: 'Hard',      time: '30 – 60 min', range: '$1.50 – $2.50', dot: '#F5823A' },
-    { effort: 'Very hard', time: '60+ min',     range: '$2.50+',        dot: '#E53E3E' },
+    { effort: 'Very easy', time: '< 5 min',    range: '$0.10–$0.25', dot: '#22C55E' },
+    { effort: 'Easy',      time: '5–15 min',   range: '$0.25–$0.75', dot: '#84CC16' },
+    { effort: 'Medium',    time: '15–30 min',  range: '$0.75–$1.50', dot: '#F59E0B' },
+    { effort: 'Hard',      time: '30–60 min',  range: '$1.50–$2.50', dot: '#F97316' },
+    { effort: 'Very hard', time: '60+ min',    range: '$2.50+',      dot: '#EF4444' },
   ];
 
   return (
     <CreamBg>
-      {/* Header */}
       <View style={p.screenHeader}>
         <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
           <Text style={p.backBtnText}>←</Text>
@@ -6598,43 +7274,44 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 100 }}>
-        {/* Info card */}
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 120 }}>
+
+        {/* Purple info card */}
         <View style={p.rateInfoCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={p.rateInfoText}>These are suggested rates based on typical time and effort.</Text>
-            <TouchableOpacity style={p.learnMoreBtn} activeOpacity={0.7}>
-              <Text style={p.learnMoreText}>Learn more</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={{ fontSize: scale(40) }}>🪙</Text>
+          <Text style={{ fontSize: scale(22) }}>💡</Text>
+          <Text style={p.rateInfoText}>Suggested rates based on typical time and effort.</Text>
         </View>
 
-        {/* Table */}
-        <View style={p.sectionCard}>
-          {/* Header row */}
-          <View style={[p.rateTableRow, { borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: 10, marginBottom: 4 }]}>
-            <Text style={[p.rateTableHeader, { flex: 1.2 }]}>Effort</Text>
+        {/* Table card */}
+        <View style={[p.sectionCard, { padding: 0, overflow: 'hidden' }]}>
+          {/* Dark header */}
+          <View style={p.rateTableHead}>
+            <Text style={[p.rateTableHeader, { flex: 1.4 }]}>Effort</Text>
             <Text style={[p.rateTableHeader, { flex: 1.2 }]}>Time</Text>
-            <Text style={[p.rateTableHeader, { flex: 1.4 }]}>Suggested rate</Text>
+            <Text style={[p.rateTableHeader, { flex: 1.4 }]}>Rate</Text>
           </View>
+          {/* Rows */}
           {rates.map((row, i) => (
-            <View key={row.effort} style={[p.rateTableRow, i < rates.length - 1 && { borderBottomWidth: 1, borderBottomColor: '#F0EEE8', paddingBottom: 12, marginBottom: 4 }]}>
-              <View style={[{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+            <View
+              key={row.effort}
+              style={[p.rateTableRow, i < rates.length - 1 && { borderBottomWidth: 1, borderBottomColor: '#E8E6E0' }]}
+            >
+              <View style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <View style={[p.rateDot, { backgroundColor: row.dot }]} />
                 <Text style={p.rateTableCell}>{row.effort}</Text>
               </View>
-              <Text style={[p.rateTableCell, { flex: 1.2 }]}>{row.time}</Text>
-              <Text style={[p.rateTableCell, { flex: 1.4 }]}>{row.range}</Text>
+              <Text style={[p.rateTableCell, { flex: 1.2, color: '#888' }]}>{row.time}</Text>
+              <Text style={[p.rateTableCell, { flex: 1.4, fontFamily: 'Inter_800ExtraBold' }]}>{row.range}</Text>
             </View>
           ))}
         </View>
 
-        {/* Note card */}
-        <View style={p.noteCard}>
-          <Text style={{ fontSize: scale(20), marginRight: 8 }}>💡</Text>
-          <Text style={p.noteText}>These are just suggestions. You know your child and what's fair!</Text>
+        {/* Lime footer card */}
+        <View style={p.rateLimeCard}>
+          <Text style={{ fontSize: scale(22) }}>🧡</Text>
+          <Text style={p.rateLimeText}>These are just suggestions. You know your child and what's fair!</Text>
         </View>
+
       </ScrollView>
     </CreamBg>
   );
@@ -6665,7 +7342,7 @@ function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   );
 }
 
-function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles }: {
+function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles, sessionUser, parentRole, pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName }: {
   onNav: (s: ParentScreen) => void;
   baseRate: string;
   onAddKid?: () => void;
@@ -6674,13 +7351,20 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidA
   kidApprovalSettings: Record<string, boolean>;
   setKidApprovalSettings: (v: Record<string, boolean>) => void;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
+  sessionUser?: SessionUser | null;
+  parentRole?: string;
+  pinEnabled: boolean;
+  savedPin: string;
+  onSavePin: (pin: string) => void;
+  onDisablePin: () => void;
+  onSaveName: (name: string) => void;
 }) {
   const [sub, setSub] = useState<SettingsSubScreen>('main');
   const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
   if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} kidProfiles={kidProfiles} />;
   if (sub === 'battle')   return <SettingsBattleScreen   onBack={() => setSub('main')} baseRate={baseRate} />;
-  if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} />;
+  if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} />;
   if (sub === 'approval') return <SettingsApprovalScreen onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={kidProfiles} />;
 
   return (
@@ -6733,14 +7417,26 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidA
 
 function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
   const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
-  useEffect(() => { getEarnedMilestones().then(setEarnedMilestones); }, []);
+  const [detailMilestone, setDetailMilestone]   = useState<MilestoneDef | null>(null);
+  useEffect(() => { getEarnedMilestones(PARENT_OWNER).then(setEarnedMilestones); }, []);
   const earnedMap = new Map(earnedMilestones.map(m => [m.id, m.earnedAt]));
   const parentDefs = MILESTONES.filter(m => m.audience === 'parent');
   const earned = parentDefs.filter(m => earnedMap.has(m.id));
   const locked = parentDefs.filter(m => !earnedMap.has(m.id));
 
+  if (detailMilestone) {
+    return (
+      <ParentMilestoneDetail
+        milestone={detailMilestone}
+        earned={earnedMilestones.find(e => e.id === detailMilestone.id)}
+        allEarned={earnedMilestones}
+        onBack={() => setDetailMilestone(null)}
+      />
+    );
+  }
+
   const renderRow = (m: MilestoneDef, earnedAt?: string) => (
-    <View key={m.id} style={{
+    <TouchableOpacity key={m.id} onPress={() => setDetailMilestone(m)} activeOpacity={0.8} style={{
       flexDirection: 'row', alignItems: 'center', gap: 14,
       backgroundColor: earnedAt ? '#FFFFFF' : '#F3F1EC',
       borderRadius: 14, borderWidth: 2,
@@ -6755,7 +7451,9 @@ function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
         borderWidth: 2, borderColor: earnedAt ? '#1A1A1A' : '#D0CEC8',
         flexShrink: 0,
       }}>
-        <Text style={{ fontSize: scale(24) }}>{m.icon}</Text>
+        {m.image
+          ? <Image source={m.image} style={{ width: 32, height: 32 }} resizeMode="contain" />
+          : <Text style={{ fontSize: scale(24) }}>{m.icon}</Text>}
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(15), color: '#1A1A1A', marginBottom: 2 }}>{m.name}</Text>
@@ -6771,7 +7469,7 @@ function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
           <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(11), color: '#3B6D11' }}>✓</Text>
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -6783,7 +7481,7 @@ function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
         <Text style={p.screenTitle}>Your Milestones</Text>
         <View style={p.backBtn} />
       </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
         {/* Summary */}
         <View style={{ backgroundColor: PURPLE, borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, marginBottom: 24, alignItems: 'center' }}>
           <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(40), color: '#FFFFFF' }}>{earned.length}</Text>
@@ -6920,9 +7618,11 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBa
         <View style={{ width: 40 }} />
       </View>
       {kidProfiles.length === 0 ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16 }}>
-          <Text style={{ fontSize: 64 }}>🧒</Text>
-          <Text style={{ fontFamily: 'Fredoka_700Bold', fontSize: scale(26), color: '#1A1A1A', textAlign: 'center' }}>No kids yet</Text>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16, paddingBottom: '20%' }}>
+          <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center' }}>
+            <Image source={getAvatarImage(0)} style={{ width: 96, height: 96, borderRadius: 48 }} resizeMode="cover" />
+          </View>
+          <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(24), color: '#1A1A1A', textAlign: 'center' }}>No kids yet</Text>
           <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(15), color: '#ABABAB', textAlign: 'center', lineHeight: 22 }}>
             This is where your children will appear. Add a kid to get started.
           </Text>
@@ -7008,7 +7708,7 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
   const [bonusEnabled, setBonusEnabled]   = useState(true);
   const [bonusPct, setBonusPct]           = useState(25);
   const [scrollEnabled, setScrollEnabled] = useState(true);
-  const cosmetics = ['Monster skin', 'Victory dance', 'XP boost', 'Badge', 'Evolution progress'];
+  const captureRewards = ['Captured boss', 'Collectible relic'];
 
   const base = parseFloat(baseRate) || 0;
   const bonusAmount = (base * bonusPct / 100).toFixed(2);
@@ -7040,13 +7740,7 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
               <Text style={ps.rowTitle}>Cash bonus for winning</Text>
               <Text style={ps.rowSub}>Pay a bonus when a boss is defeated</Text>
             </View>
-            <TouchableOpacity
-              style={[ps.toggle, bonusEnabled && ps.toggleOn]}
-              onPress={() => setBonusEnabled(v => !v)}
-              activeOpacity={0.8}
-            >
-              <View style={[ps.toggleThumb, bonusEnabled && ps.toggleThumbOn]} />
-            </TouchableOpacity>
+            <Toggle value={bonusEnabled} onValueChange={setBonusEnabled} />
           </View>
 
           {bonusEnabled && (
@@ -7075,12 +7769,12 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
           )}
         </View>
 
-        {/* Cosmetic rewards */}
-        <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>Always unlocked on win</Text>
+        {/* Capture rewards */}
+        <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>Always earned on win</Text>
         <View style={[p.sectionCard, { backgroundColor: '#F3EEFF' }]}>
-          <Text style={[ps.rowTitle, { color: '#6B35F0', marginBottom: 10 }]}>✨  Cosmetic rewards</Text>
+          <Text style={[ps.rowTitle, { color: '#6B35F0', marginBottom: 10 }]}>🏆  Capture rewards</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {cosmetics.map(c => (
+            {captureRewards.map(c => (
               <View key={c} style={ps.cosmeticPill}><Text style={ps.cosmeticText}>{c}</Text></View>
             ))}
           </View>
@@ -7088,7 +7782,7 @@ function SettingsBattleScreen({ onBack, baseRate }: { onBack: () => void; baseRa
 
         <View style={p.noteCard}>
           <Text style={{ fontSize: scale(18), marginRight: 8 }}>💡</Text>
-          <Text style={p.noteText}>Cosmetic rewards are always given when a boss is defeated, regardless of the cash bonus setting.</Text>
+          <Text style={p.noteText}>When a boss is defeated your kid captures it into their collection and earns a collectible relic — always, regardless of the cash bonus setting.</Text>
         </View>
       </ScrollView>
     </CreamBg>
@@ -7124,81 +7818,85 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
         <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
           <Text style={p.backBtnText}>←</Text>
         </TouchableOpacity>
-        <Text style={p.screenTitle}>Approval settings</Text>
+        <Text style={p.screenTitle}>Chore Approval</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 120 }}>
-        {/* Hero */}
-        <View style={[ps.battleHero, { backgroundColor: '#1A3A2A' }]}>
-          <Text style={{ fontSize: scale(44) }}>✅</Text>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
+        {/* Header card */}
+        <View style={ps.apprHeaderCard}>
+          <View style={ps.apprHeaderIcon}>
+            <Text style={{ fontSize: scale(24) }}>✅</Text>
+          </View>
           <View style={{ flex: 1 }}>
-            <Text style={ps.battleHeroTitle}>Chore approval</Text>
-            <Text style={ps.battleHeroSub}>Choose which kids need your sign-off before earning XP and coins.</Text>
+            <Text style={ps.apprHeaderTitle}>Who needs sign-off?</Text>
+            <Text style={ps.apprHeaderSub}>Choose which kids need your approval before earning XP and coins.</Text>
           </View>
         </View>
 
-        {/* Quick actions */}
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+        {/* Per-kid cards */}
+        <Text style={ps.apprSectionLabel}>Per-kid settings</Text>
+        {kids.map((kid) => {
+          const needsApproval = kidApprovalSettings[kid] ?? true;
+          const profile = kidProfiles.find(k => k.name === kid);
+          return (
+            <View key={kid} style={ps.apprKidCard}>
+              {/* Header: avatar + name + badge */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: profile?.avatarColor ?? '#F0F0F0', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#111', ...SOLID_SHADOW }}>
+                  <Image source={getAvatarImage(profile?.avatarIdx ?? 0)} style={{ width: 34, height: 34, borderRadius: 17 }} resizeMode="cover" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={ps.apprKidName}>{kid}</Text>
+                  <View style={[ps.apprBadge, needsApproval ? ps.apprBadgeRequire : ps.apprBadgeAuto]}>
+                    <Text style={[ps.apprBadgeText, { color: needsApproval ? '#7B3FF2' : '#5A7A00' }]}>
+                      {needsApproval ? '🔒 Needs approval' : '⚡ Auto-approved'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Toggle row */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={ps.apprToggleMain}>{needsApproval ? 'Require approval' : 'Auto-approve'}</Text>
+                  <Text style={ps.apprToggleSub}>
+                    {needsApproval ? 'XP and coins held until you tap Approve.' : 'Rewards granted instantly when marked done.'}
+                  </Text>
+                </View>
+                <Toggle value={needsApproval} onValueChange={() => toggle(kid)} />
+              </View>
+            </View>
+          );
+        })}
+
+        {/* Shortcuts */}
+        <Text style={ps.apprSectionLabel}>Shortcuts</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           <TouchableOpacity
-            style={[p.sectionCard, { flex: 1, alignItems: 'center', paddingVertical: 14, opacity: allOn ? 0.45 : 1 }]}
+            style={[ps.apprShortcutBtn, { opacity: allOn ? 0.45 : 1 }]}
             onPress={() => setAll(true)}
             activeOpacity={0.7}
             disabled={allOn}
           >
-            <Text style={{ fontSize: scale(20), marginBottom: 4 }}>🔒</Text>
-            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.text }}>Require all</Text>
+            <Text style={ps.apprShortcutText}>🔒 Require all</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[p.sectionCard, { flex: 1, alignItems: 'center', paddingVertical: 14, opacity: allOff ? 0.45 : 1 }]}
+            style={[ps.apprShortcutBtn, { opacity: allOff ? 0.45 : 1 }]}
             onPress={() => setAll(false)}
             activeOpacity={0.7}
             disabled={allOff}
           >
-            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(22), height: scale(22), marginBottom: 4 }} resizeMode="contain" />
-            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.text }}>Auto-approve all</Text>
+            <Text style={ps.apprShortcutText}>⚡ Auto all</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Per-kid toggles */}
-        <View style={p.sectionCard}>
-          {kids.map((kid, idx) => {
-            const needsApproval = kidApprovalSettings[kid] ?? true;
-            const profile = kidProfiles.find(k => k.name === kid);
-            return (
-              <View key={kid}>
-                {idx > 0 && <View style={{ height: 1, backgroundColor: C.border }} />}
-                <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 }}>
-                  {/* Avatar */}
-                  <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: profile?.avatarColor ?? '#F0F0F0', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' }}>
-                    <Image source={getAvatarImage(profile?.avatarIdx ?? 0)} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
-                  </View>
-                  {/* Name + status */}
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: C.text }}>{kid}</Text>
-                    <Text style={{ fontSize: scale(12), color: needsApproval ? '#2A7A2A' : '#F59E0B', fontFamily: 'Inter_600SemiBold', marginTop: 1 }}>
-                      {needsApproval ? 'Needs your approval' : 'Auto-approves'}
-                    </Text>
-                  </View>
-                  {/* Toggle */}
-                  <TouchableOpacity
-                    style={[ps.toggle, needsApproval && ps.toggleOn]}
-                    onPress={() => toggle(kid)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[ps.toggleThumb, needsApproval && ps.toggleThumbOn]} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Explainer */}
-        <View style={p.noteCard}>
-          <Text style={{ fontSize: scale(18), marginRight: 8 }}>💡</Text>
-          <Text style={p.noteText}>
-            When approval is on, a kid's completed chore shows up under "Needs your attention" — XP and coins are held until you tap Approve. When off, they're awarded instantly.
+        {/* Info box */}
+        <View style={ps.apprInfoBox}>
+          <Text style={{ fontSize: scale(16), marginTop: 1 }}>💡</Text>
+          <Text style={ps.apprInfoText}>
+            <Text style={{ color: '#7B3FF2', fontFamily: 'Inter_700Bold' }}>Require on</Text> — rewards held until you approve the chore.{'\n'}
+            <Text style={{ color: '#7B3FF2', fontFamily: 'Inter_700Bold' }}>Require off</Text> — rewards granted instantly when your kid marks it done.
           </Text>
         </View>
       </ScrollView>
@@ -7206,7 +7904,24 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
   );
 }
 
-function SettingsAccountScreen({ onBack }: { onBack: () => void }) {
+type AccountSubScreen = 'main' | 'profile' | 'email' | 'notifications' | 'privacy';
+
+function SettingsAccountScreen({ onBack, sessionUser, parentRole = '', pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName }: {
+  onBack: () => void; sessionUser?: SessionUser | null; parentRole?: string;
+  pinEnabled: boolean; savedPin: string; onSavePin: (pin: string) => void; onDisablePin: () => void;
+  onSaveName: (name: string) => void;
+}) {
+  const displayName  = sessionUser?.name  || (parentRole ? parentRole.charAt(0).toUpperCase() + parentRole.slice(1) : 'Parent');
+  const displayEmail = sessionUser?.email || '';
+
+  const [sub, setSub] = useState<AccountSubScreen>('main');
+  const back = () => setSub('main');
+
+  if (sub === 'profile')       return <AccountProfileScreen       onBack={back} name={displayName} parentRole={parentRole} onSaveName={onSaveName} />;
+  if (sub === 'email')         return <AccountEmailScreen         onBack={back} email={displayEmail} />;
+  if (sub === 'notifications') return <AccountNotificationsScreen onBack={back} />;
+  if (sub === 'privacy')       return <AccountPrivacyScreen       onBack={back} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} />;
+
   return (
     <CreamBg>
       <View style={p.screenHeader}>
@@ -7220,24 +7935,195 @@ function SettingsAccountScreen({ onBack }: { onBack: () => void }) {
         {/* Avatar */}
         <View style={{ alignItems: 'center', paddingVertical: 28 }}>
           <View style={ps.accountAvatar}>
-            <Text style={ps.accountAvatarText}>A</Text>
+            <Image source={getParentAvatar(parentRole)} style={{ width: '100%', height: '100%', borderRadius: 999 }} resizeMode="cover" />
           </View>
-          <Text style={[ps.rowTitle, { fontSize: scale(18), marginTop: 10 }]}>Alex</Text>
-          <Text style={ps.rowSub}>alex@example.com</Text>
+          <Text style={[ps.rowTitle, { fontSize: scale(18), marginTop: 10 }]}>{displayName}</Text>
+          {displayEmail ? <Text style={ps.rowSub}>{displayEmail}</Text> : null}
         </View>
 
         <View style={ps.group}>
-          <SettingsRow iconBg="#8B5CF6" iconEmoji="👤" title="Profile information" />
+          <SettingsRow iconBg="#8B5CF6" iconEmoji="👤" title="Profile information" onPress={() => setSub('profile')} />
           <View style={ps.divider} />
-          <SettingsRow iconBg="#6366F1" iconEmoji="📧" title="Email & password" />
+          <SettingsRow iconBg="#6366F1" iconEmoji="📧" title="Email & password" onPress={() => setSub('email')} />
           <View style={ps.divider} />
-          <SettingsRow iconBg="#F59E0B" iconEmoji="🔔" title="Notifications" />
+          <SettingsRow iconBg="#F59E0B" iconEmoji="🔔" title="Notifications" onPress={() => setSub('notifications')} />
           <View style={ps.divider} />
-          <SettingsRow iconBg="#10B981" iconEmoji="🔒" title="Privacy & security" />
+          <SettingsRow iconBg="#10B981" iconEmoji="🔒" title="Privacy & security" onPress={() => setSub('privacy')} />
         </View>
 
         <TouchableOpacity style={ps.logoutBtn} activeOpacity={0.8}>
           <Text style={ps.logoutText}>Log out</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </CreamBg>
+  );
+}
+
+// ─── Account sub-screens (MVP) ────────────────────────────────────────────────
+// Lightweight scaffolds built on the design system. Inputs are local-only for
+// now — wire to Supabase (saveProfile / supabase.auth) when these ship.
+
+/** Shared header for account sub-screens. */
+function AccountSubHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <View style={p.screenHeader}>
+      <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+        <Text style={p.backBtnText}>←</Text>
+      </TouchableOpacity>
+      <Text style={p.screenTitle}>{title}</Text>
+      <View style={{ width: 40 }} />
+    </View>
+  );
+}
+
+/** A single labelled toggle row inside a grouped card. */
+function AccountToggleRow({ title, subtitle, value, onValueChange, divider }: {
+  title: string; subtitle?: string; value: boolean; onValueChange: (v: boolean) => void; divider?: boolean;
+}) {
+  return (
+    <>
+      {divider && <View style={ps.divider} />}
+      <View style={[ps.row, { justifyContent: 'space-between' }]}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={ps.rowTitle}>{title}</Text>
+          {subtitle ? <Text style={ps.rowSub}>{subtitle}</Text> : null}
+        </View>
+        <Toggle value={value} onValueChange={onValueChange} />
+      </View>
+    </>
+  );
+}
+
+function AccountProfileScreen({ onBack, name, parentRole, onSaveName }: { onBack: () => void; name: string; parentRole: string; onSaveName: (name: string) => void }) {
+  const [displayName, setDisplayName] = useState(name);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const trimmed = displayName.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    onSaveName(trimmed);   // update app state + Supabase
+    onBack();
+  };
+
+  return (
+    <CreamBg>
+      <AccountSubHeader title="Profile information" onBack={onBack} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+          <View style={ps.accountAvatar}>
+            <Image source={getParentAvatar(parentRole)} style={{ width: '100%', height: '100%', borderRadius: 999 }} resizeMode="cover" />
+          </View>
+        </View>
+        <FormField label="Display name" value={displayName} onChangeText={setDisplayName} placeholder="Your name" autoCapitalize="words" />
+        <Button label={saving ? 'Saving…' : 'Save changes'} onPress={handleSave} disabled={!displayName.trim() || displayName.trim() === name} />
+      </ScrollView>
+    </CreamBg>
+  );
+}
+
+function AccountEmailScreen({ onBack, email }: { onBack: () => void; email: string }) {
+  const [emailVal, setEmailVal] = useState(email);
+  const [newPass, setNewPass]   = useState('');
+  const [confirm, setConfirm]   = useState('');
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState('');
+  const [success, setSuccess]   = useState('');
+
+  const emailChanged = emailVal.trim() !== email && emailVal.trim().length > 0;
+  const passStarted  = newPass.length > 0;
+  const passValid    = passStarted && newPass.length >= 6 && newPass === confirm;
+  // If the user has started typing a password but it isn't valid yet, block saving
+  const passBlocking = passStarted && !passValid;
+  const canSave      = !saving && !passBlocking && (emailChanged || passValid);
+
+  const handleSave = async () => {
+    setError('');
+    setSuccess('');
+    if (passStarted && newPass !== confirm) { setError('Passwords don\'t match.'); return; }
+    if (passStarted && newPass.length < 6)  { setError('Password must be at least 6 characters.'); return; }
+    setSaving(true);
+    const err = await saveEmailAndPassword({
+      email:    emailChanged ? emailVal.trim() : undefined,
+      password: passValid    ? newPass          : undefined,
+    });
+    setSaving(false);
+    if (err) {
+      setError(err);
+    } else {
+      setSuccess(emailChanged
+        ? 'Check your new email for a confirmation link.'
+        : 'Password updated successfully.');
+      setNewPass('');
+      setConfirm('');
+    }
+  };
+
+  return (
+    <CreamBg>
+      <AccountSubHeader title="Email & password" onBack={onBack} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
+        <FormField label="Email address" value={emailVal} onChangeText={v => { setEmailVal(v); setError(''); setSuccess(''); }} placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" />
+        <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>Change password</Text>
+        <FormField label="New password" value={newPass} onChangeText={v => { setNewPass(v); setError(''); setSuccess(''); }} placeholder="••••••••" secureTextEntry autoCapitalize="none" />
+        <FormField label="Confirm password" value={confirm} onChangeText={v => { setConfirm(v); setError(''); setSuccess(''); }} placeholder="••••••••" secureTextEntry autoCapitalize="none" />
+        {!!error   && <Text style={{ fontFamily: interFamily.semibold, fontSize: fontSize.sm, color: '#E53935', textAlign: 'center', marginTop: -8 }}>{error}</Text>}
+        {!!success && <Text style={{ fontFamily: interFamily.semibold, fontSize: fontSize.sm, color: '#22C55E', textAlign: 'center', marginTop: -8 }}>{success}</Text>}
+        <Button label={saving ? 'Saving…' : 'Save changes'} onPress={handleSave} disabled={!canSave} />
+      </ScrollView>
+    </CreamBg>
+  );
+}
+
+function AccountNotificationsScreen({ onBack }: { onBack: () => void }) {
+  const [prefs, setPrefs] = useState({ chores: true, approvals: true, summary: true, payouts: false });
+  const set = (key: keyof typeof prefs) => (v: boolean) => setPrefs(prev => ({ ...prev, [key]: v }));
+  return (
+    <CreamBg>
+      <AccountSubHeader title="Notifications" onBack={onBack} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        <View style={[ps.group, { marginHorizontal: 0 }]}>
+          <AccountToggleRow title="Chore completions" subtitle="When a kid marks a chore done" value={prefs.chores} onValueChange={set('chores')} />
+          <AccountToggleRow title="Approval requests" subtitle="When a chore needs your sign-off" value={prefs.approvals} onValueChange={set('approvals')} divider />
+          <AccountToggleRow title="Weekly summary" subtitle="A recap of the week's progress" value={prefs.summary} onValueChange={set('summary')} divider />
+          <AccountToggleRow title="Payout reminders" subtitle="When a kid has coins to cash out" value={prefs.payouts} onValueChange={set('payouts')} divider />
+        </View>
+      </ScrollView>
+    </CreamBg>
+  );
+}
+
+function AccountPrivacyScreen({ onBack, pinEnabled, savedPin, onSavePin, onDisablePin }: {
+  onBack: () => void; pinEnabled: boolean; savedPin: string; onSavePin: (pin: string) => void; onDisablePin: () => void;
+}) {
+  const [requirePin, setRequirePin] = useState(pinEnabled);
+  const [shareUsage, setShareUsage] = useState(true);
+  const [pin, setPin] = useState(savedPin);
+  const [saved, setSaved] = useState(pinEnabled);
+
+  const onToggle = (v: boolean) => {
+    setRequirePin(v);
+    if (!v) { setPin(''); setSaved(false); onDisablePin(); }   // turning off clears the PIN
+  };
+  const onSave = () => { onSavePin(pin); setSaved(true); };
+
+  return (
+    <CreamBg>
+      <AccountSubHeader title="Privacy & security" onBack={onBack} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        <View style={[ps.group, { marginHorizontal: 0 }]}>
+          <AccountToggleRow title="Require PIN for parent mode" subtitle="Ask for a PIN when switching from a kid" value={requirePin} onValueChange={onToggle} />
+          {requirePin && (
+            <View style={{ marginHorizontal: 16, marginBottom: 16, gap: 12, borderTopWidth: 1, borderTopColor: '#F0EEE8', paddingTop: 16 }}>
+              <FormField label="Parent PIN" value={pin} onChangeText={(v) => { setPin(v.replace(/[^0-9]/g, '').slice(0, 6)); setSaved(false); }} placeholder="Enter a 4–6 digit PIN" keyboardType="number-pad" secureTextEntry />
+              <Button label={saved ? 'PIN saved ✓' : 'Save PIN'} onPress={onSave} disabled={pin.length < 4 || saved} />
+            </View>
+          )}
+          <AccountToggleRow title="Share anonymous usage data" subtitle="Help improve Monstir" value={shareUsage} onValueChange={setShareUsage} divider />
+        </View>
+
+        <TouchableOpacity style={[ps.logoutBtn, { marginHorizontal: 0 }]} activeOpacity={0.8} onPress={onBack}>
+          <Text style={ps.logoutText}>Delete account</Text>
         </TouchableOpacity>
       </ScrollView>
     </CreamBg>
@@ -7261,7 +8147,8 @@ interface GoalData {
   amount: string;
   category: string;
   color: string;
-  icon: number; // ImageRequireSource from require('./assets/icons/goalIcons/…')
+  iconKey: string; // stable key into GOAL_ICONS — this is what gets persisted
+  icon: number;    // resolved ImageRequireSource for rendering (derived from iconKey)
 }
 
 interface SavedGoal {
@@ -7270,31 +8157,71 @@ interface SavedGoal {
   amount: string;     // target in dollars e.g. "25.00"
   category: string;
   color: string;
-  icon: number; // ImageRequireSource
+  iconKey: string;    // stable key into GOAL_ICONS — persisted; survives asset changes
+  icon: number;       // resolved ImageRequireSource for rendering (derived from iconKey)
   savedCents: number; // how much has been saved so far
   milestones: string[];   // 4 reward labels e.g. ['Helmet', 'Trick Unlocked', 'Glow Board', 'Celebration!']
   activityFeed: { label: string; pts: number; when: string }[];  // recent progress items
 }
 
 
-const GOAL_OPTIONS: { icon: number; name: string; amount: string }[] = [
-  { icon: require('./assets/icons/goalIcons/Ps5.png'),                   name: 'PS5',               amount: '499.99' },
-  { icon: require('./assets/icons/goalIcons/Switch.png'),                name: 'Nintendo Switch',   amount: '299.99' },
-  { icon: require('./assets/icons/goalIcons/Roblox.png'),                name: 'Roblox Gift Card',  amount: '25.00'  },
-  { icon: require('./assets/icons/goalIcons/Bike.png'),                  name: 'New bike',          amount: '120.00' },
-  { icon: require('./assets/icons/goalIcons/Headset.png'),               name: 'Headphones',        amount: '60.00'  },
-  { icon: require('./assets/icons/goalIcons/Scooter.png'),               name: 'Scooter',           amount: '80.00'  },
-  { icon: require('./assets/icons/goalIcons/TV.png'),                    name: 'New TV',            amount: '200.00' },
-  { icon: require('./assets/icons/goalIcons/Shoes.png'),                 name: 'New shoes',         amount: '70.00'  },
-  { icon: require('./assets/icons/goalIcons/Legp.png'),                  name: 'Lego set',          amount: '50.00'  },
-  { icon: require('./assets/icons/goalIcons/Plushie.png'),               name: 'Stuffed animal',    amount: '30.00'  },
-  { icon: require('./assets/icons/goalIcons/Animal.png'),                name: 'Adopt a pet',       amount: '100.00' },
-  { icon: require('./assets/icons/goalIcons/Pizza.png'),                 name: 'Pizza party',       amount: '25.00'  },
-  { icon: require('./assets/icons/goalIcons/Movie.png'),                 name: 'Movie night',       amount: '15.00'  },
-  { icon: require('./assets/icons/goalIcons/Sleepover.png'),             name: 'Sleepover party',   amount: '40.00'  },
-  { icon: require('./assets/icons/goalIcons/Ice Ceam Party.png'),        name: 'Ice cream party',   amount: '20.00'  },
-  { icon: require('./assets/icons/goalIcons/Money.png'),                 name: 'Custom goal',       amount: ''       },
+// Goal icons are referenced by a stable string KEY, never by the raw require()
+// module id. Those numeric ids shift whenever assets are added/removed/reordered,
+// which would silently repoint saved goals at the wrong image (e.g. a trophy).
+// goalIconSource() resolves a key → image source at render time.
+const GOAL_ICONS: Record<string, number> = {
+  ps5:        require('./assets/icons/goalIcons/Ps5.png'),
+  switch:     require('./assets/icons/goalIcons/Switch.png'),
+  roblox:     require('./assets/icons/goalIcons/Roblox.png'),
+  bike:       require('./assets/icons/goalIcons/Bike.png'),
+  headphones: require('./assets/icons/goalIcons/Headset.png'),
+  scooter:    require('./assets/icons/goalIcons/Scooter.png'),
+  tv:         require('./assets/icons/goalIcons/TV.png'),
+  shoes:      require('./assets/icons/goalIcons/Shoes.png'),
+  lego:       require('./assets/icons/goalIcons/Legp.png'),
+  plushie:    require('./assets/icons/goalIcons/Plushie.png'),
+  pet:        require('./assets/icons/goalIcons/Animal.png'),
+  pizza:      require('./assets/icons/goalIcons/Pizza.png'),
+  movie:      require('./assets/icons/goalIcons/Movie.png'),
+  sleepover:  require('./assets/icons/goalIcons/Sleepover.png'),
+  icecream:   require('./assets/icons/goalIcons/Ice Ceam Party.png'),
+  money:      require('./assets/icons/goalIcons/Money.png'),
+};
+const DEFAULT_GOAL_ICON_KEY = 'money';
+function goalIconSource(key?: string): number {
+  return (key && GOAL_ICONS[key]) || GOAL_ICONS[DEFAULT_GOAL_ICON_KEY];
+}
+
+const GOAL_OPTIONS: { key: string; name: string; amount: string }[] = [
+  { key: 'ps5',        name: 'PS5',              amount: '499.99' },
+  { key: 'switch',     name: 'Nintendo Switch',  amount: '299.99' },
+  { key: 'roblox',     name: 'Roblox Gift Card', amount: '25.00'  },
+  { key: 'bike',       name: 'New bike',         amount: '120.00' },
+  { key: 'headphones', name: 'Headphones',       amount: '60.00'  },
+  { key: 'scooter',    name: 'Scooter',          amount: '80.00'  },
+  { key: 'tv',         name: 'New TV',           amount: '200.00' },
+  { key: 'shoes',      name: 'New shoes',        amount: '70.00'  },
+  { key: 'lego',       name: 'Lego set',         amount: '50.00'  },
+  { key: 'plushie',    name: 'Stuffed animal',   amount: '30.00'  },
+  { key: 'pet',        name: 'Adopt a pet',      amount: '100.00' },
+  { key: 'pizza',      name: 'Pizza party',      amount: '25.00'  },
+  { key: 'movie',      name: 'Movie night',      amount: '15.00'  },
+  { key: 'sleepover',  name: 'Sleepover party',  amount: '40.00'  },
+  { key: 'icecream',   name: 'Ice cream party',  amount: '20.00'  },
+  { key: 'money',      name: 'Custom goal',      amount: ''       },
 ];
+
+// Recover an icon key for a goal saved before the key scheme (match by name).
+function inferGoalIconKey(name: string): string {
+  return GOAL_OPTIONS.find(o => o.name === name)?.key ?? DEFAULT_GOAL_ICON_KEY;
+}
+
+// Repair a persisted goal: ensure it has an iconKey and a live `icon` source.
+// Fixes goals whose stored numeric icon id went stale after an asset change.
+function normalizeGoalIcon(g: SavedGoal): SavedGoal {
+  const iconKey = g.iconKey ?? inferGoalIconKey(g.name);
+  return { ...g, iconKey, icon: goalIconSource(iconKey) };
+}
 
 function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, savedCents, initialData, monsterName }: GoalCreationFlowProps) {
   // When editing an existing goal, jump straight to details (step 2)
@@ -7306,7 +8233,8 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
     amount:   initialData?.amount   ?? '',
     category: initialData?.category ?? '',
     color:    '#6B35F0',
-    icon:     initialData?.icon     ?? require('./assets/icons/goalIcons/Money.png'),
+    iconKey:  initialData?.iconKey  ?? DEFAULT_GOAL_ICON_KEY,
+    icon:     goalIconSource(initialData?.iconKey ?? DEFAULT_GOAL_ICON_KEY),
   });
   // Tracks which preset key to use for the mascot message (separate from goalData.name
   // so custom-goal typed names still resolve to the "Custom goal" message)
@@ -7322,7 +8250,7 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
   const handleGoalOptionSelect = (idx: number) => {
     const opt      = GOAL_OPTIONS[idx];
     const autoName = opt.name === 'Custom goal' ? '' : opt.name;
-    setGoalData(prev => ({ ...prev, name: autoName, amount: opt.amount, icon: opt.icon }));
+    setGoalData(prev => ({ ...prev, name: autoName, amount: opt.amount, iconKey: opt.key, icon: goalIconSource(opt.key) }));
     setAmountText(opt.amount);
     setMascotKey(opt.name);
     go(2);
@@ -7404,7 +8332,7 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
                     activeOpacity={0.7}
                   >
                     <View style={s.gfGoalIconCircle}>
-                      <Image source={opt.icon} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
+                      <Image source={goalIconSource(opt.key)} style={{ width: scale(36), height: scale(36) }} resizeMode="contain" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={s.gfGoalName}>{opt.name}</Text>
@@ -8236,6 +9164,12 @@ interface KidMonsterState {
   currentStreak: number;
   lastChoreDate: string;
   pendingEvolution: boolean;
+  /** Banked battle shards. Per kid — siblings must not share a wallet. */
+  shards: number;
+  /** True once this week's shard grant was claimed (first battle entry); reset Monday. */
+  weeklyShardsClaimed: boolean;
+  /** Remaining HP of bosses that escaped this kid wounded, keyed by boss name. */
+  woundedBossHp: Record<string, number>;
 }
 
 const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
@@ -8250,6 +9184,9 @@ const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
   currentStreak: 0,
   lastChoreDate: '',
   pendingEvolution: false,
+  shards: 0,
+  weeklyShardsClaimed: false,
+  woundedBossHp: {},
 };
 
 function AppInner() {
@@ -8262,14 +9199,12 @@ function AppInner() {
   const getKidMonster = (name: string): KidMonsterState => kidMonsterState[name] ?? { ...DEFAULT_KID_MONSTER_STATE };
   const setKidMonster = (name: string, updater: (prev: KidMonsterState) => KidMonsterState) =>
     setKidMonsterState(prev => ({ ...prev, [name]: updater(prev[name] ?? { ...DEFAULT_KID_MONSTER_STATE }) }));
-  const fallbackMonsterName = useRef(randomFallbackName()).current;
   const [screen, setScreen]             = useState<Screen>('home');
   const [tab, setTab]                   = useState<Tab>('home');
   const [trophyOrigin, setTrophyOrigin]       = useState<Tab>('home');
   const [trophyInitialKey, setTrophyInitialKey] = useState<string | undefined>(undefined);
   const [kidCoins, setKidCoins]         = useState<Record<string, number>>({});
   const [bonusCoins, setBonusCoins]     = useState(0);
-  const [woundedBossHp, setWoundedBossHp]   = useState<Record<string, number>>({});
   const [chestTier, setChestTier]           = useState<ChestTier>('Common');
   const [chorePctAtBattle, setChorePctAtBattle] = useState(0);
   const [chestCollectible, setChestCollectible] = useState(() => pickForTier('Common'));
@@ -8291,10 +9226,15 @@ function AppInner() {
   const [kids, setKids]                       = useState<string[]>([]);
   const [currentKidName, setCurrentKidName]   = useState('');
   const [kidOnboardingDone, setKidOnboardingDone] = useState<Record<string, boolean>>({});
-  const [weeklyCapEnabled, setWeeklyCap]      = useState(false);
+  // Parent PIN gate — guards switching from a kid into parent view
+  const [parentPin, setParentPin]             = useState('');
+  const [parentPinEnabled, setParentPinEnabled] = useState(false);
+  const [pinModalOpen, setPinModalOpen]       = useState(false);
   // Per-kid approval settings — true = needs parent sign-off, false = auto-approve
   const [kidApprovalSettings, setKidApprovalSettings] = useState<Record<string, boolean>>({});
-  const requireApproval = kidApprovalSettings[currentKidName] ?? false;
+  // Missing entry defaults to TRUE (requires approval) — must match the settings
+  // UI, which renders unset kids as "requires approval" (`?? true`).
+  const requireApproval = kidApprovalSettings[currentKidName] ?? true;
   const [showKidProfile, setShowKidProfile]   = useState(false);
   const [kidModalVisible, setKidModalVisible] = useState(false);
   const [kidModalInitial, setKidModalInitial] = useState<import('./src/screens/ParentOnboarding').OnboardingChild | null>(null);
@@ -8318,6 +9258,7 @@ function AppInner() {
       // Edit existing
       setSetupChildren(prev => prev.map(c => c.id === kidModalInitial.id ? { ...c, ...data } : c));
       setKids(prev => prev.map(n => n === kidModalInitial.name ? data.name : n));
+      updateKid(kidModalInitial.id, { name: data.name, avatar_idx: data.avatarIdx, avatar_color: data.avatarColor, age_range: data.ageRange }).catch(e => console.warn('[DB] updateKid error:', e));
       if (kidModalInitial.name !== data.name) {
         setCurrentKidName(cn => cn === kidModalInitial.name ? data.name : cn);
         setKidApprovalSettings(prev => {
@@ -8357,14 +9298,26 @@ function AppInner() {
       setKids(prev => [...prev, data.name]);
       setKidApprovalSettings(prev => ({ ...prev, [data.name]: true }));
       showParentToast(`${data.name} added! 🎉`);
+      addKid({ name: data.name, avatar_idx: data.avatarIdx, avatar_color: data.avatarColor, age_range: data.ageRange })
+        .then(row => { if (row?.id) setSetupChildren(prev => prev.map(c => c.id === newChild.id ? { ...c, id: row.id } : c)); })
+        .catch(e => console.warn('[DB] addKid error:', e));
     }
   };
-  const [goals, setGoals] = useState<SavedGoal[]>([]);
-  const [shards, setShards] = useState(0);
+  // Goals are per kid profile — each child has their own savings goals.
+  const [goalsByKid, setGoalsByKid] = useState<Record<string, SavedGoal[]>>({});
+  const getKidGoals = (name: string): SavedGoal[] => goalsByKid[name] ?? [];
+  const setKidGoals = (name: string, updater: (prev: SavedGoal[]) => SavedGoal[]) =>
+    setGoalsByKid(prev => ({ ...prev, [name]: updater(prev[name] ?? []) }));
+  const approvalSeq = useRef(0); // monotonic counter for unique chore-history ids when approving many at once
   const [lastWeekReset, setLastWeekReset]     = useState<string>('');
   const [weekApprovalDays, setWeekApprovalDays] = useState<string[]>([]); // date strings of days with ≥1 approval — persisted
   const getKidCoins  = useCallback((name: string) => kidCoins[name] ?? 0, [kidCoins]);
-  const addKidCoins  = useCallback((name: string, amount: number) => setKidCoins(prev => ({ ...prev, [name]: (prev[name] ?? 0) + amount })), []);
+  // Guard against NaN/Infinity: one bad amount would poison the stored balance
+  // (and sync the corruption to Supabase via the debounced kid-stats sync).
+  const addKidCoins  = useCallback((name: string, amount: number) => {
+    if (!Number.isFinite(amount)) { console.warn(`[coins] ignored non-finite amount for ${name}:`, amount); return; }
+    setKidCoins(prev => ({ ...prev, [name]: (Number.isFinite(prev[name]) ? prev[name] : 0) + amount }));
+  }, []);
   const resetKidCoins = useCallback((name: string) => setKidCoins(prev => ({ ...prev, [name]: 0 })), []);
 
   // ── Per-kid monster state shortcuts for the active kid ────────────────────
@@ -8380,50 +9333,89 @@ function AppInner() {
   const currentStreak       = _km.currentStreak;
   const lastChoreDate       = _km.lastChoreDate;
   const pendingEvolution    = _km.pendingEvolution;
-  const effectiveMonsterName = selectedMonsterName || fallbackMonsterName;
+  const shards              = _km.shards;
+  const weeklyShardsClaimed = _km.weeklyShardsClaimed;
+  const woundedBossHp       = _km.woundedBossHp;
+  const effectiveMonsterName = selectedMonsterName || fallbackNameForKid(currentKidName);
 
   const [kidPayoutPending, setKidPayoutPending] = useState<Record<string, boolean>>({});
   const [payoutLog, setPayoutLog] = useState<{ kidName: string; amount: number; paidAt: string }[]>([]);
-  const [payoutSnapshot, setPayoutSnapshot] = useState<{
-    amount: number; completedCount: number; battleWon: boolean | null; battleBonus: number | null;
-  } | null>(null);
+  // Keyed by kid name: paying two kids back-to-back must not overwrite the
+  // first kid's celebration data before they've seen it.
+  const [payoutSnapshot, setPayoutSnapshot] = useState<Record<string, {
+    amount: number; completedCount: number; weeks: UnpaidWeek[]; battleWon: boolean | null; battleBonus: number | null;
+  }>>({});
 
-  // ── Load data on startup — Supabase if logged in, AsyncStorage fallback ──
-  useEffect(() => {
-    async function bootstrap() {
-      try {
+  // ── Load all user data from Supabase after login or on startup ─────────────
+  const loadUserDataFromSupabase = useCallback(async () => {
+    try {
         const { data: { session } } = await supabase.auth.getSession();
+        console.log('[bootstrap] session:', session?.user?.email ?? 'none');
+        if (!session) return false;
 
-        if (!session) {
-          // Not logged in — load AsyncStorage and let splash → onboarding flow handle navigation
-          const [choreSaved, historySaved, approvalDaysSaved] = await Promise.all([
-            AsyncStorage.getItem('monstir:managedChores'),
-            AsyncStorage.getItem('monstir:choreHistory'),
-            AsyncStorage.getItem('monstir:weekApprovalDays'),
-          ]);
-          if (choreSaved)        { try { setManagedChores(JSON.parse(choreSaved)); } catch {} }
-          if (historySaved)      { try { setChoreHistory(JSON.parse(historySaved)); } catch {} }
-          if (approvalDaysSaved) { try { setWeekApprovalDays(JSON.parse(approvalDaysSaved)); } catch {} }
-          setAppDataLoaded(true);
-          return;
-        }
-
-        // Logged in — load from Supabase
         setSessionUser({ name: session.user.user_metadata?.name ?? '', email: session.user.email ?? '' });
 
-        const [profile, dbKids, dbChores] = await Promise.all([
+        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal] = await Promise.all([
           loadProfile(),
           loadKids(),
           loadChores(),
+          loadGoals(),
+          loadPayoutLog(),
+          AsyncStorage.getItem('monstir:kidApprovalSettings'),
+          AsyncStorage.getItem('monstir:managedChores'),
+          AsyncStorage.getItem('monstir:goals'),
+          AsyncStorage.getItem('monstir:goalsByKid'),
         ]);
+        console.log('[bootstrap] profile:', JSON.stringify(profile));
+        console.log('[bootstrap] dbKids:', JSON.stringify(dbKids));
+        console.log('[bootstrap] dbChores count:', dbChores?.length);
 
         if (profile) {
           if (profile.parent_role)                             setParentRole(profile.parent_role);
           if (profile.base_rate)                               setBaseRate((profile.base_rate / 100).toFixed(2));
           if (profile.battle_coin_bonus_enabled !== undefined) setBattleCoinBonusEnabled(profile.battle_coin_bonus_enabled);
           if (profile.battle_coin_bonus_multiplier)            setBattleCoinBonusMultiplier(Number(profile.battle_coin_bonus_multiplier));
-          if (profile.weekly_cap_enabled !== undefined)        setWeeklyCap(profile.weekly_cap_enabled);
+          if (profile.parent_pin)                              setParentPin(profile.parent_pin);
+          if (profile.parent_pin_enabled !== undefined)        setParentPinEnabled(profile.parent_pin_enabled);
         }
+
+        // Per-kid goals are built from dbKids.goals_json inside the kids block
+        // below. Legacy global goals (old single-list storage) are migrated onto
+        // the first kid so existing users don't lose their goal.
+        const legacyGlobalGoals: SavedGoal[] = (() => {
+          if (Array.isArray(dbGoals) && dbGoals.length > 0) return (dbGoals as SavedGoal[]).map(normalizeGoalIcon);
+          if (savedGoalsLocal) { try { const g = JSON.parse(savedGoalsLocal); if (Array.isArray(g)) return (g as SavedGoal[]).map(normalizeGoalIcon); } catch {} }
+          return [];
+        })();
+        const localGoalsByKid: Record<string, SavedGoal[]> = (() => {
+          if (savedGoalsByKidLocal) { try { const m = JSON.parse(savedGoalsByKidLocal); return Object.fromEntries(Object.entries(m).map(([k, arr]) => [k, (arr as SavedGoal[]).map(normalizeGoalIcon)])); } catch {} }
+          return {};
+        })();
+
+        // Payout log from Supabase
+        if (Array.isArray(dbPayouts) && dbPayouts.length > 0) {
+          setPayoutLog((dbPayouts as { kid_name?: string; amount_cents?: number; paid_at?: string }[]).map((p) => ({
+            kidName:  p.kid_name  ?? '',
+            amount:   p.amount_cents ?? 0,
+            paidAt:   p.paid_at   ?? new Date().toISOString(),
+          })));
+        }
+
+        // Chore history + week approval days — from Supabase profile JSON, fall back to AsyncStorage
+        if (profile?.chore_history_json)     { try { setChoreHistory(JSON.parse(profile.chore_history_json)); } catch {} }
+        else { const h = await AsyncStorage.getItem('monstir:choreHistory');       if (h) { try { setChoreHistory(JSON.parse(h)); } catch {} } }
+
+        if (profile?.week_approval_days_json) { try { setWeekApprovalDays(JSON.parse(profile.week_approval_days_json)); } catch {} }
+        else { const w = await AsyncStorage.getItem('monstir:weekApprovalDays');   if (w) { try { setWeekApprovalDays(JSON.parse(w)); } catch {} } }
+
+        // Per-kid approval settings — prefer AsyncStorage (granular) over the single
+        // DB boolean, which only round-trips "ALL kids require approval" and would
+        // otherwise clobber mixed per-kid settings on every launch.
+        const localApproval: Record<string, boolean> = (() => {
+          if (savedApproval) { try { const a = JSON.parse(savedApproval); if (a && typeof a === 'object' && !Array.isArray(a)) return a; } catch {} }
+          return {};
+        })();
+        setKidApprovalSettings(localApproval);
 
         if (dbKids && dbKids.length > 0) {
           const names = dbKids.map((k: { name: string }) => k.name);
@@ -8438,57 +9430,188 @@ function AppInner() {
             difficulty:       'Easy' as const,
             selectedChoreIds: [],
           })));
-          setKidApprovalSettings(Object.fromEntries(names.map((n: string) => [n, profile?.require_approval ?? false])));
+          // Granular local setting wins; the DB boolean only seeds kids with no
+          // local entry (e.g. fresh install on a new device).
+          setKidApprovalSettings(Object.fromEntries(names.map((n: string) => [n, localApproval[n] ?? (profile?.require_approval ?? true)])));
 
-          // Hydrate XP, coins, streak from DB
+          // Hydrate XP, coins, streak, goals from DB
           const kidMonsterInit: Record<string, KidMonsterState> = {};
           const kidCoinsInit: Record<string, number> = {};
-          for (const k of dbKids as { name: string; xp: number; weekly_xp: number; coins: number; current_streak: number; last_chore_date: string | null; monster_idx: number; monster_id: string | null; monster_name: string | null; kid_onboarding_done: boolean }[]) {
+          const goalsInit: Record<string, SavedGoal[]> = {};
+          for (const k of dbKids as { name: string; xp: number; weekly_xp: number; coins: number; current_streak: number; last_chore_date: string | null; monster_idx: number; monster_id: string | null; monster_name: string | null; kid_onboarding_done: boolean; goals_json?: string | null }[]) {
             kidMonsterInit[k.name] = {
               ...DEFAULT_KID_MONSTER_STATE,
               xp:                  k.xp ?? 0,
               weeklyXp:            k.weekly_xp ?? 0,
               currentStreak:       k.current_streak ?? 0,
               lastChoreDate:       k.last_chore_date ?? '',
-              monsterIdx:          (k.monster_idx ?? 0) as MonsterIdx,
-              selectedMonsterId:   (k.monster_id ?? 'slime') as MonsterId,
+              monsterIdx:          toMonsterIdx(k.monster_idx),
+              selectedMonsterId:   toMonsterId(k.monster_id),
               selectedMonsterName: k.monster_name ?? '',
             };
             kidCoinsInit[k.name] = k.coins ?? 0;
+            // Goals: prefer DB column, fall back to local per-kid map
+            let kidGoals: SavedGoal[] = [];
+            if (k.goals_json) { try { const g = JSON.parse(k.goals_json); if (Array.isArray(g)) kidGoals = (g as SavedGoal[]).map(normalizeGoalIcon); } catch {} }
+            if (kidGoals.length === 0 && Array.isArray(localGoalsByKid[k.name])) kidGoals = localGoalsByKid[k.name];
+            goalsInit[k.name] = kidGoals;
             if (k.kid_onboarding_done) {
               setKidOnboardingDone(prev => ({ ...prev, [k.name]: true }));
             }
           }
+          // Migrate legacy global goals onto the first kid if nobody has goals yet
+          if (legacyGlobalGoals.length > 0 && names[0] && Object.values(goalsInit).every(g => g.length === 0)) {
+            goalsInit[names[0]] = legacyGlobalGoals;
+          }
           setKidMonsterState(kidMonsterInit);
           setKidCoins(kidCoinsInit);
+          setGoalsByKid(goalsInit);
         }
 
         if (dbChores && dbChores.length > 0) {
-          const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[] }) => ({
-            id:         c.id,
-            name:       c.name,
-            icon:       c.icon ?? '✅',
-            iconBg:     '#EAE4FF',
-            frequency:  (c.frequency ?? 'daily') as ManagedChore['frequency'],
-            difficulty: c.difficulty === 3 ? 'Hard' : c.difficulty === 2 ? 'Medium' : 'Easy',
-            assignedTo: c.assigned_to ?? [],
-            status:     'active' as const,
+          // Build UUID → name map from the kids we just loaded
+          const kidIdToName: Record<string, string> = {};
+          for (const k of (dbKids ?? [])) kidIdToName[k.id] = k.name;
+
+          const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null }) => ({
+            id:                c.id,
+            name:              c.name,
+            description:       '',
+            icon:              resolveChoreIcon(c.icon ?? '', c.name),
+            bg:                '#EAE4FF',
+            frequency:         (c.frequency ?? 'daily') as ManagedChore['frequency'],
+            difficulty:        (c.difficulty === 3 ? 3 : c.difficulty === 2 ? 2 : 1) as 1 | 2 | 3,
+            // assigned_to contains kid UUIDs — map them to names so the kid-view filter works
+            assignedTo:        (c.assigned_to ?? []).map((id: string) => kidIdToName[id] ?? id),
+            status:            'active' as const,
+            weeklyCompletions: 0,
+            completionMode:    c.completion_mode === 'independent' ? 'independent' : c.completion_mode === 'shared' ? 'shared' : undefined,
           }));
-          setManagedChores(mapped);
+
+          // Merge today's completion state from AsyncStorage so completed chores
+          // don't reset to 'active' after re-login
+          if (savedChores) {
+            try {
+              const local: ManagedChore[] = JSON.parse(savedChores);
+              setManagedChores(mapped.map(db => {
+                const loc = local.find(l => l.id === db.id || l.name === db.name);
+                if (!loc) return db;
+                return {
+                  ...db,
+                  childStatus:        loc.childStatus,
+                  childRejectionNote: loc.childRejectionNote,
+                  childCompletions:   loc.childCompletions,
+                  childSubmittedAt:   loc.childSubmittedAt,
+                  childPendingCount:  loc.childPendingCount,
+                  weeklyCompletions:  loc.weeklyCompletions ?? db.weeklyCompletions,
+                  status:             loc.status ?? db.status,
+                };
+              }));
+            } catch { setManagedChores(mapped); }
+          } else {
+            setManagedChores(mapped);
+          }
         }
 
+        // ── Hydrate trophies from Supabase into per-kid local storage ──────────
+        // Trophies are written to Supabase on earn but read from local storage;
+        // pull the durable copy back so they survive reinstalls / new devices.
+        const fmtD = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const capRarity = (s: string) => s ? (s.charAt(0).toUpperCase() + s.slice(1)) : s;
+        await Promise.all((dbKids ?? []).map(async (k: { id: string; name: string }) => {
+          try {
+            const [caps, cols, miles] = await Promise.all([
+              loadBossCaptures(k.id),
+              loadCollectibles(k.id),
+              loadMilestones(k.id),
+            ]);
+
+            const captureEntries: BossCaptureEntry[] = (caps as { id: string; boss_name: string; captured_at: string; coins_earned: number; xp_earned: number; completion_pct: number | null }[]).map(r => {
+              const d  = new Date(r.captured_at);
+              const ws = new Date(d);  ws.setDate(d.getDate() - d.getDay());
+              const we = new Date(ws); we.setDate(ws.getDate() + 6);
+              const disp = getBossDisplay(r.boss_name);
+              return {
+                id:            r.id,
+                bossName:      r.boss_name,
+                capturedAt:    r.captured_at,
+                weekLabel:     `${fmtD(ws)} – ${fmtD(we)}`,
+                weakness:      disp?.weakness ?? '',
+                threat:        disp?.threat ?? 'Easy',
+                completionPct: r.completion_pct ?? 0,
+                coinsEarned:   r.coins_earned ?? 0,
+                xpEarned:      r.xp_earned ?? 0,
+              };
+            });
+
+            const collectibleEntries: CollectibleEntry[] = (cols as { id: string; collectible_id: string; rarity: string; earned_at: string }[]).map(r => {
+              const def = COLLECTIBLES.find(c => c.key === r.collectible_id);
+              return {
+                id:        r.id,
+                itemKey:   r.collectible_id,
+                itemName:  def?.name ?? r.collectible_id,
+                rarity:    (def?.rarity ?? capRarity(r.rarity ?? 'common')) as CollectibleEntry['rarity'],
+                earnedAt:  r.earned_at,
+                weekLabel: fmtD(new Date(r.earned_at)),
+              };
+            });
+
+            const milestoneEntries: EarnedMilestone[] = (miles as { milestone_id: string; earned_at: string }[]).map(r => ({
+              id:       r.milestone_id,
+              earnedAt: r.earned_at,
+            }));
+
+            await Promise.all([
+              mergeBossCaptures(k.name, captureEntries),
+              mergeCollectibles(k.name, collectibleEntries),
+              mergeMilestones(k.name, milestoneEntries),
+            ]);
+          } catch (e) {
+            console.warn('[DB] trophy hydration failed for', k.name, e);
+          }
+        }));
+
         setAppDataLoaded(true);
+        setViewMode('parent');
         setAppMode('app');
-      } catch (e) {
-        console.warn('[DB] Startup load failed, falling back to AsyncStorage:', e);
-        const [choreSaved, historySaved, approvalDaysSaved] = await Promise.all([
+        return true;
+    } catch (e) {
+      console.warn('[DB] loadUserData failed, falling back to AsyncStorage:', e);
+      const [choreSaved, historySaved, approvalDaysSaved] = await Promise.all([
+        AsyncStorage.getItem('monstir:managedChores'),
+        AsyncStorage.getItem('monstir:choreHistory'),
+        AsyncStorage.getItem('monstir:weekApprovalDays'),
+      ]);
+      if (choreSaved)        { try { setManagedChores(JSON.parse(choreSaved)); } catch {} }
+      if (historySaved)      { try { setChoreHistory(JSON.parse(historySaved)); } catch {} }
+      if (approvalDaysSaved) { try { setWeekApprovalDays(JSON.parse(approvalDaysSaved)); } catch {} }
+      setAppDataLoaded(true);
+      return false;
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── On startup: load from Supabase if session exists, else AsyncStorage ──
+  useEffect(() => {
+    async function bootstrap() {
+      // Hydrate the week-reset marker before appDataLoaded flips on, so the weekly
+      // reset effect can tell "already reset this week" from "new week began".
+      try { const lwr = await AsyncStorage.getItem('monstir:lastWeekReset'); if (lwr) setLastWeekReset(lwr); } catch {}
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await loadUserDataFromSupabase();
+      } else {
+        const [choreSaved, historySaved, approvalDaysSaved, goalsByKidSaved, goalsSaved] = await Promise.all([
           AsyncStorage.getItem('monstir:managedChores'),
           AsyncStorage.getItem('monstir:choreHistory'),
           AsyncStorage.getItem('monstir:weekApprovalDays'),
+          AsyncStorage.getItem('monstir:goalsByKid'),
+          AsyncStorage.getItem('monstir:goals'),
         ]);
         if (choreSaved)        { try { setManagedChores(JSON.parse(choreSaved)); } catch {} }
         if (historySaved)      { try { setChoreHistory(JSON.parse(historySaved)); } catch {} }
         if (approvalDaysSaved) { try { setWeekApprovalDays(JSON.parse(approvalDaysSaved)); } catch {} }
+        if (goalsByKidSaved)   { try { const m = JSON.parse(goalsByKidSaved); setGoalsByKid(Object.fromEntries(Object.entries(m).map(([k, arr]) => [k, (arr as SavedGoal[]).map(normalizeGoalIcon)]))); } catch {} }
+        else if (goalsSaved)   { try { const g = JSON.parse(goalsSaved); if (Array.isArray(g) && g.length > 0 && currentKidName) setGoalsByKid({ [currentKidName]: (g as SavedGoal[]).map(normalizeGoalIcon) }); } catch {} }
         setAppDataLoaded(true);
       }
     }
@@ -8500,14 +9623,59 @@ function AppInner() {
     AsyncStorage.setItem('monstir:managedChores', JSON.stringify(managedChores)).catch(() => {});
   }, [managedChores, appDataLoaded]);
 
+  // ── Persist pay-rate settings to Supabase (debounced) ────────────────────
+  const payRateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    if (payRateSyncTimer.current) clearTimeout(payRateSyncTimer.current);
+    payRateSyncTimer.current = setTimeout(() => {
+      const rateNum = Math.round(parseFloat(baseRate) * 100) || 50;
+      saveProfile({
+        base_rate: rateNum,
+
+        battle_coin_bonus_enabled: battleCoinBonusEnabled,
+        battle_coin_bonus_multiplier: battleCoinBonusMultiplier,
+      }).catch(e => console.warn('[DB] saveProfile (rates) error:', e));
+    }, 1500);
+  }, [baseRate, battleCoinBonusEnabled, battleCoinBonusMultiplier, appDataLoaded]);
+
+  // ── Persist per-kid approval settings to Supabase ───────────────────────
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    saveProfile({ require_approval: Object.values(kidApprovalSettings).every(v => v) }).catch(() => {});
+    // Also store the full per-kid map so granularity isn't lost
+    AsyncStorage.setItem('monstir:kidApprovalSettings', JSON.stringify(kidApprovalSettings)).catch(() => {});
+  }, [kidApprovalSettings, appDataLoaded]);
+
+  // ── Persist per-kid goals to Supabase + AsyncStorage ─────────────────────
+  const goalSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    AsyncStorage.setItem('monstir:goalsByKid', JSON.stringify(goalsByKid)).catch(() => {});
+    if (goalSyncTimer.current) clearTimeout(goalSyncTimer.current);
+    goalSyncTimer.current = setTimeout(() => {
+      // Each kid's goals live on their own kids row (goals_json column)
+      for (const [name, kidGoals] of Object.entries(goalsByKid)) {
+        const kidDbId = setupChildren.find(c => c.name === name)?.id;
+        if (kidDbId) updateKid(kidDbId, { goals_json: JSON.stringify(kidGoals) }).catch(e => console.warn('[DB] saveGoals error:', e));
+      }
+    }, 1000);
+  }, [goalsByKid, appDataLoaded, setupChildren]);
+
+  const appStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:choreHistory', JSON.stringify(choreHistory)).catch(() => {});
+    if (appStateSyncTimer.current) clearTimeout(appStateSyncTimer.current);
+    appStateSyncTimer.current = setTimeout(() => {
+      saveAppState({ chore_history_json: JSON.stringify(choreHistory) }).catch(e => console.warn('[DB] saveAppState (history) error:', e));
+    }, 2000);
   }, [choreHistory, appDataLoaded]);
 
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:weekApprovalDays', JSON.stringify(weekApprovalDays)).catch(() => {});
+    saveAppState({ week_approval_days_json: JSON.stringify(weekApprovalDays) }).catch(e => console.warn('[DB] saveAppState (approvalDays) error:', e));
   }, [weekApprovalDays, appDataLoaded]);
 
   // ── Sync kid XP / coins to Supabase (debounced) ──────────────────────────
@@ -8526,15 +9694,39 @@ function AppInner() {
           coins:           kidCoins[name] ?? 0,
           current_streak:  km.currentStreak,
           last_chore_date: km.lastChoreDate || undefined,
+          monster_idx:     km.monsterIdx,
+          monster_name:    km.selectedMonsterName || undefined,
         }).catch(e => console.warn('[DB] updateKidStats error:', e));
       }
     }, 2000); // 2s debounce — avoids hammering DB on rapid updates
     return () => { if (kidSyncTimer.current) clearTimeout(kidSyncTimer.current); };
   }, [kidMonsterState, kidCoins, appDataLoaded]);
 
+  // ── Stuck-evolution recovery: if XP is already past the threshold on load ─
+  // This happens when the app is killed during the evolve animation, leaving
+  // xp > needed but monsterIdx un-advanced. Checks EVERY kid (not just the one
+  // active at load) and raises pendingEvolution — the dedicated effect then
+  // shows the evolve screen when that kid is (or becomes) the active view.
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    setKidMonsterState(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [name, km] of Object.entries(prev)) {
+        if (!km.pendingEvolution && km.monsterIdx < MONSTERS.length - 1 && km.xp >= MONSTERS[km.monsterIdx].needed) {
+          next[name] = { ...km, pendingEvolution: true };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [appDataLoaded]); // intentionally runs only once after load
+
   // ── Daily chore reset ─────────────────────────────────────────────────────
   const [lastResetDate,  setLastResetDate]  = useState<string>('');
   const [debugDayOffset, setDebugDayOffset] = useState(0);
+  // Active kid's streak as it stands today (reads 0 the moment a day is missed).
+  const liveCurrentStreak = liveStreak(currentStreak, lastChoreDate, getSimulatedToday(debugDayOffset));
 
   useEffect(() => {
     const today = getSimulatedToday(debugDayOffset);
@@ -8585,75 +9777,105 @@ function AppInner() {
   }, [viewMode, kidPayoutPending, currentKidName]);
 
   // Allow audio to play through iOS silent switch
-  useEffect(() => { setAudioModeAsync({ playsInSilentModeIOS: true }); }, []);
+  useEffect(() => { setAudioModeAsync({ playsInSilentMode: true }); }, []);
   const openDebug = () => { if (__DEV__) setDebugOpen(true); };
-
-  const completeChore = useCallback((c: Chore) => {
-    setKidMonster(currentKidName, s => {
-      const newXp = s.xp + c.xp;
-      const updated: KidMonsterState = {
-        ...s,
-        done: { ...s.done, [c.id]: true },
-        xp: newXp,
-        weeklyXp: s.weeklyXp + c.xp,
-      };
-      if (s.monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[s.monsterIdx].needed) {
-        setScreen('evolve');
-      }
-      return updated;
-    });
-    addKidCoins(currentKidName, choreCoins(c, baseRate));
-  }, [baseRate, currentKidName, addKidCoins]);
 
   const submitManagedChore = useCallback((id: string) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
     const choreStatus = getChoreStatus(chore, currentKidName);
     if (choreStatus !== 'active' && choreStatus !== 'rejected') return;
+    // Hard weekly cap: never let a kid claim a chore more than its recurrence
+    // target across all states (approved + pending). This is what keeps progress
+    // from exceeding 100%.
+    if (getClaimedCount(chore, currentKidName) >= frequencyToWeeklyTarget(chore.frequency)) return;
     const kidDbId = getKidDbId(currentKidName);
-    const earnedCents = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+    const today = getSimulatedToday(debugDayOffset);
+    const earnedCents = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
     if (requireApproval) {
-      setManagedChores(prev => prev.map(c => c.id === id ? {
-        ...c,
-        childStatus: { ...c.childStatus, [currentKidName]: 'pending' as ChoreStatus },
-        childRejectionNote: { ...c.childRejectionNote, [currentKidName]: '' },
-      } : c));
+      // Shared "first to finish" chores: the moment one kid submits, lock it for
+      // the whole household. The submitter goes 'pending' (awaiting approval);
+      // every other eligible kid is marked 'approved' so it drops off their to-do
+      // and reads as done — you'd never want two kids doing the same shared chore
+      // just because the first is still awaiting approval. This also closes the
+      // weekly-cap race: with the others locked out, the shared counter can't be
+      // bumped past target by a second submission. (Independent chores stay per-kid.)
+      const shared = !isIndependentChore(chore);
+      const eligible = shared ? choreEligibleKids(chore, setupChildren.map(c => c.name)) : [];
+      // Snapshot the XP this submission will pay on approval. The streak bonus
+      // applies only to the first chore of a new day — the same rule as the
+      // auto-approve path — so approval timing/batching can't multiply it.
+      const km = kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE;
+      const isNewDay = km.lastChoreDate !== today;
+      const newStreak = nextStreak(km.currentStreak, km.lastChoreDate, today);
+      const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
+      let pendingXp = baseXp;
+      if (isNewDay && newStreak > 0 && newStreak % 7 === 0) pendingXp += 25;          // +25 flat on 7-day
+      else if (isNewDay && newStreak > 0 && newStreak % 3 === 0) pendingXp = Math.round(baseXp * 1.1); // +10% on 3-day
+      setManagedChores(prev => prev.map(c => {
+        if (c.id !== id) return c;
+        const childStatus: Record<string, ChoreStatus> = { ...c.childStatus, [currentKidName]: 'pending' };
+        if (shared) for (const k of eligible) if (k !== currentKidName) childStatus[k] = 'approved';
+        return {
+          ...c,
+          childStatus,
+          childRejectionNote: { ...c.childRejectionNote, [currentKidName]: '' },
+          childSubmittedAt: { ...c.childSubmittedAt, [currentKidName]: new Date().toISOString() },
+          // Pin this submission's pay/XP to the rate and streak in effect right now.
+          childPendingCents: { ...c.childPendingCents, [currentKidName]: [...(c.childPendingCents?.[currentKidName] ?? []), earnedCents] },
+          childPendingXp:    { ...c.childPendingXp,    [currentKidName]: [...(c.childPendingXp?.[currentKidName] ?? []), pendingXp] },
+        };
+      }));
+      // The streak tracks the kid's activity, so it advances when they DO the
+      // chore (submit), not when the parent later approves it. This keeps the
+      // streak honest even if approvals are batched days later.
+      setKidMonster(currentKidName, s =>
+        s.lastChoreDate === today
+          ? s
+          : { ...s, currentStreak: nextStreak(s.currentStreak, s.lastChoreDate, today), lastChoreDate: today }
+      );
       // Save to Supabase
       if (kidDbId) {
         submitChoreCompletion({ choreId: id, kidId: kidDbId, requiresApproval: true }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
       }
     } else {
-      const newCompletions = (chore.weeklyCompletions ?? 0) + 1;
-      setManagedChores(prev => prev.map(c => c.id === id ? {
-        ...c,
-        childStatus: { ...c.childStatus, [currentKidName]: 'approved' as ChoreStatus },
-        weeklyCompletions: newCompletions,
-      } : c));
+      const allKidNames = setupChildren.map(c => c.name);
+      setManagedChores(prev => prev.map(c => c.id === id ? applyChoreCompletion(c, currentKidName, allKidNames) : c));
       // ── XP with streak bonus ──────────────────────────────────────────────────
-      const today = getSimulatedToday(debugDayOffset);
-      const earnedCoins = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+      const earnedCoins = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
       addKidCoins(currentKidName, earnedCoins);
+      // Log to history so "earned this week" counts auto-approved chores too
+      // (mirrors the parent-approval path; no-approval households relied on this).
+      setChoreHistory(prev => [{
+        id: `${id}-${currentKidName}-${Date.now()}-${(approvalSeq.current++)}`,
+        choreName: chore.name,
+        kidName: currentKidName,
+        earnedCents,
+        approvedAt: new Date(Date.now() + debugDayOffset * 86_400_000).toISOString(),
+        icon: chore.icon,
+        bg: chore.bg,
+      }, ...prev]);
       setKidMonster(currentKidName, s => {
         const isNewDay = s.lastChoreDate !== today;
-        const newStreak = isNewDay ? s.currentStreak + 1 : s.currentStreak;
+        const newStreak = nextStreak(s.currentStreak, s.lastChoreDate, today);
         const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
         let earnedXp = baseXp;
         if (isNewDay && newStreak > 0 && newStreak % 7 === 0) earnedXp += 25;          // +25 flat on 7-day
         else if (isNewDay && newStreak > 0 && newStreak % 3 === 0) earnedXp = Math.round(earnedXp * 1.1); // +10% on 3-day
         const newXp = s.xp + earnedXp;
-        if (s.monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[s.monsterIdx].needed) {
-          setScreen('evolve');
-        }
         return {
           ...s,
           xp: newXp,
           weeklyXp: s.weeklyXp + earnedXp,
           currentStreak: isNewDay ? newStreak : s.currentStreak,
           lastChoreDate: isNewDay ? today : s.lastChoreDate,
+          // Updaters must stay pure (no setScreen here) — the pendingEvolution
+          // effect fires the evolve screen once this state lands.
+          pendingEvolution: (s.monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[s.monsterIdx].needed) ? true : s.pendingEvolution,
         };
       });
       // Update active goal progress
-      setGoals(prev => {
+      setKidGoals(currentKidName, prev => {
         if (prev.length === 0) return prev;
         return prev.map((g, i) => i === 0 ? {
           ...g,
@@ -8670,116 +9892,154 @@ function AppInner() {
         approveChoreCompletion({ choreId: id, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
       }
     }
-  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins]);
+  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState]);
 
-  // ── Monday midnight weekly reset ─────────────────────────────────────────────
+  // ── Weekly reset (the chore board rolls over at the week boundary) ───────────
+  // This is the ONLY place the chore board resets for a new week. It fires on the
+  // first app open of a new week — anchored to Monday via getWeekMondayKey, but not
+  // requiring the app to be open at midnight Monday — so a skipped Monday still
+  // rolls over the next time the app opens. The boss battle no longer resets chores.
   useEffect(() => {
+    if (!appDataLoaded) return; // wait until persisted state (incl. lastWeekReset) is hydrated
     const mondayKey = getWeekMondayKey(debugDayOffset);
-    if (lastWeekReset === mondayKey) return; // already reset this week
-    const simDay = new Date(Date.now() + debugDayOffset * 86_400_000).getDay();
-    if (simDay !== 1 && debugDayOffset === 0) return; // not Monday in real time (debug can force it)
+    // First run / post-update with no stored marker: adopt the current week as
+    // already-reset so we never wipe a kid's in-progress week on launch.
+    if (!lastWeekReset) { setLastWeekReset(mondayKey); return; }
+    if (lastWeekReset === mondayKey) return; // already reset for this week
     // Reset weekly chore completions and approval days
     setManagedChores(prev => prev.map(c => ({
       ...c,
       weeklyCompletions: 0,
+      childCompletions: undefined,
+      // childPendingCount is intentionally PRESERVED across the week boundary:
+      // it's work the kid already did that's still awaiting review — wiping it
+      // would silently drop their pay. Approving it later lands in the new
+      // week's counts/history (same as any cross-day approval), and it keeps
+      // counting toward the weekly cap until the parent resolves it.
       status: c.status === 'approved' || c.status === 'rejected' ? 'active' as const : c.status,
       rejectionNote: undefined,
+      childStatus: c.childStatus
+        ? Object.fromEntries(Object.entries(c.childStatus).map(([k, st]) =>
+            [k, (st === 'approved' || st === 'rejected') ? 'active' as ChoreStatus : st]))
+        : c.childStatus,
     })));
-    // Reset per-kid weekly state for all kids
+    // Reset per-kid weekly state for all kids.
+    // NOTE: cumulative `xp` (progress toward the next evolution) intentionally
+    // persists across weeks — only the weekly battle power (`weeklyXp`) and the
+    // weekly chore/battle bookkeeping reset. This keeps leveling cumulative so a
+    // kid doesn't lose evolution progress every Monday.
     setKidMonsterState(prev => {
       const next = { ...prev };
       for (const name of Object.keys(next)) {
         next[name] = {
           ...next[name],
-          xp: 0,
           weeklyXp: 0,
           done: {},
           battleResult: null,
           lockedBossName: null,
+          weeklyShardsClaimed: false,
+          // The boss lock clears at the week boundary, so the wound does too —
+          // a boss returning in a later rotation starts at full HP.
+          woundedBossHp: {},
         };
       }
       return next;
     });
     setWeekApprovalDays([]);
     setLastWeekReset(mondayKey);
-  }, [debugDayOffset, lastWeekReset]);
+  }, [appDataLoaded, debugDayOffset, lastWeekReset]);
+
+  // Persist the week-reset marker so a cold start mid-week doesn't wrongly wipe
+  // chores that were already completed earlier in the same week.
+  useEffect(() => {
+    if (!appDataLoaded || !lastWeekReset) return;
+    AsyncStorage.setItem('monstir:lastWeekReset', lastWeekReset).catch(() => {});
+  }, [lastWeekReset, appDataLoaded]);
 
   // ── Milestone helper ─────────────────────────────────────────────────────────
   const checkMilestone = useCallback(async (id: string, kidName?: string) => {
-    const wasNew = await earnMilestone(id);
-    if (!wasNew) return;
     const def = getMilestone(id);
     if (!def) return;
+    // Parent milestones belong to the parent; kid milestones to a specific kid.
+    const isParent = def.audience === 'parent';
+    const name  = kidName ?? currentKidName;
+    const owner = isParent ? PARENT_OWNER : name;
+    const wasNew = await earnMilestone(owner, id);
+    if (!wasNew) return;
     setToastMid(id);
     setActiveToast(def);
-    // Save to Supabase
-    const name = kidName ?? currentKidName;
-    const kidDbId = setupChildren.find(c => c.name === name)?.id;
-    if (kidDbId) {
-      saveMilestoneToDb({ kidId: kidDbId, milestoneId: id }).catch(e => console.warn('[DB] saveMilestoneToDb error:', e));
+    // Save kid milestones to Supabase under that kid (parent milestones stay local).
+    if (!isParent) {
+      const kidDbId = setupChildren.find(c => c.name === name)?.id;
+      if (kidDbId) {
+        saveMilestoneToDb({ kidId: kidDbId, milestoneId: id }).catch(e => console.warn('[DB] saveMilestoneToDb error:', e));
+      }
     }
   }, [currentKidName, setupChildren]);
 
-  const approveManagedChore = useCallback((id: string, kidName: string) => {
+  // Grant ONE day's approval for (chore, kidName): consumes a single pending
+  // unit — backlog (a prior day's submission) first so today's fresh instance is
+  // left intact — and awards that day's coins, XP, history entry, and milestones.
+  // `unitIdx` is which queued unit this call pays out (0 = oldest). Batch
+  // approval calls this in a loop with i = 0..n-1 against the same pre-click
+  // snapshot of `managedChores`, so the index selects each unit's own amount.
+  const grantChoreApproval = useCallback((id: string, kidName: string, unitIdx = 0) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
-    const choreStatus = getChoreStatus(chore, kidName);
-    if (choreStatus !== 'pending') return;
-    const newCompletions = (chore.weeklyCompletions ?? 0) + 1;
-    const earnedCents = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
-    // Stay approved until weekly reset clears it back to active
-    setManagedChores(prev => prev.map(c => c.id === id ? {
-      ...c,
-      childStatus: { ...c.childStatus, [kidName]: 'approved' as ChoreStatus },
-      weeklyCompletions: newCompletions,
-    } : c));
-    // Mark today as an approval day for the burndown chart
+    const allKidNames = setupChildren.map(c => c.name);
+    // Pay the amount snapshotted when the kid submitted; fall back to the
+    // current rate for legacy submissions that predate the snapshot field.
+    const earnedCents = chore.childPendingCents?.[kidName]?.[unitIdx]
+      ?? Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+    const today = getSimulatedToday(debugDayOffset);
+    const earnedCoins = earnedCents;
+    // XP likewise: pay what was snapshotted at submit (streak bonus already
+    // baked in, gated to the first chore of a new day). Legacy submissions
+    // without a snapshot fall back to base XP plus a bonus from the kid's LIVE
+    // streak — the stored value can be stale once a day is missed.
+    const kmAtClick = kidMonsterState[kidName] ?? DEFAULT_KID_MONSTER_STATE;
+    const legacyLiveStreak = liveStreak(kmAtClick.currentStreak, kmAtClick.lastChoreDate, today);
+    let legacyXp = XP_BY_DIFFICULTY[chore.difficulty];
+    if (legacyLiveStreak > 0 && legacyLiveStreak % 7 === 0) legacyXp += 25;
+    else if (legacyLiveStreak > 0 && legacyLiveStreak % 3 === 0) legacyXp = Math.round(legacyXp * 1.1);
+    const earnedXp = chore.childPendingXp?.[kidName]?.[unitIdx] ?? legacyXp;
+
+    // Consume one pending unit. Backlog first (oldest), else today's live pending.
+    setManagedChores(prev => prev.map(c => {
+      if (c.id !== id) return c;
+      const backlog = c.childPendingCount?.[kidName] ?? 0;
+      const consumed = shiftPendingCents(c, kidName);
+      if (backlog > 0) return decPendingBacklog(bumpCompletionCount(consumed, kidName), kidName);
+      return applyChoreCompletion(consumed, kidName, allKidNames);
+    }));
+
     setWeekApprovalDays(prev => prev.includes(today) ? prev : [...prev, today]);
-    // Push to history log
     setChoreHistory(prev => [{
-      id: `${id}-${kidName}-${Date.now()}`,
+      id: `${id}-${kidName}-${Date.now()}-${(approvalSeq.current++)}`,
       choreName: chore.name,
       kidName,
       earnedCents,
-      approvedAt: new Date().toISOString(),
+      // Stamp with the simulated date so "earned this week" filters correctly when
+      // debug-scrubbing days (identical to real time when debugDayOffset is 0).
+      approvedAt: new Date(Date.now() + debugDayOffset * 86_400_000).toISOString(),
       icon: chore.icon,
       bg: chore.bg,
     }, ...prev]);
-    // ── XP with streak bonus ──────────────────────────────────────────────────
-    const today = getSimulatedToday(debugDayOffset);
-    const earnedCoins = Math.round(parseFloat(baseRate) * 100 * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
     addKidCoins(kidName, earnedCoins);
     setKidMonster(kidName, s => {
-      const isNewDay = s.lastChoreDate !== today;
-      const newStreak = isNewDay ? s.currentStreak + 1 : s.currentStreak;
-      const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
-      let earnedXp = baseXp;
-      if (isNewDay && newStreak > 0 && newStreak % 7 === 0) earnedXp += 25;
-      else if (isNewDay && newStreak > 0 && newStreak % 3 === 0) earnedXp = Math.round(earnedXp * 1.1);
+      // The streak already advanced when the kid submitted, so approval only
+      // pays out the snapshotted XP/coins. Updaters must stay pure: crossing
+      // the evolution threshold just raises pendingEvolution — the dedicated
+      // effect shows the evolve screen when this kid is (or becomes) active.
       const newXp = s.xp + earnedXp;
-      if (s.monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[s.monsterIdx].needed) {
-        checkMilestone('first-evolution');
-        if (viewMode === 'kid' && kidName === currentKidName) {
-          setScreen('evolve');
-        } else {
-          // will be deferred via pendingEvolution effect when kid switches back
-        }
-      }
       return {
         ...s,
         xp: newXp,
         weeklyXp: s.weeklyXp + earnedXp,
-        currentStreak: isNewDay ? newStreak : s.currentStreak,
-        lastChoreDate: isNewDay ? today : s.lastChoreDate,
-        pendingEvolution: (s.monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[s.monsterIdx].needed && !(viewMode === 'kid' && kidName === currentKidName))
-          ? true
-          : s.pendingEvolution,
+        pendingEvolution: (s.monsterIdx < MONSTERS.length - 1 && newXp >= MONSTERS[s.monsterIdx].needed) ? true : s.pendingEvolution,
       };
     });
-    // Streak + approval day tracking
-    setWeekApprovalDays(prev => prev.includes(today) ? prev : [...prev, today]);
-    // Update active goal progress
-    setGoals(prev => {
+    setKidGoals(kidName, prev => {
       if (prev.length === 0) return prev;
       return prev.map((g, i) => i === 0 ? {
         ...g,
@@ -8792,29 +10052,28 @@ function AppInner() {
     });
 
     // ── Milestone triggers ────────────────────────────────────────────────────
-    // Count lifetime approved chores after this approval
-    const totalApproved = managedChores.filter(c => c.status === 'approved').length + 1;
-    if (totalApproved >= 1)  checkMilestone('first-chore');
-    if (totalApproved >= 10) checkMilestone('chores-10');
-    if (totalApproved >= 50) checkMilestone('chores-50');
-    // Streak milestones (use kid's updated streak)
-    const kidStreak = (kidMonsterState[kidName]?.currentStreak ?? 0) + 1;
-    if (kidStreak >= 3) checkMilestone('streak-3');
-    if (kidStreak >= 7) checkMilestone('streak-7');
-    // Money milestones (total coins ever earned, approximate from current + earned)
+    // Lifetime completions = this kid's history entries plus the one being
+    // granted now (+unitIdx for earlier grants in the same batch, which haven't
+    // landed in `choreHistory` yet — this callback reads the pre-click snapshot).
+    const totalApproved = choreHistory.filter(e => e.kidName === kidName).length + 1 + unitIdx;
+    if (totalApproved >= 1)  checkMilestone('first-chore', kidName);
+    if (totalApproved >= 10) checkMilestone('chores-10', kidName);
+    if (totalApproved >= 50) checkMilestone('chores-50', kidName);
+    // Use the LIVE streak — the stored value lingers after a missed day and
+    // would award streak milestones for a streak that's already broken.
+    if (legacyLiveStreak >= 3) checkMilestone('streak-3', kidName);
+    if (legacyLiveStreak >= 7) checkMilestone('streak-7', kidName);
     const totalCoinsAfter = (kidCoins[kidName] ?? 0) + earnedCoins;
-    if (totalCoinsAfter >= 1000)  checkMilestone('money-10');
-    if (totalCoinsAfter >= 2500)  checkMilestone('money-25');
-    if (totalCoinsAfter >= 10000) checkMilestone('money-100');
-    // Goal Getter — check if current goal is reached after this coin add
-    const currentGoal = goals[0];
+    if (totalCoinsAfter >= 1000)  checkMilestone('money-10', kidName);
+    if (totalCoinsAfter >= 2500)  checkMilestone('money-25', kidName);
+    if (totalCoinsAfter >= 10000) checkMilestone('money-100', kidName);
+    const currentGoal = getKidGoals(kidName)[0];
     if (currentGoal) {
       const targetCents = Math.round(parseFloat(currentGoal.amount || '0') * 100);
       if (targetCents > 0 && currentGoal.savedCents + earnedCoins >= targetCents) {
-        checkMilestone('goal-getter');
+        checkMilestone('goal-getter', kidName);
       }
     }
-    // Parent milestones
     checkMilestone('parent-first-approval');
 
     // Save to Supabase
@@ -8822,23 +10081,84 @@ function AppInner() {
     if (kidDbId) {
       approveChoreCompletion({ choreId: id, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
     }
-  }, [managedChores, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins]);
+  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren]);
+
+  // Approve a single day (the oldest pending submission).
+  const approveManagedChore = useCallback((id: string, kidName: string) => {
+    const chore = managedChores.find(c => c.id === id);
+    if (!chore || getPendingCount(chore, kidName) <= 0) return;
+    grantChoreApproval(id, kidName);
+  }, [managedChores, grantChoreApproval]);
+
+  // Approve every pending day at once — grants each day's pay/XP separately.
+  const approveAllManagedChore = useCallback((id: string, kidName: string) => {
+    const chore = managedChores.find(c => c.id === id);
+    if (!chore) return;
+    const n = getPendingCount(chore, kidName);
+    for (let i = 0; i < n; i++) grantChoreApproval(id, kidName, i);
+  }, [managedChores, grantChoreApproval]);
 
   const rejectManagedChore = useCallback((id: string, note: string, kidName: string) => {
-    setManagedChores(prev => prev.map(c => c.id === id ? {
-      ...c,
-      childStatus: { ...c.childStatus, [kidName]: (note ? 'rejected' : 'active') as ChoreStatus },
-      childRejectionNote: note ? { ...c.childRejectionNote, [kidName]: note } : c.childRejectionNote,
-    } : c));
+    // Reject one pending unit — backlog (oldest) first, else today's live pending.
+    setManagedChores(prev => prev.map(c => {
+      if (c.id !== id) return c;
+      const hasBacklog = (c.childPendingCount?.[kidName] ?? 0) > 0;
+      // When today's submission is ALSO still pending, consume ONLY the backlog
+      // unit and leave the live submission in the queue — touching the status
+      // here would silently discard it (mirrors grantChoreApproval). The note is
+      // dropped: it only renders while the kid's status is 'rejected'.
+      if (hasBacklog && getChoreStatus(c, kidName) === 'pending') {
+        return decPendingBacklog(shiftPendingCents(c, kidName), kidName);
+      }
+      // Otherwise surface the note and reopen the chore so the kid can redo it.
+      const consumed = shiftPendingCents(c, kidName);
+      const base = hasBacklog ? decPendingBacklog(consumed, kidName) : consumed;
+      // Shared chores were locked for the whole household when this kid claimed it
+      // (others marked 'approved'). A rejection unclaims it, so reopen it for every
+      // eligible kid — not just the submitter — and clear their stand-in 'approved'.
+      if (!isIndependentChore(c)) {
+        const childStatus: Record<string, ChoreStatus> = { ...base.childStatus };
+        for (const k of choreEligibleKids(c, setupChildren.map(x => x.name))) {
+          childStatus[k] = (k === kidName && note) ? 'rejected' : 'active';
+        }
+        return {
+          ...base,
+          status: 'active' as ChoreStatus,
+          childStatus,
+          childRejectionNote: note ? { ...base.childRejectionNote, [kidName]: note } : base.childRejectionNote,
+        };
+      }
+      return {
+        ...base,
+        childStatus: { ...base.childStatus, [kidName]: (note ? 'rejected' : 'active') as ChoreStatus },
+        childRejectionNote: note ? { ...base.childRejectionNote, [kidName]: note } : base.childRejectionNote,
+      };
+    }));
     // Save to Supabase
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
       rejectChoreCompletion({ choreId: id, kidId: kidDbId, rejectionNote: note }).catch(e => console.warn('[DB] rejectChoreCompletion error:', e));
     }
-  }, [managedChores]);
+  }, [managedChores, setupChildren]);
 
   const confirmPayout = useCallback((kidName: string) => {
     const amount = kidCoins[kidName] ?? 0;
+    // Capture the per-week breakdown BEFORE logging this payout — the new payout
+    // entry would otherwise move the "unpaid since" boundary and zero out the weeks.
+    const weeks = getUnpaidWeeks(kidName, choreHistory, payoutLog);
+    // Chores covered by THIS payout = everything in the unpaid weeks (a payout
+    // can span multiple weeks; this week's completion tally would undercount).
+    // Fall back to the weekly tally for legacy installs with no chore history.
+    const historyCount = weeks.reduce((s, w) => s + w.choreCount, 0);
+    const fallbackCount = managedChores
+      .filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(kidName))
+      .reduce((sum, c) => sum + getChoreCompletions(c, kidName), 0);
+    const completedCount = historyCount > 0 ? historyCount : fallbackCount;
+    // Anything paid beyond the chore-history total is battle-capture bonus coins —
+    // surface it so the weeks breakdown visibly adds up to the amount paid.
+    const weeksCents = weeks.reduce((s, w) => s + w.earnedCents, 0);
+    const battleBonus = historyCount > 0 && amount > weeksCents ? amount - weeksCents : null;
+    setPayoutSnapshot(prev => ({ ...prev, [kidName]: { amount, completedCount, weeks, battleWon: battleBonus != null ? true : null, battleBonus } }));
     resetKidCoins(kidName);
     setPayoutLog(prev => [{ kidName, amount, paidAt: new Date().toISOString() }, ...prev]);
     setKidPayoutPending(prev => ({ ...prev, [kidName]: true }));
@@ -8849,7 +10169,7 @@ function AppInner() {
     if (kidDbId) {
       savePayoutToDb({ kidId: kidDbId, kidName, amountCents: amount }).catch(e => console.warn('[DB] savePayoutToDb error:', e));
     }
-  }, [kidCoins, resetKidCoins]);
+  }, [kidCoins, resetKidCoins, choreHistory, payoutLog, managedChores]);
 
   const openPayout = useCallback(() => {
     setParentScreen('parentPayout');
@@ -8863,7 +10183,7 @@ function AppInner() {
   };
 
     const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number, completionPctOverride?: number, bossOverride?: Boss, remainingBossHp?: number) => {
-    const boss = bossOverride ?? resolveCurrentBoss(monsterIdx, lockedBossName);
+    const boss = bossOverride ?? resolveCurrentBoss(monsterIdx, lockedBossName, debugDayOffset);
     let coinsEarned = 0;
     if (result === 'captured' && battleCoinBonusEnabled) {
       coinsEarned = Math.round(boss.captureCoins * battleCoinBonusMultiplier);
@@ -8873,32 +10193,41 @@ function AppInner() {
       setBonusCoins(0);
     }
     const xpSnapshot = weeklyXp;
-    // Track wounded boss HP and lock boss until captured
-    if (result === 'got-away') {
-      if (remainingBossHp != null && remainingBossHp > 0) {
-        setWoundedBossHp(prev => ({ ...prev, [boss.name]: remainingBossHp }));
-      }
-    } else if (result === 'captured') {
-      setWoundedBossHp(prev => { const next = { ...prev }; delete next[boss.name]; return next; });
+    // Chore completion % — drives the chest tier and the weekly shard grant.
+    let pct: number;
+    if (completionPctOverride !== undefined) {
+      pct = completionPctOverride;
+    } else {
+      const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
+      const totalTarget = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
+      const totalDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
+      pct = Math.min(100, Math.round((totalDone / totalTarget) * 100));
     }
-    setKidMonster(currentKidName, s => ({
-      ...s,
-      battleResult: result,
-      lockedBossName: result === 'got-away' ? boss.name : null,
-      weeklyXp: 0,
-    }));
-    setManagedChores(prev => prev.map(c => ({ ...c, weeklyCompletions: 0, status: 'active' as const, rejectionNote: undefined })));
-    setShards(prev => Math.max(0, prev - shardsUsed));
+    setKidMonster(currentKidName, s => {
+      // Bank unspent shards: the arena was seeded with the banked balance plus
+      // this week's grant (if not yet claimed), so persist what's left after
+      // spending — and mark the grant claimed so a re-entry can't re-farm it.
+      const entryShards = Math.min(SHARD_CAP, s.shards + (s.weeklyShardsClaimed ? 0 : calcWeeklyShards(pct)));
+      // Track wounded boss HP per kid, and lock the boss until captured.
+      const woundedNext = { ...s.woundedBossHp };
+      if (result === 'got-away' && remainingBossHp != null && remainingBossHp > 0) woundedNext[boss.name] = remainingBossHp;
+      else if (result === 'captured') delete woundedNext[boss.name];
+      return {
+        ...s,
+        battleResult: result,
+        lockedBossName: result === 'got-away' ? boss.name : null,
+        weeklyXp: 0,
+        shards: Math.max(0, entryShards - shardsUsed),
+        weeklyShardsClaimed: true,
+        woundedBossHp: woundedNext,
+      };
+    });
+    // The battle consumes the week's power (weeklyXp) and hands out rewards, but it
+    // does NOT reset the chore board — Sunday is still part of the current week, so
+    // chores completed that day stay done. The chore board rolls over only at the
+    // real week boundary, handled by the weekly reset effect.
 
     if (result === 'captured') {
-      let pct: number;
-      if (completionPctOverride !== undefined) {
-        pct = completionPctOverride;
-      } else {
-        const totalTarget = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
-        const totalDone   = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
-        pct = Math.min(100, Math.round((totalDone / totalTarget) * 100));
-      }
       setChorePctAtBattle(pct);
       const t = tierFromPct(pct);
       setChestTier(t);
@@ -8908,9 +10237,9 @@ function AppInner() {
       const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
       const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
       const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      checkMilestone('first-boss');
+      checkMilestone('first-boss', currentKidName);
 
-      saveBossCapture({
+      saveBossCapture(currentKidName, {
         id:            `${Date.now()}-${boss.name}`,
         bossName:      boss.name,
         capturedAt:    now.toISOString(),
@@ -8925,30 +10254,35 @@ function AppInner() {
       // Also save to Supabase
       const kidDbId = getKidDbId(currentKidName);
       if (kidDbId) {
-        saveBossCaptureToDb({ kidId: kidDbId, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned }).catch(e => console.warn('[DB] saveBossCaptureToDb error:', e));
+        saveBossCaptureToDb({ kidId: kidDbId, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned, completionPct: pct }).catch(e => console.warn('[DB] saveBossCaptureToDb error:', e));
       }
 
       setScreen('chestReveal');
     } else {
       setScreen('result');
     }
-  }, [monsterIdx, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins]);
+  }, [monsterIdx, lockedBossName, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset]);
 
   const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
 
   const navTab = useCallback((t: Tab) => { setTab(t); setScreen(t); }, []);
-  const showTabBar = ['home', 'world', 'wallet'].includes(screen);
+  const showTabBar = ['home', 'world', 'wallet', 'trophies'].includes(screen);
 
   const handleEvolveDone = useCallback(() => {
     setKidMonster(currentKidName, s => ({
       ...s,
       monsterIdx: Math.min(s.monsterIdx + 1, MONSTERS.length - 1) as MonsterIdx,
-      xp: 0,
+      // Carry excess XP into the next level rather than dropping it to 0,
+      // so a kid who overshoots the threshold doesn't lose those points.
+      xp: Math.max(0, s.xp - MONSTERS[s.monsterIdx].needed),
       done: {},
     }));
+    // Awarded here — when the evolution actually completes — so every trigger
+    // path (auto-approve, parent approval, deferred) earns it exactly once.
+    checkMilestone('first-evolution', currentKidName);
     setTab('home');
     setScreen('home');
-  }, [currentKidName]);
+  }, [currentKidName, checkMilestone]);
 
   // Parent navigation — always track where we came from so back buttons work correctly
   const navParent = (s: ParentScreen) => {
@@ -8959,7 +10293,7 @@ function AppInner() {
     else if (s === 'chores' || s === 'addChore' || s === 'editChore') setParentTab('chores');
     else if (s === 'choreLibrary') setParentTab('settings');
     else if (s === 'moneyLedger' || s === 'parentPayout') setParentTab('money');
-    else if (s === 'settings' || s === 'payRates' || s === 'rateGuide' || s === 'rewards' || s === 'approval') setParentTab('settings');
+    else if (s === 'settings' || s === 'payRates' || s === 'rateGuide' || s === 'rewards') setParentTab('settings');
   };
   const navParentTab = (t: ParentTab) => {
     setParentTab(t);
@@ -8982,8 +10316,26 @@ function AppInner() {
       return exists ? prev.map(c => c.id === chore.id ? chore : c) : [...prev, chore];
     });
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
+
+    const iconStr = serializeChoreIcon(chore.icon);
+    const assignedIds = chore.assignedTo.map(name => setupChildren.find(c => c.name === name)?.id ?? name);
+    const fields = { name: chore.name, icon: iconStr, frequency: chore.frequency, difficulty: chore.difficulty, assigned_to: assignedIds, completion_mode: chore.completionMode ?? null };
+
+    // Supabase UUIDs are long strings; short numeric-string IDs are local-only
+    const isSupabaseId = chore.id.length > 20;
+    if (isSupabaseId) {
+      updateChoreDb(chore.id, fields).catch(e => console.warn('[DB] updateChore error:', e));
+    } else {
+      addChore(fields).then(row => {
+        if (row?.id) setManagedChores(prev => prev.map(c => c.id === chore.id ? { ...c, id: row.id } : c));
+      }).catch(e => console.warn('[DB] addChore error:', e));
+    }
   };
-  const deleteChore = (id: string) => { setManagedChores(prev => prev.filter(c => c.id !== id)); setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores'); };
+  const deleteChore = (id: string) => {
+    setManagedChores(prev => prev.filter(c => c.id !== id));
+    setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
+    if (id.length > 20) deleteChoreDb(id).catch(e => console.warn('[DB] deleteChore error:', e));
+  };
 
   const addGoal = useCallback((data: GoalData) => {
     const goal: SavedGoal = {
@@ -8992,20 +10344,40 @@ function AppInner() {
       amount: data.amount,
       category: data.category,
       color: data.color,
-      icon: data.icon,
+      iconKey: data.iconKey,
+      icon: goalIconSource(data.iconKey),
       savedCents: getKidCoins(currentKidName),   // credit whatever the kid has already earned
       milestones: ['Keep it up!', 'Halfway there!', 'Almost done!', 'Goal unlocked!'],
       activityFeed: [],
     };
-    setGoals(prev => [...prev, goal]);
+    setKidGoals(currentKidName, prev => [...prev, goal]);
   }, [getKidCoins, currentKidName]);
 
   const editGoal = useCallback((updated: SavedGoal) => {
-    setGoals(prev => prev.map(g => g.id === updated.id ? updated : g));
-  }, []);
+    setKidGoals(currentKidName, prev => prev.map(g => g.id === updated.id ? updated : g));
+  }, [currentKidName]);
 
   const deleteGoal = useCallback((id: string) => {
-    setGoals(prev => prev.filter(g => g.id !== id));
+    setKidGoals(currentKidName, prev => prev.filter(g => g.id !== id));
+  }, [currentKidName]);
+
+  // ── Parent PIN gate ─────────────────────────────────────────────────────
+  // Switching from a kid into parent view; prompt for the PIN if one is set.
+  const requestParentMode = useCallback(() => {
+    if (parentPinEnabled && parentPin) setPinModalOpen(true);
+    else setViewMode('parent');
+  }, [parentPinEnabled, parentPin]);
+
+  const saveParentPin = useCallback((pin: string) => {
+    setParentPin(pin);
+    setParentPinEnabled(true);
+    saveProfile({ parent_pin: pin, parent_pin_enabled: true }).catch(e => console.warn('[DB] saveParentPin error:', e));
+  }, []);
+
+  const disableParentPin = useCallback(() => {
+    setParentPin('');
+    setParentPinEnabled(false);
+    saveProfile({ parent_pin: null, parent_pin_enabled: false }).catch(e => console.warn('[DB] disableParentPin error:', e));
   }, []);
 
   // Avatar index for the currently active kid (0 = fallback)
@@ -9052,7 +10424,7 @@ function AppInner() {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#C5F215' }}>
           <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
           <LandingScreen
-            onLogin={() => setAppMode('app')}
+            onLogin={() => loadUserDataFromSupabase()}
             onCreateAccount={() => setAppMode('signup')}
           />
         </SafeAreaView>
@@ -9067,7 +10439,7 @@ function AppInner() {
           <StatusBar barStyle="dark-content" />
           <LoginScreen
             onBack={() => setAppMode('onboarding')}
-            onSuccess={() => setAppMode('app')}
+            onSuccess={() => loadUserDataFromSupabase()}
             onSignUp={() => setAppMode('signup')}
           />
         </SafeAreaView>
@@ -9140,9 +10512,13 @@ function AppInner() {
             // Save to Supabase in background
             try {
               const choreIdToName = Object.fromEntries(
-                Object.entries(setup.choreMap).map(([id, e]) => [id, { name: e.name, icon: '', difficulty: e.difficulty }])
+                Object.entries(setup.choreMap).map(([id, e]) => [id, { name: e.name, icon: id, difficulty: e.difficulty, frequency: e.frequency ?? 'Every day' }])
               );
-              await saveOnboardingSetup(setup, choreIdToName);
+              const { kidIdMap } = await saveOnboardingSetup(setup, choreIdToName);
+              // Replace the temporary local kid ids with the real Supabase UUIDs so
+              // later chore assignments map names → valid uuid[] values (otherwise the
+              // assigned_to write is rejected and the assignment isn't remembered).
+              setSetupChildren(prev => prev.map(c => kidIdMap[c.name] ? { ...c, id: kidIdMap[c.name] } : c));
             } catch (e) {
               console.warn('[DB] Failed to save onboarding setup:', e);
             }
@@ -9167,6 +10543,15 @@ function AppInner() {
                 selectedMonsterName: monsterName,
               }));
               setKidOnboardingDone(prev => ({ ...prev, [currentKidName]: true }));
+              // Persist monster choice and onboarding-done flag to Supabase
+              const kidDbId = getKidDbId(currentKidName);
+              if (kidDbId) {
+                updateKid(kidDbId, {
+                  monster_id:          validId,
+                  monster_name:        monsterName,
+                  kid_onboarding_done: true,
+                }).catch(e => console.warn('[DB] updateKid (kidWelcome) error:', e));
+              }
               setViewMode('kid');
               setAppMode('app');
             }}
@@ -9203,10 +10588,14 @@ function AppInner() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <ErrorBoundary key={`home-${currentKidName}`}><HomeScreen   key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={getKidCoins(currentKidName)} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={() => setViewMode('parent')} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} parentRole={parentRole} requireApproval={requireApproval} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={(name: string) => setKidMonster(currentKidName, s => ({ ...s, selectedMonsterName: name }))} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} /></ErrorBoundary>}
-            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={() => setViewMode('parent')} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} currentBoss={resolveCurrentBoss(monsterIdx, lockedBossName)} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} /></ErrorBoundary>}
+            {screen === 'home'     && <ErrorBoundary key={`home-${currentKidName}`}><HomeScreen   key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={getKidCoins(currentKidName)} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={requestParentMode} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} parentRole={parentRole} requireApproval={requireApproval} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={(name: string) => {
+                  setKidMonster(currentKidName, s => ({ ...s, selectedMonsterName: name }));
+                  const kidDbId = getKidDbId(currentKidName);
+                  if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
+                }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} /></ErrorBoundary>}
+            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} currentBoss={resolveCurrentBoss(monsterIdx, lockedBossName, debugDayOffset)} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} captureCoins={resolveCurrentBoss(monsterIdx, lockedBossName, debugDayOffset).captureCoins} /></ErrorBoundary>}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
-              <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : resolveCurrentBoss(monsterIdx, lockedBossName)} /></ErrorBoundary>
+              <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : resolveCurrentBoss(monsterIdx, lockedBossName, debugDayOffset)} /></ErrorBoundary>
             </Modal>
             {screen === 'arena'      && <ErrorBoundary key="arena">{(() => {
               if (dbgBattleActive) {
@@ -9219,15 +10608,17 @@ function AppInner() {
                   initialBossHp={woundedBossHp[BOSSES[dbgBossIdx].name]}
                 />;
               }
-              const totalWeeklyTarget = managedChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
-              const totalWeeklyDone   = managedChores.reduce((sum, c) => sum + (c.weeklyCompletions ?? 0), 0);
+              const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
+              const totalWeeklyTarget = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
+              const totalWeeklyDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
               const completionPct = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
-              const totalPower = calcPowerRating(completionPct, monsterIdx, currentStreak);
-              const weeklyShards = calcWeeklyShards(completionPct);
-              const battleShards = Math.min(SHARD_CAP, shards + weeklyShards);
-              const weaknessUnlocked = completionPct >= 50 && currentStreak >= 5;
+              const totalPower = calcPowerRating(completionPct, monsterIdx, liveCurrentStreak);
+              // The weekly grant is claimed once per week (first battle entry);
+              // re-entering after an escape brings only the banked balance.
+              const battleShards = Math.min(SHARD_CAP, shards + (weeklyShardsClaimed ? 0 : calcWeeklyShards(completionPct)));
+              const weaknessUnlocked = completionPct >= 50 && liveCurrentStreak >= 5;
               const guaranteedWin = completionPct >= 100;
-              const currentBoss = resolveCurrentBoss(monsterIdx, lockedBossName);
+              const currentBoss = resolveCurrentBoss(monsterIdx, lockedBossName, debugDayOffset);
               return <BattleArenaScreen
                 monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} monsterId={selectedMonsterId}
                 totalPower={totalPower} completionPct={completionPct} shards={battleShards} weaknessUnlocked={weaknessUnlocked}
@@ -9236,7 +10627,7 @@ function AppInner() {
                 initialBossHp={woundedBossHp[currentBoss.name]}
               />;
             })()}</ErrorBoundary>}
-            {screen === 'result'   && <ErrorBoundary key="result"><ResultScreen monsterIdx={monsterIdx} captured={battleResult === 'captured'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} bossName={resolveCurrentBoss(monsterIdx, lockedBossName).name} /></ErrorBoundary>}
+            {screen === 'result'   && <ErrorBoundary key="result"><ResultScreen monsterIdx={monsterIdx} captured={battleResult === 'captured'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} bossName={resolveCurrentBoss(monsterIdx, lockedBossName, debugDayOffset).name} /></ErrorBoundary>}
             {screen === 'chestReveal' && (
               <ErrorBoundary key="chestReveal">
                 <ChestReveal
@@ -9245,6 +10636,7 @@ function AppInner() {
                   collectible={chestCollectible}
                   weekLabel={new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   onDone={() => { setTrophyOrigin('home'); setScreen('trophyRoom'); }}
+                  kidName={currentKidName}
                   kidDbId={getKidDbId(currentKidName)}
                 />
               </ErrorBoundary>
@@ -9256,16 +10648,44 @@ function AppInner() {
                   monsterImg={currentMonsterImg}
                   monsterName={effectiveMonsterName}
                   xp={xp}
+                  currentKidName={currentKidName}
                   initialRelicKey={trophyInitialKey}
                   onBack={() => { setTrophyInitialKey(undefined); setTab(trophyOrigin); setScreen(trophyOrigin); }}
                 />
               </ErrorBoundary>
             )}
-            {screen === 'wallet'   && <ErrorBoundary key={`wallet-${currentKidName}`}><WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={getKidCoins(currentKidName)} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={goals} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={currentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={() => setViewMode('parent')} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} onOpenTrophyRoom={() => { setTrophyInitialKey(undefined); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }}
-                onOpenRelicDetail={(key) => { setTrophyInitialKey(key); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }} /></ErrorBoundary>}
+            {screen === 'wallet'   && <ErrorBoundary key={`wallet-${currentKidName}`}><WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={getKidCoins(currentKidName)} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={getKidGoals(currentKidName)} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={liveCurrentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={requestParentMode} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} onOpenTrophyRoom={() => { setTrophyInitialKey(undefined); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }}
+                onOpenRelicDetail={(key) => { setTrophyInitialKey(key); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }} parentRole={parentRole} /></ErrorBoundary>}
+            {screen === 'trophies' && <ErrorBoundary key={`trophies-${currentKidName}`}><TrophyRoom monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} xp={xp} currentKidName={currentKidName} isTab header={
+                <View style={[s.homeHeader, { backgroundColor: 'transparent' }]}>
+                  <View style={s.homeHeaderLeft}>
+                    <AvatarPickerSheet selected={currentKidAvatarIdx} onSelect={() => {}} />
+                    <View style={{ gap: 2 }}>
+                      <ViewSwitcher
+                        selected={currentKidName || 'Kid view'}
+                        options={[
+                          ...setupChildren.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
+                          { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
+                        ]}
+                        onSelect={(opt) => { if (opt.label === 'Parent view') requestParentMode(); else switchToKid(opt.label); }}
+                      />
+                    </View>
+                  </View>
+                  <View style={s.homeBalancePill}>
+                    <Text style={s.homeBalanceText}>${(getKidCoins(currentKidName) / 100).toFixed(2)}</Text>
+                    <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
+                  </View>
+                </View>
+              } currentBossName={resolveCurrentBoss(monsterIdx, lockedBossName, debugDayOffset).name} {...(() => { const { target, done } = householdChoreTotals(managedChores, setupChildren.map(c => c.name)); return { familyPowerPct: Math.min(100, Math.round((done / (target || 1)) * 100)), choresLeft: Math.max(0, target - done) }; })()} daysLeft={daysUntilSunday(debugDayOffset)} onViewBoss={() => { setTab('world'); setScreen('world'); }} onBack={() => { setTab('wallet'); setScreen('wallet'); }} /></ErrorBoundary>}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} onGoalCreated={addGoal} monsterName={effectiveMonsterName} />}
-            {screen === 'kidPayout' && (() => { const lastPayout = payoutLog.find(p => p.kidName === currentKidName); return lastPayout ? <KidPayoutScreen amount={lastPayout.amount} completedCount={0} battleWon={null} battleBonus={null} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setScreen('home'); setTab('home'); }} /> : null; })()}
+            {screen === 'kidPayout' && (() => { const lastPayout = payoutLog.find(p => p.kidName === currentKidName); const snap = payoutSnapshot[currentKidName]; return lastPayout ? <KidPayoutScreen amount={lastPayout.amount} completedCount={snap?.completedCount ?? 0} weeks={snap?.weeks ?? []} battleWon={snap?.battleWon ?? null} battleBonus={snap?.battleBonus ?? null} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setScreen('home'); setTab('home'); }} /> : null; })()}
             {showTabBar && <TabBar active={tab} onNav={navTab} />}
+            <ParentPinModal
+              open={pinModalOpen}
+              expectedPin={parentPin}
+              onSuccess={() => { setPinModalOpen(false); setViewMode('parent'); }}
+              onClose={() => setPinModalOpen(false)}
+            />
             {activeToast && (
               <MilestoneToast
                 milestone={activeToast}
@@ -9285,13 +10705,13 @@ function AppInner() {
             <View style={[p.homeHeader, { backgroundColor: '#FFFFFF', zIndex: 10 }]}>
               <View style={p.homeHeaderLeft}>
                 <View style={p.homeAvatar}>
-                  <Text style={{ fontSize: scale(24) }}>👩</Text>
+                  <Image source={getParentAvatar(parentRole)} style={{ width: '100%', height: '100%', borderRadius: 999 }} resizeMode="cover" />
                 </View>
                 <ViewSwitcher
                   selected="Parent view"
                   dark
                   options={[
-                    { label: 'Parent view', emoji: '👩', bg: '#C5F215' },
+                    { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
                     ...setupChildren.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
                   ]}
                   onSelect={(opt) => { if (opt.label !== 'Parent view') switchToKid(opt.label); }}
@@ -9302,16 +10722,16 @@ function AppInner() {
               </TouchableOpacity>
             </View>
 
-            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} weekApprovalDays={weekApprovalDays} /></ErrorBoundary>}
+            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} /></ErrorBoundary>}
             {parentScreen === 'parentPayout' && <ErrorBoundary key="parentPayout"><ParentPayoutScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} payoutLog={payoutLog} onConfirm={confirmPayout} onBack={goBack} /></ErrorBoundary>}
-            {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onReject={rejectManagedChore} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
+            {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
             {parentScreen === 'choreLibrary' && <ErrorBoundary key="choreLibrary"><ChoreLibraryScreen chores={managedChores} onBack={goBack} onAdd={() => { setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore'); }} onEdit={(c) => { setPrevParentScreen('choreLibrary'); openEditChore(c); }} onDelete={deleteChore} baseRate={baseRate} /></ErrorBoundary>}
-            {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} weeklyCapEnabled={weeklyCapEnabled} setWeeklyCap={setWeeklyCap} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} /></ErrorBoundary>}
+            {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} /></ErrorBoundary>}
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
-            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
-            {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={() => navParent('settings')} /></ErrorBoundary>}
+            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
+            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} /></ErrorBoundary>}
+            {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen !== 'parentPayout' && (
               <ParentTabBar active={parentTab} onNav={navParentTab} />
             )}
@@ -9602,7 +11022,7 @@ function AppInner() {
 
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Text style={s.debugSectionLabel}>WEAKNESS UNLOCKED</Text>
-                    <Switch value={dbgWeaknessUnlocked} onValueChange={setDbgWeaknessUnlocked} trackColor={{ true: '#6B35F0' }} />
+                    <Toggle value={dbgWeaknessUnlocked} onValueChange={setDbgWeaknessUnlocked} />
                   </View>
 
                   {/* Computed preview */}
@@ -9636,6 +11056,16 @@ function AppInner() {
                   const simDate    = new Date(Date.now() + debugDayOffset * 86_400_000);
                   const dayNames   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
                   const dayName    = dayNames[simDate.getDay()];
+                  // Progress is read from the (non-destructive, simulated-date-stamped)
+                  // history log filtered to the simulated week — so scrubbing to ANY
+                  // week shows what was actually approved then, both forward and back.
+                  // The live weekly counters can't do this: they reset on the week
+                  // boundary and don't restore when you scrub backward.
+                  const simWeekStart = new Date(getWeekMondayKey(debugDayOffset));
+                  const simWeekEnd   = new Date(simWeekStart); simWeekEnd.setDate(simWeekEnd.getDate() + 7);
+                  const inSimWeek    = (iso: string) => { const d = new Date(iso); return d >= simWeekStart && d < simWeekEnd; };
+                  const doneInSimWeek = (c: ManagedChore) =>
+                    choreHistory.filter(e => e.choreName === c.name && inSimWeek(e.approvedAt)).length;
                   const willReset  = managedChores.filter(c => {
                     const target = frequencyToWeeklyTarget(c.frequency);
                     return (c.weeklyCompletions ?? 0) < target && (c.status === 'approved' || c.status === 'rejected');
@@ -9672,9 +11102,9 @@ function AppInner() {
                       {/* Weekly chore progress */}
                       <Text style={s.debugSectionLabel}>WEEKLY CHORE PROGRESS</Text>
                       {managedChores.map(c => {
-                        const target = frequencyToWeeklyTarget(c.frequency);
-                        const done   = c.weeklyCompletions ?? 0;
-                        const pct    = Math.round((done / target) * 100);
+                        const { target } = householdChoreTotals([c], setupChildren.map(k => k.name));
+                        const done   = doneInSimWeek(c);
+                        const pct    = Math.min(100, Math.round((done / (target || 1)) * 100));
                         return (
                           <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <View style={{ flex: 1 }}>
@@ -9716,6 +11146,68 @@ function AppInner() {
   }
 }
 
+// ─── Parent PIN modal ─────────────────────────────────────────────────────────
+// Shown when a kid tries to enter parent view and a PIN is set.
+function ParentPinModal({ open, expectedPin, onSuccess, onClose }: {
+  open: boolean; expectedPin: string; onSuccess: () => void; onClose: () => void;
+}) {
+  const [entry, setEntry] = useState('');
+  const [error, setError] = useState(false);
+  useEffect(() => { if (open) { setEntry(''); setError(false); } }, [open]);
+
+  const submit = () => {
+    if (entry === expectedPin) onSuccess();
+    else { setError(true); setEntry(''); }
+  };
+
+  return (
+    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 28 }}>
+        <View style={{ backgroundColor: '#FFFDF7', borderRadius: 18, borderWidth: 2, borderColor: '#111', padding: 24, gap: 20, ...SOLID_SHADOW }}>
+
+          {/* Icon + heading */}
+          <View style={{ alignItems: 'center', gap: 8 }}>
+            <Image
+              source={require('./assets/icons/IconLock.png')}
+              style={{ width: scale(52), height: scale(52) }}
+              resizeMode="contain"
+            />
+            <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.h2, color: '#111' }}>
+              Enter parent PIN
+            </Text>
+            <Text style={{ fontFamily: nunitoFamily.semibold, fontSize: fontSize.md, color: '#888', textAlign: 'center' }}>
+              Ask a grown-up to unlock parent mode.
+            </Text>
+          </View>
+
+          {/* PIN field */}
+          <FormField
+            label="PIN"
+            value={entry}
+            onChangeText={(v) => { setEntry(v.replace(/[^0-9]/g, '').slice(0, 6)); setError(false); }}
+            placeholder="····"
+            keyboardType="number-pad"
+            secureTextEntry
+            autoCapitalize="none"
+          />
+
+          {error && (
+            <Text style={{ fontFamily: interFamily.semibold, fontSize: fontSize.sm, color: '#E53935', textAlign: 'center', marginTop: -12 }}>
+              Incorrect PIN. Try again.
+            </Text>
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Button label="Cancel" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
+            <Button label="Unlock" onPress={submit} disabled={entry.length < 4} style={{ flex: 1 }} />
+          </View>
+
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function App() {
   const [fontsLoaded] = useFonts({
     FredokaOne_400Regular,
@@ -9747,6 +11239,12 @@ export default App;
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const SOLID_SHADOW = shadows.solid;
+// Smaller solid drop shadow (0px 3px 0px #111) — matches the design-system --shadow-sm
+const SOLID_SHADOW_SM = Platform.select({
+  ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
+  android: { elevation: 3 },
+  default: {},
+})!;
 
 const s = StyleSheet.create({
   root:            { flex: 1, backgroundColor: C.surface },
@@ -9776,10 +11274,11 @@ const s = StyleSheet.create({
   choreCheckDone:  { backgroundColor: C.accent, borderColor: C.accent },
   checkDot:        { width: 7, height: 7, borderRadius: 4, backgroundColor: 'white' },
   tabBar:          { position: 'absolute', bottom: 36, left: 12, right: 12 },
-  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 6, justifyContent: 'space-between', alignItems: 'center', ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12 }, android: { elevation: 8 } }) },
+  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 8, justifyContent: 'space-between', alignItems: 'center', ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12 }, android: { elevation: 8 } }) },
   tab:             { flex: 1, alignItems: 'center', gap: 3 },
-  tabIconWrap:     { width: 98, borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 2 },
-  tabIconWrapActive: { backgroundColor: '#EAE4FF' },
+  tabIconWrap:     { width: 86, borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 2 },
+  tabIconWrapActive: { backgroundColor: '#EAE4FF' }, // legacy static highlight — superseded by the animated tabPill
+  tabPill:         { position: 'absolute', top: 8, bottom: 8, left: 0, borderRadius: 32, backgroundColor: '#EAE4FF' },
   tabIcon:         { width: 44, height: 44 },
   tabLabel:        { fontSize: scale(10), fontFamily: 'Inter_600SemiBold', color: '#ABABAB', letterSpacing: 0.1 },
   tabLabelActive:  { color: '#6B35F0' },
@@ -9791,7 +11290,7 @@ const s = StyleSheet.create({
   homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
   homeBalanceText:    { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 },
-  homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW },
+  homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW, overflow: 'visible' },
   homeCharImage:      { height: 340, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: 'visible' },
   homeCharInfo:       { padding: 14 },
   homeCharNameRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
@@ -10056,6 +11555,17 @@ const p = StyleSheet.create({
   kidPillActive:    { backgroundColor: '#C5F215', borderColor: '#1A1A1A' },
   kidPillText:      { fontSize: scale(14), fontFamily: 'Inter_600SemiBold' as const, color: '#ABABAB' },
   kidPillTextActive:{ color: '#1A1A1A' },
+  // Completion-mode radio card
+  modeCard:         { borderWidth: 2, borderColor: '#ECEAE4', borderRadius: 14, overflow: 'hidden', backgroundColor: '#FFFFFF' },
+  modeRow:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14, backgroundColor: '#FFFFFF' },
+  modeRowDivider:   { borderTopWidth: 1, borderTopColor: '#ECEAE4' },
+  modeRowActive:    { backgroundColor: '#F4F9E3', borderLeftWidth: 4, borderLeftColor: '#7B3FF2', paddingLeft: 10 },
+  modeRadio:        { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#C7C5BF', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  modeRadioActive:  { borderColor: '#7B3FF2' },
+  modeRadioDot:     { width: 11, height: 11, borderRadius: 6, backgroundColor: '#7B3FF2' },
+  modeTitle:        { fontSize: scale(16), fontFamily: 'Inter_700Bold' as const, color: '#1A1A1A', marginBottom: 3 },
+  modeTitleActive:  { color: '#7B3FF2' },
+  modeDesc:         { fontSize: scale(13), lineHeight: scale(18), fontFamily: 'Inter_500Medium' as const, color: '#6B6B6B' },
   iconPickerItem:   { width: 56, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   iconPickerSelected: { borderColor: '#6B35F0', backgroundColor: '#EAE4FF' },
   saveBtn:          { backgroundColor: '#C5F215', borderRadius: 14, borderWidth: 1.5, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
@@ -10077,14 +11587,16 @@ const p = StyleSheet.create({
   rateGuideLink:    { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#6B35F0' },
 
   // Rate guide
-  rateInfoCard:     { backgroundColor: '#FEF9EC', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
-  rateInfoText:     { fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20), marginBottom: 10 },
-  learnMoreBtn:     { backgroundColor: '#6B35F0', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, alignSelf: 'flex-start' },
-  learnMoreText:    { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#FFFFFF' },
-  rateTableRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  rateTableHeader:  { fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
-  rateTableCell:    { fontSize: scale(13), color: '#1A1A1A' },
-  rateDot:          { width: 8, height: 8, borderRadius: 4 },
+  rateGuideCoinBadge: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#D8F52F', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW_SM },
+  rateInfoCard:     { backgroundColor: '#7B3FF2', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW },
+  rateInfoText:     { flex: 1, fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#FFFFFF', lineHeight: scale(22) },
+  rateTableHead:    { backgroundColor: '#1A1A1A', flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 16 },
+  rateTableHeader:  { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#D8F52F', letterSpacing: 1.2, textTransform: 'uppercase' },
+  rateTableRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16 },
+  rateTableCell:    { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
+  rateDot:          { width: 12, height: 12, borderRadius: 6 },
+  rateLimeCard:     { backgroundColor: '#D8F52F', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 12, ...SOLID_SHADOW },
+  rateLimeText:     { flex: 1, fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A', lineHeight: scale(22) },
   noteCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 4, ...SOLID_SHADOW },
   noteText:         { flex: 1, fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20) },
 
@@ -10126,10 +11638,25 @@ const ps = StyleSheet.create({
   battleHero:     { backgroundColor: '#3D1FA3', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, flexDirection: 'row', alignItems: 'center', gap: 14, ...SOLID_SHADOW },
   battleHeroTitle:{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF', marginBottom: 4 },
   battleHeroSub:  { fontSize: scale(13), color: 'rgba(255,255,255,0.7)', lineHeight: scale(18) },
-  toggle:         { width: 44, height: 26, borderRadius: 13, backgroundColor: '#E0DCDC', justifyContent: 'center', paddingHorizontal: 3 },
-  toggleOn:       { backgroundColor: '#6B35F0' },
-  toggleThumb:    { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFFFFF' },
-  toggleThumbOn:  { alignSelf: 'flex-end' },
+
+  // ── Chore Approval (v2) ──────────────────────────────────────────────────
+  apprHeaderCard:   { backgroundColor: '#7B3FF2', borderRadius: 18, borderWidth: 2, borderColor: '#111', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4, ...SOLID_SHADOW },
+  apprHeaderIcon:   { width: 52, height: 52, backgroundColor: '#D8F52F', borderWidth: 2, borderColor: '#111', borderRadius: 14, alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
+  apprHeaderTitle:  { fontFamily: 'FredokaOne_400Regular', fontSize: scale(19), color: '#FFFFFF' },
+  apprHeaderSub:    { fontSize: scale(13), color: 'rgba(255,255,255,0.85)', marginTop: 3, lineHeight: scale(18), fontFamily: 'Inter_600SemiBold' },
+  apprSectionLabel: { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.5, textTransform: 'uppercase', color: '#888', paddingTop: 20, paddingBottom: 10 },
+  apprKidCard:      { backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#111', borderRadius: 18, padding: 16, marginBottom: 12, ...SOLID_SHADOW },
+  apprKidName:      { fontFamily: 'FredokaOne_400Regular', fontSize: scale(18), color: '#111' },
+  apprBadge:        { alignSelf: 'flex-start', flexDirection: 'row', marginTop: 5, paddingHorizontal: 9, paddingVertical: 2, borderRadius: 20, borderWidth: 2 },
+  apprBadgeRequire: { backgroundColor: '#F0E8FF', borderColor: '#7B3FF2' },
+  apprBadgeAuto:    { backgroundColor: '#EEFFD0', borderColor: '#B8D020' },
+  apprBadgeText:    { fontSize: scale(11), fontFamily: 'Inter_800ExtraBold' },
+  apprToggleMain:   { fontSize: scale(14), fontFamily: 'Inter_800ExtraBold', color: '#111' },
+  apprToggleSub:    { fontSize: scale(12), color: '#888', fontFamily: 'Inter_600SemiBold', lineHeight: scale(17), marginTop: 2 },
+  apprShortcutBtn:  { flex: 1, paddingVertical: 12, backgroundColor: '#FFFDF7', borderWidth: 2, borderColor: '#111', borderRadius: 12, alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW_SM },
+  apprShortcutText: { fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#111' },
+  apprInfoBox:      { marginTop: 20, backgroundColor: '#F0E8FF', borderWidth: 2, borderColor: '#7B3FF2', borderRadius: 12, padding: 14, flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  apprInfoText:     { flex: 1, fontSize: scale(12), color: '#444', lineHeight: scale(19), fontFamily: 'Inter_600SemiBold' },
   sliderTrack:    { height: 6, backgroundColor: '#E0DCDC', borderRadius: 3, position: 'relative', marginBottom: 4 },
   sliderFill:     { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#6B35F0', borderRadius: 3 },
   sliderThumb:    { position: 'absolute', top: -7, marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
@@ -10217,7 +11744,7 @@ const w = StyleSheet.create({
   countdownUnit: { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#6B35F0', marginTop: 2 },
 
   // Section header (on green bg)
-  sectionHeader: { fontSize: scale(22), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginTop: scale(4) },
+  sectionHeader: { fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginTop: scale(4) },
 
   // Intel row
   intelRow: { flexDirection: 'row', gap: scale(10) },
