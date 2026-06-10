@@ -811,17 +811,25 @@ function resolveChoreIcon(icon: string, name: string): ReturnType<typeof require
   return CHORE_ICON_BY_ID[icon] ?? CHORE_ICON_BY_NAME[name] ?? (icon || '✅');
 }
 
+function randomUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+const isUUID = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
 const DEFAULT_MANAGED_CHORES: ManagedChore[] = [
-  { id: '1', name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active', weeklyCompletions: 0 },
-  { id: '2', name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
-  { id: '3', name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
-  { id: '4', name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
-  { id: '5', name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
-  { id: '6', name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
-  { id: '7', name: 'Vacuum the floors',  description: 'Vacuum all carpeted rooms.',           frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconVacuum.png'), bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
-  { id: '8', name: 'Sweep & mop',        description: 'Sweep and mop the kitchen floor.',     frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBroom.png'),  bg: '#F5F0FB', status: 'active', weeklyCompletions: 0 },
-  { id: '9', name: 'Wash the dishes',    description: 'Wash, dry, and put away dishes.',      frequency: 'Every day',        difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconDishes.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
-  { id: '10', name: 'Tidy your room',   description: 'Put everything back in its place.',    frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBroom.png'),  bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Make your bed',      description: 'Make your bed neatly every morning.', frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBed.png'),     bg: '#FEF3D7', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Fold the laundry',   description: 'Fold and put away laundry.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconLaundry.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Clean the bathroom', description: 'Clean sink, toilet, and floor.',      frequency: '2 times per week', difficulty: 3, assignedTo: [], icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Take out the trash', description: 'Take all trash cans to the curb.',    frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Water the plants',   description: 'Water all indoor and outdoor plants.',frequency: '3 times per week', difficulty: 1, assignedTo: [], icon: '🪴',                                             bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Feed the pet',       description: 'Fill food and water bowls.',          frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: '🐾',                                             bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Vacuum the floors',  description: 'Vacuum all carpeted rooms.',           frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconVacuum.png'), bg: '#EAF3FB', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Sweep & mop',        description: 'Sweep and mop the kitchen floor.',     frequency: '2 times per week', difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBroom.png'),  bg: '#F5F0FB', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Wash the dishes',    description: 'Wash, dry, and put away dishes.',      frequency: 'Every day',        difficulty: 2, assignedTo: [], icon: require('./assets/icons/chores/chore=iconDishes.png'), bg: '#FFF9E6', status: 'active', weeklyCompletions: 0 },
+  { id: '_' + randomUUID(), name: 'Tidy your room',     description: 'Put everything back in its place.',    frequency: 'Every day',        difficulty: 1, assignedTo: [], icon: require('./assets/icons/chores/chore=iconBroom.png'),  bg: '#F0F7F0', status: 'active', weeklyCompletions: 0 },
 ];
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -6869,7 +6877,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
     setSaveError('');
     try {
       const chore: ManagedChore = {
-        id: existing?.id ?? Date.now().toString(),
+        id: existing?.id ?? '_' + randomUUID(),
         name: name.trim(),
         description,
         frequency,
@@ -7342,7 +7350,7 @@ function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   );
 }
 
-function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles, sessionUser, parentRole, pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName }: {
+function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles, sessionUser, parentRole, pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName, onSignOut }: {
   onNav: (s: ParentScreen) => void;
   baseRate: string;
   onAddKid?: () => void;
@@ -7358,13 +7366,14 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidA
   onSavePin: (pin: string) => void;
   onDisablePin: () => void;
   onSaveName: (name: string) => void;
+  onSignOut: () => void;
 }) {
   const [sub, setSub] = useState<SettingsSubScreen>('main');
   const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
   if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} kidProfiles={kidProfiles} />;
   if (sub === 'battle')   return <SettingsBattleScreen   onBack={() => setSub('main')} baseRate={baseRate} />;
-  if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} />;
+  if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} onSignOut={onSignOut} />;
   if (sub === 'approval') return <SettingsApprovalScreen onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={kidProfiles} />;
 
   return (
@@ -7906,10 +7915,10 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
 
 type AccountSubScreen = 'main' | 'profile' | 'email' | 'notifications' | 'privacy';
 
-function SettingsAccountScreen({ onBack, sessionUser, parentRole = '', pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName }: {
+function SettingsAccountScreen({ onBack, sessionUser, parentRole = '', pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName, onSignOut }: {
   onBack: () => void; sessionUser?: SessionUser | null; parentRole?: string;
   pinEnabled: boolean; savedPin: string; onSavePin: (pin: string) => void; onDisablePin: () => void;
-  onSaveName: (name: string) => void;
+  onSaveName: (name: string) => void; onSignOut: () => void;
 }) {
   const displayName  = sessionUser?.name  || (parentRole ? parentRole.charAt(0).toUpperCase() + parentRole.slice(1) : 'Parent');
   const displayEmail = sessionUser?.email || '';
@@ -7951,7 +7960,7 @@ function SettingsAccountScreen({ onBack, sessionUser, parentRole = '', pinEnable
           <SettingsRow iconBg="#10B981" iconEmoji="🔒" title="Privacy & security" onPress={() => setSub('privacy')} />
         </View>
 
-        <TouchableOpacity style={ps.logoutBtn} activeOpacity={0.8}>
+        <TouchableOpacity style={ps.logoutBtn} activeOpacity={0.8} onPress={onSignOut}>
           <Text style={ps.logoutText}>Log out</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -9355,7 +9364,7 @@ function AppInner() {
 
         setSessionUser({ name: session.user.user_metadata?.name ?? '', email: session.user.email ?? '' });
 
-        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal] = await Promise.all([
+        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset] = await Promise.all([
           loadProfile(),
           loadKids(),
           loadChores(),
@@ -9365,6 +9374,7 @@ function AppInner() {
           AsyncStorage.getItem('monstir:managedChores'),
           AsyncStorage.getItem('monstir:goals'),
           AsyncStorage.getItem('monstir:goalsByKid'),
+          AsyncStorage.getItem('monstir:lastWeekReset'),
         ]);
         console.log('[bootstrap] profile:', JSON.stringify(profile));
         console.log('[bootstrap] dbKids:', JSON.stringify(dbKids));
@@ -9408,11 +9418,13 @@ function AppInner() {
         if (profile?.week_approval_days_json) { try { setWeekApprovalDays(JSON.parse(profile.week_approval_days_json)); } catch {} }
         else { const w = await AsyncStorage.getItem('monstir:weekApprovalDays');   if (w) { try { setWeekApprovalDays(JSON.parse(w)); } catch {} } }
 
-        // Per-kid approval settings — prefer AsyncStorage (granular) over the single
-        // DB boolean, which only round-trips "ALL kids require approval" and would
-        // otherwise clobber mixed per-kid settings on every launch.
+        if (profile?.last_week_reset)         { setLastWeekReset(profile.last_week_reset); }
+        else if (savedLastWeekReset)           { setLastWeekReset(savedLastWeekReset); }
+
+        // Per-kid approval settings — prefer Supabase full map, fall back to AsyncStorage
         const localApproval: Record<string, boolean> = (() => {
-          if (savedApproval) { try { const a = JSON.parse(savedApproval); if (a && typeof a === 'object' && !Array.isArray(a)) return a; } catch {} }
+          const source = profile?.kid_approval_settings_json ?? savedApproval;
+          if (source) { try { const a = JSON.parse(source); if (a && typeof a === 'object' && !Array.isArray(a)) return a; } catch {} }
           return {};
         })();
         setKidApprovalSettings(localApproval);
@@ -9468,6 +9480,8 @@ function AppInner() {
           setGoalsByKid(goalsInit);
         }
 
+        const choresToMerge = profile?.chores_state_json ?? savedChores;
+
         if (dbChores && dbChores.length > 0) {
           // Build UUID → name map from the kids we just loaded
           const kidIdToName: Record<string, string> = {};
@@ -9488,12 +9502,17 @@ function AppInner() {
             completionMode:    c.completion_mode === 'independent' ? 'independent' : c.completion_mode === 'shared' ? 'shared' : undefined,
           }));
 
-          // Merge today's completion state from AsyncStorage so completed chores
-          // don't reset to 'active' after re-login
-          if (savedChores) {
+          if (choresToMerge) {
             try {
-              const local: ManagedChore[] = JSON.parse(savedChores);
-              setManagedChores(mapped.map(db => {
+              let migrated = false;
+              const local: ManagedChore[] = (JSON.parse(choresToMerge) as ManagedChore[]).map(c => {
+                if (!isUUID(c.id) && !c.id.startsWith('_')) {
+                  migrated = true;
+                  return { ...c, id: '_' + randomUUID() };
+                }
+                return c;
+              });
+              const merged = mapped.map(db => {
                 const loc = local.find(l => l.id === db.id || l.name === db.name);
                 if (!loc) return db;
                 return {
@@ -9506,11 +9525,33 @@ function AppInner() {
                   weeklyCompletions:  loc.weeklyCompletions ?? db.weeklyCompletions,
                   status:             loc.status ?? db.status,
                 };
-              }));
+              });
+              setManagedChores(merged);
+              if (migrated) {
+                saveAppState({ chores_state_json: JSON.stringify(merged) })
+                  .catch(e => console.warn('[DB] migrate chore IDs error:', e));
+              }
             } catch { setManagedChores(mapped); }
           } else {
             setManagedChores(mapped);
           }
+        } else if (choresToMerge) {
+          // No DB chores yet — migrate non-UUID IDs in saved state and restore
+          try {
+            let migrated = false;
+            const local: ManagedChore[] = (JSON.parse(choresToMerge) as ManagedChore[]).map(c => {
+              if (!isUUID(c.id) && !c.id.startsWith('_')) {
+                migrated = true;
+                return { ...c, id: '_' + randomUUID() };
+              }
+              return c;
+            });
+            setManagedChores(local);
+            if (migrated) {
+              saveAppState({ chores_state_json: JSON.stringify(local) })
+                .catch(e => console.warn('[DB] migrate chore IDs error:', e));
+            }
+          } catch {}
         }
 
         // ── Hydrate trophies from Supabase into per-kid local storage ──────────
@@ -9618,9 +9659,14 @@ function AppInner() {
     bootstrap();
   }, []);
 
+  const choresStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:managedChores', JSON.stringify(managedChores)).catch(() => {});
+    if (choresStateSyncTimer.current) clearTimeout(choresStateSyncTimer.current);
+    choresStateSyncTimer.current = setTimeout(() => {
+      saveAppState({ chores_state_json: JSON.stringify(managedChores) }).catch(e => console.warn('[DB] saveAppState (choresState) error:', e));
+    }, 2000);
   }, [managedChores, appDataLoaded]);
 
   // ── Persist pay-rate settings to Supabase (debounced) ────────────────────
@@ -9642,9 +9688,8 @@ function AppInner() {
   // ── Persist per-kid approval settings to Supabase ───────────────────────
   useEffect(() => {
     if (!appDataLoaded) return;
-    saveProfile({ require_approval: Object.values(kidApprovalSettings).every(v => v) }).catch(() => {});
-    // Also store the full per-kid map so granularity isn't lost
     AsyncStorage.setItem('monstir:kidApprovalSettings', JSON.stringify(kidApprovalSettings)).catch(() => {});
+    saveAppState({ kid_approval_settings_json: JSON.stringify(kidApprovalSettings) }).catch(e => console.warn('[DB] saveAppState (kidApproval) error:', e));
   }, [kidApprovalSettings, appDataLoaded]);
 
   // ── Persist per-kid goals to Supabase + AsyncStorage ─────────────────────
@@ -9780,6 +9825,39 @@ function AppInner() {
   useEffect(() => { setAudioModeAsync({ playsInSilentMode: true }); }, []);
   const openDebug = () => { if (__DEV__) setDebugOpen(true); };
 
+  // A chore whose id is '_'-prefixed exists only locally — it has no row in the
+  // Supabase `chores` table yet, so sending its id to any completion write fails
+  // with "invalid input syntax for type uuid". This resolves a chore to its real
+  // Supabase UUID, lazily inserting it (and upgrading the local id) the first time
+  // it's needed. Concurrent calls for the same local id are coalesced so we never
+  // create duplicate rows.
+  const choreIdUpgrades = useRef<Record<string, Promise<string | null>>>({});
+  const ensureChoreInDb = useCallback((choreId: string): Promise<string | null> => {
+    if (!choreId.startsWith('_')) return Promise.resolve(choreId);
+    const inFlight = choreIdUpgrades.current[choreId];
+    if (inFlight) return inFlight;
+    const chore = managedChores.find(c => c.id === choreId);
+    if (!chore) return Promise.resolve(null);
+    const iconStr = serializeChoreIcon(chore.icon);
+    const assignedIds = chore.assignedTo.map(name => setupChildren.find(c => c.name === name)?.id ?? name);
+    const p = addChore({
+      name: chore.name, icon: iconStr, frequency: chore.frequency,
+      difficulty: chore.difficulty, assigned_to: assignedIds,
+      completion_mode: chore.completionMode ?? null,
+    }).then(row => {
+      const newId = row?.id ?? null;
+      if (newId) setManagedChores(prev => prev.map(c => c.id === choreId ? { ...c, id: newId } : c));
+      delete choreIdUpgrades.current[choreId];
+      return newId;
+    }).catch(e => {
+      console.warn('[DB] ensureChoreInDb error:', e);
+      delete choreIdUpgrades.current[choreId];
+      return null;
+    });
+    choreIdUpgrades.current[choreId] = p;
+    return p;
+  }, [managedChores, setupChildren]);
+
   const submitManagedChore = useCallback((id: string) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
@@ -9836,7 +9914,9 @@ function AppInner() {
       );
       // Save to Supabase
       if (kidDbId) {
-        submitChoreCompletion({ choreId: id, kidId: kidDbId, requiresApproval: true }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
+        ensureChoreInDb(id).then(realId => {
+          if (realId) submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: true }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
+        });
       }
     } else {
       const allKidNames = setupChildren.map(c => c.name);
@@ -9888,11 +9968,14 @@ function AppInner() {
       });
       // Save to Supabase (auto-approved)
       if (kidDbId) {
-        submitChoreCompletion({ choreId: id, kidId: kidDbId, requiresApproval: false, earnedCents }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
-        approveChoreCompletion({ choreId: id, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+        ensureChoreInDb(id).then(realId => {
+          if (!realId) return;
+          submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
+          approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+        });
       }
     }
-  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState]);
+  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb]);
 
   // ── Weekly reset (the chore board rolls over at the week boundary) ───────────
   // This is the ONLY place the chore board resets for a new week. It fires on the
@@ -9954,6 +10037,7 @@ function AppInner() {
   useEffect(() => {
     if (!appDataLoaded || !lastWeekReset) return;
     AsyncStorage.setItem('monstir:lastWeekReset', lastWeekReset).catch(() => {});
+    saveAppState({ last_week_reset: lastWeekReset }).catch(e => console.warn('[DB] saveAppState (lastWeekReset) error:', e));
   }, [lastWeekReset, appDataLoaded]);
 
   // ── Milestone helper ─────────────────────────────────────────────────────────
@@ -10079,9 +10163,11 @@ function AppInner() {
     // Save to Supabase
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
-      approveChoreCompletion({ choreId: id, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+      ensureChoreInDb(id).then(realId => {
+        if (realId) approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+      });
     }
-  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren]);
+  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, ensureChoreInDb]);
 
   // Approve a single day (the oldest pending submission).
   const approveManagedChore = useCallback((id: string, kidName: string) => {
@@ -10137,9 +10223,11 @@ function AppInner() {
     // Save to Supabase
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
-      rejectChoreCompletion({ choreId: id, kidId: kidDbId, rejectionNote: note }).catch(e => console.warn('[DB] rejectChoreCompletion error:', e));
+      ensureChoreInDb(id).then(realId => {
+        if (realId) rejectChoreCompletion({ choreId: realId, kidId: kidDbId, rejectionNote: note }).catch(e => console.warn('[DB] rejectChoreCompletion error:', e));
+      });
     }
-  }, [managedChores, setupChildren]);
+  }, [managedChores, setupChildren, ensureChoreInDb]);
 
   const confirmPayout = useCallback((kidName: string) => {
     const amount = kidCoins[kidName] ?? 0;
@@ -10321,20 +10409,19 @@ function AppInner() {
     const assignedIds = chore.assignedTo.map(name => setupChildren.find(c => c.name === name)?.id ?? name);
     const fields = { name: chore.name, icon: iconStr, frequency: chore.frequency, difficulty: chore.difficulty, assigned_to: assignedIds, completion_mode: chore.completionMode ?? null };
 
-    // Supabase UUIDs are long strings; short numeric-string IDs are local-only
-    const isSupabaseId = chore.id.length > 20;
-    if (isSupabaseId) {
-      updateChoreDb(chore.id, fields).catch(e => console.warn('[DB] updateChore error:', e));
-    } else {
+    // IDs prefixed with '_' are local-only (not yet in Supabase); bare UUIDs are already saved
+    if (chore.id.startsWith('_')) {
       addChore(fields).then(row => {
         if (row?.id) setManagedChores(prev => prev.map(c => c.id === chore.id ? { ...c, id: row.id } : c));
       }).catch(e => console.warn('[DB] addChore error:', e));
+    } else {
+      updateChoreDb(chore.id, fields).catch(e => console.warn('[DB] updateChore error:', e));
     }
   };
   const deleteChore = (id: string) => {
     setManagedChores(prev => prev.filter(c => c.id !== id));
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
-    if (id.length > 20) deleteChoreDb(id).catch(e => console.warn('[DB] deleteChore error:', e));
+    if (!id.startsWith('_')) deleteChoreDb(id).catch(e => console.warn('[DB] deleteChore error:', e));
   };
 
   const addGoal = useCallback((data: GoalData) => {
@@ -10378,6 +10465,29 @@ function AppInner() {
     setParentPin('');
     setParentPinEnabled(false);
     saveProfile({ parent_pin: null, parent_pin_enabled: false }).catch(e => console.warn('[DB] disableParentPin error:', e));
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const toRemove = allKeys.filter(k => k.startsWith('monstir:'));
+      if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove);
+    } catch {}
+    setSessionUser(null);
+    setSetupChildren([]);
+    setKids([]);
+    setManagedChores(DEFAULT_MANAGED_CHORES);
+    setChoreHistory([]);
+    setPayoutLog([]);
+    setGoalsByKid({});
+    setWeekApprovalDays([]);
+    setKidApprovalSettings({});
+    setKidMonsterState({});
+    setKidCoins({});
+    setPayoutSnapshot({});
+    setKidPayoutPending({});
+    setAppMode('landing');
   }, []);
 
   // Avatar index for the currently active kid (0 = fallback)
@@ -10488,8 +10598,8 @@ function AppInner() {
                 if (!choreKids[choreId].kidNames.includes(name)) choreKids[choreId].kidNames.push(name);
               }
             }
-            const newChores: ManagedChore[] = Object.entries(choreKids).map(([choreId, { entry, kidNames }]) => ({
-              id: choreId,
+            const newChores: ManagedChore[] = Object.entries(choreKids).map(([, { entry, kidNames }]) => ({
+              id: '_' + randomUUID(),
               name: entry.name,
               description: '',
               frequency: 'Every day',
@@ -10514,11 +10624,14 @@ function AppInner() {
               const choreIdToName = Object.fromEntries(
                 Object.entries(setup.choreMap).map(([id, e]) => [id, { name: e.name, icon: id, difficulty: e.difficulty, frequency: e.frequency ?? 'Every day' }])
               );
-              const { kidIdMap } = await saveOnboardingSetup(setup, choreIdToName);
-              // Replace the temporary local kid ids with the real Supabase UUIDs so
-              // later chore assignments map names → valid uuid[] values (otherwise the
-              // assigned_to write is rejected and the assignment isn't remembered).
+              const { kidIdMap, choreNameToId } = await saveOnboardingSetup(setup, choreIdToName);
+              // Replace temporary local kid IDs with real Supabase UUIDs
               setSetupChildren(prev => prev.map(c => kidIdMap[c.name] ? { ...c, id: kidIdMap[c.name] } : c));
+              // Replace _-prefixed local chore IDs with real Supabase UUIDs so kids
+              // can submit completions immediately without hitting a UUID format error
+              if (Object.keys(choreNameToId).length > 0) {
+                setManagedChores(prev => prev.map(c => choreNameToId[c.name] ? { ...c, id: choreNameToId[c.name] } : c));
+              }
             } catch (e) {
               console.warn('[DB] Failed to save onboarding setup:', e);
             }
@@ -10730,7 +10843,7 @@ function AppInner() {
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
             {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
-            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} /></ErrorBoundary>}
+            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen !== 'parentPayout' && (
               <ParentTabBar active={parentTab} onNav={navParentTab} />

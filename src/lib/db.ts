@@ -24,13 +24,15 @@ export async function saveProfile(fields: {
 }) {
   const userId = await getCurrentUserId();
   if (!userId) return;
-  await supabase.from('profiles').update(fields).eq('id', userId);
+  const { data, error } = await supabase.from('profiles').update(fields).eq('id', userId);
+  console.log('[DB] saveProfile data:', data, 'error:', error);
 }
 
 export async function saveGoals(goals: unknown[]): Promise<void> {
   const userId = await getCurrentUserId();
   if (!userId) return;
-  await supabase.from('profiles').update({ goals_json: JSON.stringify(goals) }).eq('id', userId);
+  const { data, error } = await supabase.from('profiles').update({ goals_json: JSON.stringify(goals) }).eq('id', userId);
+  console.log('[DB] saveGoals data:', data, 'error:', error);
 }
 
 export async function loadGoals(): Promise<unknown[] | null> {
@@ -41,10 +43,11 @@ export async function loadGoals(): Promise<unknown[] | null> {
   try { return JSON.parse(data.goals_json); } catch { return null; }
 }
 
-export async function saveAppState(fields: { chore_history_json?: string; week_approval_days_json?: string }): Promise<void> {
+export async function saveAppState(fields: { chore_history_json?: string; week_approval_days_json?: string; chores_state_json?: string; kid_approval_settings_json?: string; last_week_reset?: string }): Promise<void> {
   const userId = await getCurrentUserId();
   if (!userId) return;
-  await supabase.from('profiles').update(fields).eq('id', userId);
+  const { data, error } = await supabase.from('profiles').update(fields).eq('id', userId);
+  console.log('[DB] saveAppState data:', data, 'error:', error);
 }
 
 export async function loadPayoutLog(): Promise<unknown[]> {
@@ -98,6 +101,7 @@ export async function addKid(fields: { name: string; avatar_color: string; avata
   const userId = await getCurrentUserId();
   if (!userId) return null;
   const { data, error } = await supabase.from('kids').insert({ ...fields, parent_id: userId }).select().single();
+  console.log('[DB] addKid data:', data, 'error:', error);
   if (error) throw error;
   return data;
 }
@@ -114,6 +118,7 @@ export async function saveKid(child: OnboardingChild & { parent_id: string }) {
     })
     .select()
     .single();
+  console.log('[DB] saveKid data:', data, 'error:', error);
   if (error) throw error;
   return data;
 }
@@ -126,7 +131,8 @@ export async function loadKids() {
 }
 
 export async function updateKid(kidId: string, fields: Record<string, unknown>) {
-  await supabase.from('kids').update(fields).eq('id', kidId);
+  const { data, error } = await supabase.from('kids').update(fields).eq('id', kidId);
+  console.log('[DB] updateKid data:', data, 'error:', error);
 }
 
 // ─── Chores ────────────────────────────────────────────────────────────────
@@ -135,6 +141,7 @@ export async function addChore(fields: { name: string; icon: string; frequency: 
   const userId = await getCurrentUserId();
   if (!userId) return null;
   const { data, error } = await supabase.from('chores').insert({ ...fields, parent_id: userId }).select().single();
+  console.log('[DB] addChore data:', data, 'error:', error);
   if (error) throw error;
   return data;
 }
@@ -148,6 +155,7 @@ export async function saveChore(chore: {
   assigned_to: string[];
 }) {
   const { data, error } = await supabase.from('chores').insert(chore).select().single();
+  console.log('[DB] saveChore data:', data, 'error:', error);
   if (error) throw error;
   return data;
 }
@@ -160,12 +168,14 @@ export async function loadChores() {
 }
 
 export async function updateChore(choreId: string, fields: Record<string, unknown>) {
-  const { error } = await supabase.from('chores').update(fields).eq('id', choreId);
+  const { data, error } = await supabase.from('chores').update(fields).eq('id', choreId);
+  console.log('[DB] updateChore data:', data, 'error:', error);
   if (error) throw error;
 }
 
 export async function deleteChore(choreId: string) {
-  await supabase.from('chores').delete().eq('id', choreId);
+  const { data, error } = await supabase.from('chores').delete().eq('id', choreId);
+  console.log('[DB] deleteChore data:', data, 'error:', error);
 }
 
 // ─── Onboarding: save everything at once ──────────────────────────────────
@@ -173,12 +183,13 @@ export async function deleteChore(choreId: string) {
 export async function saveOnboardingSetup(
   setup: ParentSetupResult,
   choreCatalogue: Record<string, { name: string; icon: string; difficulty: string; frequency?: string }>,
-): Promise<{ kidIdMap: Record<string, string> }> {
+): Promise<{ kidIdMap: Record<string, string>; choreNameToId: Record<string, string> }> {
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Not logged in');
 
   // 1. Update profile with parent role
-  await supabase.from('profiles').update({ parent_role: setup.parentRole }).eq('id', userId);
+  const { data: profileData, error: profileError } = await supabase.from('profiles').update({ parent_role: setup.parentRole }).eq('id', userId);
+  console.log('[DB] saveOnboardingSetup profile data:', profileData, 'error:', profileError);
 
   // 2. Insert kids and build name→id map
   const kidIdMap: Record<string, string> = {};
@@ -194,6 +205,7 @@ export async function saveOnboardingSetup(
       })
       .select()
       .single();
+    console.log('[DB] saveOnboardingSetup insert kid', child.name, 'data:', data, 'error:', error);
     if (error) throw error;
     kidIdMap[child.name] = data.id;
   }
@@ -220,18 +232,21 @@ export async function saveOnboardingSetup(
     }
   }
 
+  const choreNameToId: Record<string, string> = {};
   for (const [, chore] of Object.entries(choreKidsMap)) {
-    await supabase.from('chores').insert({
+    const { data, error } = await supabase.from('chores').insert({
       parent_id:   userId,
       name:        chore.name,
       icon:        chore.icon,
       frequency:   chore.frequency,
       difficulty:  chore.difficulty,
       assigned_to: chore.kidIds,
-    });
+    }).select('id, name').single();
+    console.log('[DB] saveOnboardingSetup insert chore', chore.name, 'data:', data, 'error:', error);
+    if (data?.id) choreNameToId[chore.name] = data.id;
   }
 
-  return { kidIdMap };
+  return { kidIdMap, choreNameToId };
 }
 
 // ─── Chore Completions ─────────────────────────────────────────────────────
@@ -258,7 +273,7 @@ export async function submitChoreCompletion(params: {
   const now = new Date().toISOString();
   const status = params.requiresApproval ? 'pending' : 'approved';
 
-  const { error } = await supabase.from('chore_completions').insert({
+  const { data, error } = await supabase.from('chore_completions').insert({
     chore_id:     params.choreId,
     kid_id:       params.kidId,
     parent_id:    userId,
@@ -268,8 +283,7 @@ export async function submitChoreCompletion(params: {
     approved_at:  params.requiresApproval ? null : now,
     earned_cents: params.requiresApproval ? null : params.earnedCents,
   });
-
-  if (error) console.warn('[DB] submitChoreCompletion error:', error.message);
+  console.log('[DB] submitChoreCompletion data:', data, 'error:', error);
 }
 
 export async function approveChoreCompletion(params: {
@@ -287,16 +301,17 @@ export async function approveChoreCompletion(params: {
   const now = new Date().toISOString();
 
   // Update chore_completion to approved
-  await supabase
+  const { data: updateData, error: updateError } = await supabase
     .from('chore_completions')
     .update({ status: 'approved', approved_at: now, earned_cents: params.earnedCents })
     .eq('chore_id', params.choreId)
     .eq('kid_id', params.kidId)
     .eq('week_start', weekStart)
     .eq('status', 'pending');
+  console.log('[DB] approveChoreCompletion update data:', updateData, 'error:', updateError);
 
   // Write to chore_history audit log
-  await supabase.from('chore_history').insert({
+  const { data: histData, error: histError } = await supabase.from('chore_history').insert({
     parent_id:    userId,
     kid_id:       params.kidId,
     kid_name:     params.kidName,
@@ -305,6 +320,7 @@ export async function approveChoreCompletion(params: {
     earned_cents: params.earnedCents,
     approved_at:  now,
   });
+  console.log('[DB] approveChoreCompletion history data:', histData, 'error:', histError);
 }
 
 export async function rejectChoreCompletion(params: {
@@ -317,13 +333,14 @@ export async function rejectChoreCompletion(params: {
 
   const weekStart = getWeekStart();
 
-  await supabase
+  const { data, error } = await supabase
     .from('chore_completions')
     .update({ status: 'rejected', rejection_note: params.rejectionNote ?? null })
     .eq('chore_id', params.choreId)
     .eq('kid_id', params.kidId)
     .eq('week_start', weekStart)
     .eq('status', 'pending');
+  console.log('[DB] rejectChoreCompletion data:', data, 'error:', error);
 }
 
 // ─── Boss Captures ─────────────────────────────────────────────────────────
@@ -351,7 +368,7 @@ export async function saveBossCaptureToDb(params: {
 
   if (existing) return; // already saved
 
-  const { error } = await supabase.from('boss_captures').insert({
+  const { data, error } = await supabase.from('boss_captures').insert({
     kid_id:         params.kidId,
     parent_id:      userId,
     boss_name:      params.bossName,
@@ -361,8 +378,7 @@ export async function saveBossCaptureToDb(params: {
     week_start:     weekStart,
     captured_at:    new Date().toISOString(),
   });
-
-  if (error) console.warn('[DB] saveBossCaptureToDb error:', error.message);
+  console.log('[DB] saveBossCaptureToDb data:', data, 'error:', error);
 }
 
 export async function loadBossCaptures(kidId: string) {
@@ -384,7 +400,7 @@ export async function saveCollectibleToDb(params: {
   const userId = await getCurrentUserId();
   if (!userId) return;
 
-  const { error } = await supabase.from('collectibles').insert({
+  const { data, error } = await supabase.from('collectibles').insert({
     kid_id:         params.kidId,
     parent_id:      userId,
     collectible_id: params.collectibleId,
@@ -392,8 +408,7 @@ export async function saveCollectibleToDb(params: {
     week_start:     getWeekStart(),
     earned_at:      new Date().toISOString(),
   });
-
-  if (error) console.warn('[DB] saveCollectibleToDb error:', error.message);
+  console.log('[DB] saveCollectibleToDb data:', data, 'error:', error);
 }
 
 export async function loadCollectibles(kidId: string) {
@@ -415,15 +430,14 @@ export async function savePayoutToDb(params: {
   const userId = await getCurrentUserId();
   if (!userId) return;
 
-  const { error } = await supabase.from('payouts').insert({
+  const { data, error } = await supabase.from('payouts').insert({
     parent_id:    userId,
     kid_id:       params.kidId,
     kid_name:     params.kidName,
     amount_cents: params.amountCents,
     paid_at:      new Date().toISOString(),
   });
-
-  if (error) console.warn('[DB] savePayoutToDb error:', error.message);
+  console.log('[DB] savePayoutToDb data:', data, 'error:', error);
 }
 
 export async function loadPayouts() {
@@ -447,7 +461,7 @@ export async function saveMilestoneToDb(params: {
   if (!userId) return;
 
   // The unique index on (kid_id, milestone_id) prevents duplicates
-  const { error } = await supabase.from('milestones').insert({
+  const { data, error } = await supabase.from('milestones').insert({
     kid_id:       params.kidId,
     parent_id:    userId,
     milestone_id: params.milestoneId,
@@ -456,7 +470,9 @@ export async function saveMilestoneToDb(params: {
 
   // Ignore unique constraint violations (already earned)
   if (error && !error.message.includes('unique')) {
-    console.warn('[DB] saveMilestoneToDb error:', error.message);
+    console.log('[DB] saveMilestoneToDb data:', data, 'error:', error);
+  } else {
+    console.log('[DB] saveMilestoneToDb data:', data, 'error:', error);
   }
 }
 
@@ -490,5 +506,6 @@ export async function updateKidStats(kidId: string, delta: {
   if (delta.last_chore_date !== undefined) updates.last_chore_date = delta.last_chore_date;
   if (delta.monster_idx !== undefined)     updates.monster_idx = delta.monster_idx;
   if (delta.monster_name !== undefined)    updates.monster_name = delta.monster_name;
-  await supabase.from('kids').update(updates).eq('id', kidId);
+  const { data, error } = await supabase.from('kids').update(updates).eq('id', kidId);
+  console.log('[DB] updateKidStats data:', data, 'error:', error);
 }
