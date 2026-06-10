@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, Switch, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, scale } from '../tokens';
+import { Toggle } from './Toggle';
 
 interface SettingsRowProps {
   title: string;
@@ -35,14 +36,7 @@ export function ToggleRow({ title, subtitle, value, onValueChange, style }: Togg
       title={title}
       subtitle={subtitle}
       style={style}
-      right={
-        <Switch
-          value={value}
-          onValueChange={onValueChange}
-          trackColor={{ false: colors.border, true: colors.green }}
-          thumbColor={colors.white}
-        />
-      }
+      right={<Toggle value={value} onValueChange={onValueChange} />}
     />
   );
 }

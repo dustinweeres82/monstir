@@ -158,6 +158,12 @@ export const shadows = {
     android: { elevation: 6 },
     default: {},
   })!,
+  /** Monstir design system, smaller: 0px 3px 0px #111111 */
+  solidSm: Platform.select({
+    ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
+    android: { elevation: 3 },
+    default: {},
+  })!,
 };
 
 // ─── Border shortcuts ─────────────────────────────────────────────────────────

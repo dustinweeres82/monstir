@@ -18,10 +18,40 @@ export async function saveProfile(fields: {
   weekly_cap_enabled?: boolean;
   battle_coin_bonus_enabled?: boolean;
   battle_coin_bonus_multiplier?: number;
+  goals_json?: string;
+  parent_pin?: string | null;
+  parent_pin_enabled?: boolean;
 }) {
   const userId = await getCurrentUserId();
   if (!userId) return;
   await supabase.from('profiles').update(fields).eq('id', userId);
+}
+
+export async function saveGoals(goals: unknown[]): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  await supabase.from('profiles').update({ goals_json: JSON.stringify(goals) }).eq('id', userId);
+}
+
+export async function loadGoals(): Promise<unknown[] | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+  const { data } = await supabase.from('profiles').select('goals_json').eq('id', userId).single();
+  if (!data?.goals_json) return null;
+  try { return JSON.parse(data.goals_json); } catch { return null; }
+}
+
+export async function saveAppState(fields: { chore_history_json?: string; week_approval_days_json?: string }): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  await supabase.from('profiles').update(fields).eq('id', userId);
+}
+
+export async function loadPayoutLog(): Promise<unknown[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+  const { data } = await supabase.from('payouts').select('*').eq('parent_id', userId).order('paid_at', { ascending: false }).limit(50);
+  return data ?? [];
 }
 
 export async function loadProfile() {
@@ -31,7 +61,46 @@ export async function loadProfile() {
   return data;
 }
 
+/**
+ * Updates the parent's email and/or password in Supabase Auth.
+ * Pass only the fields you want to change.
+ * Returns an error message string if anything failed, or null on success.
+ */
+export async function saveEmailAndPassword(fields: {
+  email?: string;
+  password?: string;
+}): Promise<string | null> {
+  if (!fields.email && !fields.password) return null;
+  const updates: { email?: string; password?: string } = {};
+  if (fields.email)    updates.email    = fields.email;
+  if (fields.password) updates.password = fields.password;
+  const { error } = await supabase.auth.updateUser(updates);
+  if (error) return error.message;
+  return null;
+}
+
+/**
+ * Saves the parent's display name to both:
+ *  - Supabase Auth user_metadata (the source of truth on login)
+ *  - The profiles table (for any server-side reads)
+ */
+export async function saveDisplayName(name: string): Promise<void> {
+  // 1. Update auth user_metadata — this is what's read back on every session load
+  const { error } = await supabase.auth.updateUser({ data: { name } });
+  if (error) console.warn('[DB] saveDisplayName (auth) error:', error.message);
+  // 2. Mirror to profiles table for consistency
+  await saveProfile({ name });
+}
+
 // ─── Kids ──────────────────────────────────────────────────────────────────
+
+export async function addKid(fields: { name: string; avatar_color: string; avatar_idx: number; age_range: string }) {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+  const { data, error } = await supabase.from('kids').insert({ ...fields, parent_id: userId }).select().single();
+  if (error) throw error;
+  return data;
+}
 
 export async function saveKid(child: OnboardingChild & { parent_id: string }) {
   const { data, error } = await supabase
@@ -62,6 +131,14 @@ export async function updateKid(kidId: string, fields: Record<string, unknown>) 
 
 // ─── Chores ────────────────────────────────────────────────────────────────
 
+export async function addChore(fields: { name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null }) {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+  const { data, error } = await supabase.from('chores').insert({ ...fields, parent_id: userId }).select().single();
+  if (error) throw error;
+  return data;
+}
+
 export async function saveChore(chore: {
   parent_id: string;
   name: string;
@@ -83,7 +160,8 @@ export async function loadChores() {
 }
 
 export async function updateChore(choreId: string, fields: Record<string, unknown>) {
-  await supabase.from('chores').update(fields).eq('id', choreId);
+  const { error } = await supabase.from('chores').update(fields).eq('id', choreId);
+  if (error) throw error;
 }
 
 export async function deleteChore(choreId: string) {
@@ -94,7 +172,7 @@ export async function deleteChore(choreId: string) {
 
 export async function saveOnboardingSetup(
   setup: ParentSetupResult,
-  choreCatalogue: Record<string, { name: string; icon: string; difficulty: string }>,
+  choreCatalogue: Record<string, { name: string; icon: string; difficulty: string; frequency?: string }>,
 ): Promise<{ kidIdMap: Record<string, string> }> {
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Not logged in');
@@ -121,7 +199,7 @@ export async function saveOnboardingSetup(
   }
 
   // 3. Group chores by choreId across all kids so shared chores have one row with multiple assigned_to
-  const choreKidsMap: Record<string, { name: string; icon: string; difficulty: number; kidIds: string[] }> = {};
+  const choreKidsMap: Record<string, { name: string; icon: string; frequency: string; difficulty: number; kidIds: string[] }> = {};
   for (const child of setup.children) {
     const kidId = kidIdMap[child.name];
     if (!kidId) continue;
@@ -131,6 +209,7 @@ export async function saveOnboardingSetup(
         choreKidsMap[choreId] = {
           name:       catalogue?.name ?? choreId,
           icon:       catalogue?.icon ?? '✅',
+          frequency:  catalogue?.frequency ?? 'Every day',
           difficulty: catalogue?.difficulty === 'Hard' ? 3 : catalogue?.difficulty === 'Medium' ? 2 : 1,
           kidIds:     [],
         };
@@ -146,7 +225,7 @@ export async function saveOnboardingSetup(
       parent_id:   userId,
       name:        chore.name,
       icon:        chore.icon,
-      frequency:   'daily',
+      frequency:   chore.frequency,
       difficulty:  chore.difficulty,
       assigned_to: chore.kidIds,
     });
@@ -254,6 +333,7 @@ export async function saveBossCaptureToDb(params: {
   bossName: string;
   xpEarned: number;
   coinsEarned: number;
+  completionPct?: number;
 }): Promise<void> {
   const userId = await getCurrentUserId();
   if (!userId) return;
@@ -272,13 +352,14 @@ export async function saveBossCaptureToDb(params: {
   if (existing) return; // already saved
 
   const { error } = await supabase.from('boss_captures').insert({
-    kid_id:       params.kidId,
-    parent_id:    userId,
-    boss_name:    params.bossName,
-    xp_earned:    params.xpEarned,
-    coins_earned: params.coinsEarned,
-    week_start:   weekStart,
-    captured_at:  new Date().toISOString(),
+    kid_id:         params.kidId,
+    parent_id:      userId,
+    boss_name:      params.bossName,
+    xp_earned:      params.xpEarned,
+    coins_earned:   params.coinsEarned,
+    completion_pct: params.completionPct ?? null,
+    week_start:     weekStart,
+    captured_at:    new Date().toISOString(),
   });
 
   if (error) console.warn('[DB] saveBossCaptureToDb error:', error.message);
@@ -396,14 +477,18 @@ export async function updateKidStats(kidId: string, delta: {
   coins?: number;
   current_streak?: number;
   last_chore_date?: string;
+  monster_idx?: number;
+  monster_name?: string;
 }): Promise<void> {
   if (!kidId) return;
   // Use RPC increment to avoid race conditions
   const updates: Record<string, unknown> = {};
-  if (delta.xp !== undefined)             updates.xp = delta.xp;
-  if (delta.weekly_xp !== undefined)      updates.weekly_xp = delta.weekly_xp;
-  if (delta.coins !== undefined)          updates.coins = delta.coins;
-  if (delta.current_streak !== undefined) updates.current_streak = delta.current_streak;
+  if (delta.xp !== undefined)              updates.xp = delta.xp;
+  if (delta.weekly_xp !== undefined)       updates.weekly_xp = delta.weekly_xp;
+  if (delta.coins !== undefined)           updates.coins = delta.coins;
+  if (delta.current_streak !== undefined)  updates.current_streak = delta.current_streak;
   if (delta.last_chore_date !== undefined) updates.last_chore_date = delta.last_chore_date;
+  if (delta.monster_idx !== undefined)     updates.monster_idx = delta.monster_idx;
+  if (delta.monster_name !== undefined)    updates.monster_name = delta.monster_name;
   await supabase.from('kids').update(updates).eq('id', kidId);
 }

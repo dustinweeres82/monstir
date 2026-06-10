@@ -1,148 +1,155 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, Image, ScrollView,
-  TouchableOpacity, Animated,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Share,
 } from 'react-native';
-import { colors, spacing, scale, fontSize, interFamily } from '../design-system/tokens';
+import { colors, spacing, fontSize, scale, interFamily, radii } from '../design-system/tokens';
 import { useScaleAnimation } from '../design-system/hooks';
-import { getBossDisplay, THREAT_STARS } from '../data/bossLookup';
+import { MilestoneHero } from '../components/MilestoneHero';
+import { StatCard, RewardCard } from '../components/TrophyCards';
+import { getBossDisplay } from '../data/bossLookup';
+import { COLLECTIBLES } from '../data/collectibles';
 import type { BossCaptureEntry } from '../storage/bossCaptures';
+import type { CollectibleEntry } from '../storage/collectibles';
 
 const PURPLE = '#7B3FF2';
 const BORDER = '#111111';
-const MUTED  = '#888888';
 const BG     = '#FFFDF7';
 
 const CARD_SHADOW = {
   shadowColor: BORDER,
-  shadowOffset: { width: 0, height: 4 },
+  shadowOffset: { width: 0, height: 6 },
   shadowOpacity: 1,
   shadowRadius: 0,
-  elevation: 5,
+  elevation: 6,
 };
 
-interface BossDetailProps {
-  capture: BossCaptureEntry;
-  relicName?: string;
-  relicImage?: ReturnType<typeof require>;
-  onBack: () => void;
+type RewardRarity = 'rare' | 'legendary' | 'common' | 'milestone';
+
+const THREAT_TO_RARITY: Record<string, RewardRarity> = {
+  Easy:    'common',
+  Medium:  'rare',
+  Hard:    'rare',
+  Extreme: 'legendary',
+};
+
+const THREAT_STARS: Record<string, string> = {
+  Easy:    '★',
+  Medium:  '★★',
+  Hard:    '★★★',
+  Extreme: '★★★★',
+};
+
+export interface BossDetailProps {
+  captures:      BossCaptureEntry[];
+  initialIndex:  number;
+  relics:        CollectibleEntry[];
+  onBack:        () => void;
 }
 
-function MetaCell({ label, value, purple }: { label: string; value: string; purple?: boolean }) {
-  return (
-    <View style={s.metaCell}>
-      <Text style={s.metaLabel}>{label}</Text>
-      <Text style={[s.metaValue, purple && { color: PURPLE }]}>{value}</Text>
-    </View>
-  );
+function relicForCapture(capture: BossCaptureEntry, relics: CollectibleEntry[]) {
+  const match = relics.find(r => r.weekLabel === capture.weekLabel);
+  const def   = match ? COLLECTIBLES.find(c => c.key === match.itemKey) : undefined;
+  return { relicName: match?.itemName, relicImage: def?.image };
 }
 
-export function BossDetail({ capture, relicName, relicImage, onBack }: BossDetailProps) {
-  const { scaleAnim: backScale, pressIn: backPI, pressOut: backPO } = useScaleAnimation({ toScale: 0.85 });
-  const boss   = getBossDisplay(capture.bossName);
-  const stars  = THREAT_STARS[capture.threat] ?? '★';
+export function BossDetail({ captures, initialIndex, relics, onBack }: BossDetailProps) {
+  const [idx, setIdx] = useState(initialIndex);
+  const { scaleAnim: backScale, pressIn: backPI, pressOut: backPO }     = useScaleAnimation({ toScale: 0.85 });
+  const { scaleAnim: shareScale, pressIn: sharePI, pressOut: sharePO } = useScaleAnimation({ toScale: 0.85 });
 
+  const capture     = captures[idx];
+  const boss        = getBossDisplay(capture.bossName);
   const captureDate = new Date(capture.capturedAt);
-  const dateStr = captureDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  const dayStr  = captureDate.toLocaleDateString('en-US', { weekday: 'long' });
+  const dateStr     = captureDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const dayStr      = captureDate.toLocaleDateString('en-US', { weekday: 'long' });
+  const stars       = THREAT_STARS[capture.threat] ?? '★';
+  const threat      = capture.threat ?? 'Easy';
+  const jarRarity   = THREAT_TO_RARITY[threat] ?? 'common';
+  const artSrc      = boss?.jar ?? boss?.image;
+  const footerText  = boss?.tagline ?? `Captured on ${dayStr}.`;
+  const { relicName, relicImage } = relicForCapture(capture, relics);
+
+  const heroItems = captures.map(c => {
+    const b        = getBossDisplay(c.bossName);
+    const t        = c.threat ?? 'Easy';
+    const src      = b?.jar ?? b?.image;
+    const day      = new Date(c.capturedAt).toLocaleDateString('en-US', { weekday: 'long' });
+    return {
+      typePillLabel: `${t} Boss`,
+      title:         c.bossName,
+      footerText:    b?.tagline ?? `Captured on ${day}.`,
+      artSrc:        src,
+    };
+  });
+
+  async function handleShare() {
+    try {
+      await Share.share({ message: `I captured ${capture.bossName} on ${dateStr} in Monstir! 🫙` });
+    } catch (_) {}
+  }
 
   return (
     <View style={s.root}>
-
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity style={s.backBtn} onPress={onBack} onPressIn={backPI} onPressOut={backPO} activeOpacity={1}>
+        <TouchableOpacity style={s.iconBtn} onPress={onBack} onPressIn={backPI} onPressOut={backPO} activeOpacity={1}>
           <Animated.View style={{ transform: [{ scale: backScale }] }}>
-            <Text style={s.backBtnText}>←</Text>
+            <Text style={s.iconBtnText}>←</Text>
           </Animated.View>
         </TouchableOpacity>
         <Text style={s.headerTitle}>Boss Trophy</Text>
-        <View style={s.backBtn} />
+        <TouchableOpacity style={s.iconBtn} onPress={handleShare} onPressIn={sharePI} onPressOut={sharePO} activeOpacity={1}>
+          <Animated.View style={{ transform: [{ scale: shareScale }] }}>
+            <Text style={s.iconBtnText}>↑</Text>
+          </Animated.View>
+        </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
 
-        {/* ── Hero card ── */}
-        <View style={s.heroCard}>
-          <View style={s.heroTop}>
-            {/* Boss jar art */}
-            <View style={s.heroArtWrap}>
-              {boss?.jar ? (
-                <Image source={boss.jar} style={s.heroArt} resizeMode="contain" />
-              ) : boss?.image ? (
-                <Image source={boss.image} style={s.heroArt} resizeMode="contain" />
-              ) : (
-                <Text style={s.heroJar}>🫙</Text>
-              )}
-            </View>
-            <View style={s.heroInfo}>
-              <View style={s.bossTrophyLabel}>
-                <Text style={s.bossTrophyLabelText}>BOSS TROPHY</Text>
-              </View>
-              <Text style={s.bossName}>{capture.bossName}</Text>
-              <View style={s.starsRow}>
-                <Text style={s.stars}>{stars}</Text>
-                <Text style={s.threatLabel}>{capture.threat} Boss</Text>
-              </View>
-              {boss?.tagline && (
-                <Text style={s.tagline}>{boss.tagline}</Text>
-              )}
-            </View>
-          </View>
+        <MilestoneHero
+          type="boss"
+          items={heroItems}
+          index={idx}
+          onIndexChange={setIdx}
+        />
+
+        {/* Stats row 1 */}
+        <View style={s.row}>
+          <StatCard label="Captured" value={dateStr} sublabel={dayStr} />
+          <StatCard label="Completion" value={`${capture.completionPct}%`} valueColor={PURPLE} />
         </View>
 
-        {/* ── Metadata strip ── */}
-        <View style={[s.metaCard, CARD_SHADOW]}>
-          <MetaCell label="Captured" value={`${dateStr}\n${dayStr}`} />
-          <View style={s.metaDivider} />
-          <MetaCell label="Completion" value={`${capture.completionPct}%`} purple />
-          <View style={s.metaDivider} />
-          <MetaCell label="Threat" value={stars} purple />
-          <View style={s.metaDivider} />
-          <MetaCell label="Weakness" value={capture.weakness} purple />
+        {/* Stats row 2 */}
+        <View style={s.row}>
+          <StatCard label="Weakness" value={capture.weakness} valueColor={PURPLE} />
+          <StatCard label="Threat" value={stars} sublabel={`${threat} difficulty`} />
         </View>
 
-        {/* ── Rewards Earned ── */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>🎁 REWARDS EARNED</Text>
-          <View style={s.rewardsRow}>
-            {/* Relic drop */}
-            <View style={s.rewardCell}>
-              {relicImage ? (
-                <Image source={relicImage} style={s.rewardImg} resizeMode="contain" />
-              ) : (
-                <Text style={s.rewardEmoji}>🫙</Text>
-              )}
-              <Text style={s.rewardLabel}>{relicName ?? 'Relic'}</Text>
-            </View>
-            {/* Jar decoration */}
-            {boss?.jar && (
-              <View style={s.rewardCell}>
-                <Image source={boss.jar} style={s.rewardImg} resizeMode="contain" />
-                <Text style={s.rewardLabel}>Jar</Text>
-              </View>
-            )}
-            {/* XP */}
-            <View style={s.rewardCell}>
-              <Text style={s.rewardEmoji}>⭐</Text>
-              <Text style={s.rewardLabel}>+{capture.xpEarned} XP</Text>
-            </View>
-            {/* Coins */}
-            <View style={s.rewardCell}>
-              <Text style={s.rewardEmoji}>🟡</Text>
-              <Text style={s.rewardLabel}>+{capture.coinsEarned} coins</Text>
-            </View>
-          </View>
+        {/* Rewards section */}
+        <Text style={s.sectionTitle}>🎁 Rewards Earned</Text>
+
+        <View style={s.rewardsGrid}>
+          {boss?.jar && (
+            <RewardCard
+              rarity={jarRarity}
+              imageSrc={boss.jar}
+              name={`${capture.bossName} Jar`}
+            />
+          )}
+          <RewardCard
+            rarity="common"
+            imageSrc={relicImage}
+            name={relicName ?? 'Relic'}
+          />
+          <RewardCard rarity="milestone" icon="⭐" name={`+${capture.xpEarned ?? 50} XP`} />
+          <RewardCard rarity="milestone" icon="🟡" name={`+${capture.coinsEarned ?? 0} coins`} />
         </View>
 
-        {/* ── Memory card ── */}
-        <View style={[s.memoryCard, CARD_SHADOW]}>
-          <Text style={s.memoryLabel}>MEMORY 💜</Text>
-          <Text style={s.memoryText}>
-            {`Captured ${capture.bossName} on ${dayStr}, ${dateStr} — after completing ${capture.completionPct}% of their chores that week. Weakness: ${capture.weakness}.`}
-          </Text>
-          <Text style={s.memoryWeek}>{capture.weekLabel}</Text>
-        </View>
+        {/* CTA */}
+        <TouchableOpacity style={[s.ctaBtn, CARD_SHADOW]} activeOpacity={0.8}>
+          <Text style={s.ctaText}>Power up for the next boss →</Text>
+        </TouchableOpacity>
 
       </ScrollView>
     </View>
@@ -150,221 +157,52 @@ export function BossDetail({ capture, relicName, relicImage, onBack }: BossDetai
 }
 
 const s = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: BG,
-  },
+  root: { flex: 1, backgroundColor: BG },
+
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backBtnText: {
-    fontSize: fontSize.xxl,
-    color: BORDER,
-    fontFamily: interFamily.semibold,
-  },
-  headerTitle: {
-    fontFamily: 'FredokaOne_400Regular',
-    fontSize: fontSize.xxl,
-    color: BORDER,
-  },
-
-  scroll: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
-  },
-
-  // Hero card
-  heroCard: {
-    backgroundColor: '#F3EEFF',
-    borderRadius: 16,
-    borderWidth: 3,
-    borderColor: BORDER,
-    overflow: 'hidden',
-    ...CARD_SHADOW,
-  },
-  heroTop: {
-    flexDirection: 'row',
-    gap: 12,
-    padding: 14,
-  },
-  heroArtWrap: {
-    width: 90,
-    height: 90,
-    backgroundColor: '#EDE9FC',
-    borderRadius: 14,
-    borderWidth: 3,
-    borderColor: BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  heroArt: {
-    width: 76,
-    height: 76,
-  },
-  heroJar: {
-    fontSize: fontSize.display,
-  },
-  heroInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  bossTrophyLabel: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#EDE9FC',
-    borderWidth: 1.5,
-    borderColor: '#C4B0F8',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  bossTrophyLabelText: {
-    fontSize: fontSize.xs,
-    fontFamily: interFamily.heavy,
-    color: PURPLE,
-    letterSpacing: 0.5,
-  },
-  bossName: {
-    fontFamily: 'FredokaOne_400Regular',
-    fontSize: fontSize.xxxl,
-    color: BORDER,
-  },
-  starsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  stars: {
-    color: PURPLE,
-    fontSize: fontSize.base,
-  },
-  threatLabel: {
-    fontFamily: 'FredokaOne_400Regular',
-    fontSize: fontSize.base,
-    color: PURPLE,
-  },
-  tagline: {
-    fontSize: fontSize.sm,
-    color: '#555',
-    fontFamily: interFamily.regular,
-    lineHeight: fontSize.lg,
-    marginTop: 2,
-  },
-
-  // Metadata strip
-  metaCard: {
-    flexDirection: 'row',
+  iconBtn: {
+    width: 44, height: 44, borderRadius: 12,
+    borderWidth: 2, borderColor: BORDER,
     backgroundColor: colors.white,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: BORDER,
-    overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: BORDER, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
   },
-  metaCell: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    gap: 3,
-  },
-  metaDivider: {
-    width: 1,
-    backgroundColor: '#EEE',
-    marginVertical: 8,
-  },
-  metaLabel: {
-    fontSize: fontSize.xs,
-    color: MUTED,
-    fontFamily: interFamily.heavy,
-    textAlign: 'center',
-  },
-  metaValue: {
-    fontSize: fontSize.sm,
-    color: BORDER,
-    fontFamily: 'FredokaOne_400Regular',
-    textAlign: 'center',
-    lineHeight: fontSize.base,
-  },
+  iconBtnText: { fontSize: fontSize.xxl, color: BORDER, fontFamily: interFamily.bold },
+  headerTitle: { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.xxl, color: BORDER },
 
-  // Rewards
-  section: {
-    gap: 10,
-  },
+  scroll: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 120 },
+
+  row: { flexDirection: 'row', gap: spacing.sm },
+
   sectionTitle: {
-    fontFamily: 'FredokaOne_400Regular',
-    fontSize: fontSize.base,
-    color: BORDER,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  rewardsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  rewardCell: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderWidth: 2,
-    borderColor: BORDER,
-    borderRadius: 10,
-    paddingVertical: 8,
-    alignItems: 'center',
-    gap: 4,
-    ...CARD_SHADOW,
-  },
-  rewardImg: {
-    width: scale(36),
-    height: scale(36),
-  },
-  rewardEmoji: {
-    fontSize: fontSize.h2,
-  },
-  rewardLabel: {
-    fontSize: fontSize.xs,
     fontFamily: interFamily.heavy,
-    color: '#555',
-    textAlign: 'center',
+    fontSize: scale(22),
+    color: BORDER,
+    marginTop: spacing.xs,
   },
 
-  // Memory card
-  memoryCard: {
-    backgroundColor: colors.white,
-    borderWidth: 2,
+  rewardsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+
+  ctaBtn: {
+    backgroundColor: PURPLE,
+    borderRadius: 50,
+    borderWidth: 3,
     borderColor: BORDER,
-    borderRadius: 14,
-    padding: 12,
-    gap: 4,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
     marginBottom: spacing.sm,
   },
-  memoryLabel: {
-    fontSize: fontSize.xs,
-    fontFamily: interFamily.heavy,
-    color: PURPLE,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  memoryText: {
-    fontSize: fontSize.sm,
-    color: '#333',
-    fontFamily: interFamily.regular,
-    lineHeight: fontSize.xl,
-  },
-  memoryWeek: {
-    fontSize: fontSize.xs,
-    color: MUTED,
-    fontFamily: interFamily.bold,
+  ctaText: {
+    fontFamily: 'FredokaOne_400Regular',
+    fontSize: 18,
+    color: '#FFFFFF',
   },
 });

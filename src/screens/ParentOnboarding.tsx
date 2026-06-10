@@ -30,6 +30,7 @@ export interface ChoreMapEntry {
   icon: ReturnType<typeof require>;
   iconBg: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
+  frequency?: string;
 }
 
 export interface ParentSetupResult {
@@ -78,27 +79,27 @@ const DIFFICULTIES: OnboardingChild['difficulty'][] = ['Easy', 'Medium', 'Hard']
 const AVATAR_COLORS = ['#E0D4FF', '#FFD6E4', '#C8EEFF', '#D6FFE8', '#FFF3C8', '#FFE0CC'];
 
 const AVATARS = [
-  require('../../assets/icons/kidProfile1.png'),
-  require('../../assets/icons/kidProfile2.png'),
-  require('../../assets/icons/kidProfile3.png'),
-  require('../../assets/icons/kidProfile4.png'),
-  require('../../assets/icons/kidProfile5.png'),
-  require('../../assets/icons/kidProfile6.png'),
-  require('../../assets/icons/kidProfile7.png'),
-  require('../../assets/icons/kidProfile8.png'),
-  require('../../assets/icons/kidProfile9.png'),
-  require('../../assets/icons/kidProfile10.png'),
-  require('../../assets/icons/kidProfile11.png'),
-  require('../../assets/icons/kidProfile12.png'),
-  require('../../assets/icons/kidProfile13.png'),
-  require('../../assets/icons/kidProfile14.png'),
-  require('../../assets/icons/kidProfile15.png'),
-  require('../../assets/icons/kidProfile16.png'),
-  require('../../assets/icons/kidProfile17.png'),
-  require('../../assets/icons/kidProfile18.png'),
-  require('../../assets/icons/kidProfile19.png'),
-  require('../../assets/icons/kidProfile20.png'),
-  require('../../assets/icons/kidProfile21.png'),
+  require('../../assets/icons/Avatars/kidProfile1.png'),
+  require('../../assets/icons/Avatars/kidProfile2.png'),
+  require('../../assets/icons/Avatars/kidProfile3.png'),
+  require('../../assets/icons/Avatars/kidProfile4.png'),
+  require('../../assets/icons/Avatars/kidProfile5.png'),
+  require('../../assets/icons/Avatars/kidProfile6.png'),
+  require('../../assets/icons/Avatars/kidProfile7.png'),
+  require('../../assets/icons/Avatars/kidProfile8.png'),
+  require('../../assets/icons/Avatars/kidProfile9.png'),
+  require('../../assets/icons/Avatars/kidProfile10.png'),
+  require('../../assets/icons/Avatars/kidProfile11.png'),
+  require('../../assets/icons/Avatars/kidProfile12.png'),
+  require('../../assets/icons/Avatars/kidProfile13.png'),
+  require('../../assets/icons/Avatars/kidProfile14.png'),
+  require('../../assets/icons/Avatars/kidProfile15.png'),
+  require('../../assets/icons/Avatars/kidProfile16.png'),
+  require('../../assets/icons/Avatars/kidProfile17.png'),
+  require('../../assets/icons/Avatars/kidProfile18.png'),
+  require('../../assets/icons/Avatars/kidProfile19.png'),
+  require('../../assets/icons/Avatars/kidProfile20.png'),
+  require('../../assets/icons/Avatars/kidProfile21.png'),
 ];
 
 interface SuggestedChore {
@@ -112,43 +113,43 @@ interface SuggestedChore {
 
 const CHORES_BY_AGE: Record<OnboardingChild['ageRange'], SuggestedChore[]> = {
   '5-6': [
-    { id: 'make_bed',     name: 'Make bed',        xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBed.png'),     iconBg: colors.iconBed },
-    { id: 'tidy_room',    name: 'Tidy room',        xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: colors.iconBroom },
-    { id: 'water_plants', name: 'Water plants',     xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconTrash },
-    { id: 'put_clothes',  name: 'Put away clothes', xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
-    { id: 'set_table',    name: 'Help set table',   xp: 15, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: colors.iconDishes },
+    { id: 'make_bed',     name: 'Make bed',        xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBed.png'),     iconBg: colors.iconBed },
+    { id: 'tidy_room',    name: 'Tidy room',        xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBroom.png'),   iconBg: colors.iconBroom },
+    { id: 'water_plants', name: 'Water plants',     xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconSoap.png'),    iconBg: colors.iconTrash },
+    { id: 'put_clothes',  name: 'Put away clothes', xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
+    { id: 'set_table',    name: 'Help set table',   xp: 15, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconDishes.png'),  iconBg: colors.iconDishes },
   ],
   '7-9': [
-    { id: 'make_bed',      name: 'Make bed',          xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBed.png'),     iconBg: colors.iconBed },
-    { id: 'unload_dishes', name: 'Unload dishwasher', xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: colors.iconDishes },
-    { id: 'take_trash',    name: 'Take out trash',    xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: colors.iconTrash },
-    { id: 'pack_bag',      name: 'Pack school bag',   xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: colors.iconBroom },
-    { id: 'water_plants',  name: 'Water plants',      xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconTrash },
+    { id: 'make_bed',      name: 'Make bed',          xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBed.png'),     iconBg: colors.iconBed },
+    { id: 'unload_dishes', name: 'Unload dishwasher', xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconDishes.png'),  iconBg: colors.iconDishes },
+    { id: 'take_trash',    name: 'Take out trash',    xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconGarbage.png'), iconBg: colors.iconTrash },
+    { id: 'pack_bag',      name: 'Pack school bag',   xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBroom.png'),   iconBg: colors.iconBroom },
+    { id: 'water_plants',  name: 'Water plants',      xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconSoap.png'),    iconBg: colors.iconTrash },
   ],
   '10-12': [
-    { id: 'vacuum',      name: 'Vacuum',         xp: 25, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconVacuum.png'),  iconBg: colors.iconBlue },
-    { id: 'laundry',     name: 'Do laundry',     xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
-    { id: 'wash_dishes', name: 'Wash dishes',    xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconDishes.png'),  iconBg: colors.iconDishes },
-    { id: 'clean_bath',  name: 'Clean bathroom', xp: 25, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconBlue },
-    { id: 'take_trash',  name: 'Take out trash', xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: colors.iconTrash },
+    { id: 'vacuum',      name: 'Vacuum',         xp: 25, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconVacuum.png'),  iconBg: colors.iconBlue },
+    { id: 'laundry',     name: 'Do laundry',     xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chores/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
+    { id: 'wash_dishes', name: 'Wash dishes',    xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconDishes.png'),  iconBg: colors.iconDishes },
+    { id: 'clean_bath',  name: 'Clean bathroom', xp: 25, difficulty: 'Hard',   icon: require('../../assets/icons/chores/chore=iconSoap.png'),    iconBg: colors.iconBlue },
+    { id: 'take_trash',  name: 'Take out trash', xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconGarbage.png'), iconBg: colors.iconTrash },
   ],
   '13+': [
-    { id: 'vacuum',     name: 'Vacuum',         xp: 25, difficulty: 'Medium', icon: require('../../assets/icons/chore=iconVacuum.png'),  iconBg: colors.iconBlue },
-    { id: 'laundry',    name: 'Do laundry',     xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
-    { id: 'sweep',      name: 'Sweep floors',   xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconBroom.png'),   iconBg: colors.iconBroom },
-    { id: 'clean_bath', name: 'Clean bathroom', xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chore=iconSoap.png'),    iconBg: colors.iconBlue },
-    { id: 'take_trash', name: 'Take out trash', xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chore=iconGarbage.png'), iconBg: colors.iconTrash },
+    { id: 'vacuum',     name: 'Vacuum',         xp: 25, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconVacuum.png'),  iconBg: colors.iconBlue },
+    { id: 'laundry',    name: 'Do laundry',     xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chores/chore=iconLaundry.png'), iconBg: colors.iconLaundry },
+    { id: 'sweep',      name: 'Sweep floors',   xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBroom.png'),   iconBg: colors.iconBroom },
+    { id: 'clean_bath', name: 'Clean bathroom', xp: 30, difficulty: 'Hard',   icon: require('../../assets/icons/chores/chore=iconSoap.png'),    iconBg: colors.iconBlue },
+    { id: 'take_trash', name: 'Take out trash', xp: 20, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconGarbage.png'), iconBg: colors.iconTrash },
   ],
 };
 
 const CHORE_ICONS: { icon: ReturnType<typeof require>; bg: string }[] = [
-  { icon: require('../../assets/icons/chore=iconBed.png'),     bg: colors.iconBed },
-  { icon: require('../../assets/icons/chore=iconBroom.png'),   bg: colors.iconBroom },
-  { icon: require('../../assets/icons/chore=iconDishes.png'),  bg: colors.iconDishes },
-  { icon: require('../../assets/icons/chore=iconGarbage.png'), bg: colors.iconTrash },
-  { icon: require('../../assets/icons/chore=iconLaundry.png'), bg: colors.iconLaundry },
-  { icon: require('../../assets/icons/chore=iconSoap.png'),    bg: colors.iconBlue },
-  { icon: require('../../assets/icons/chore=iconVacuum.png'),  bg: colors.iconBlue },
+  { icon: require('../../assets/icons/chores/chore=iconBed.png'),     bg: colors.iconBed },
+  { icon: require('../../assets/icons/chores/chore=iconBroom.png'),   bg: colors.iconBroom },
+  { icon: require('../../assets/icons/chores/chore=iconDishes.png'),  bg: colors.iconDishes },
+  { icon: require('../../assets/icons/chores/chore=iconGarbage.png'), bg: colors.iconTrash },
+  { icon: require('../../assets/icons/chores/chore=iconLaundry.png'), bg: colors.iconLaundry },
+  { icon: require('../../assets/icons/chores/chore=iconSoap.png'),    bg: colors.iconBlue },
+  { icon: require('../../assets/icons/chores/chore=iconVacuum.png'),  bg: colors.iconBlue },
 ];
 
 // Reward type still used in Step4ChooseReward (payout/slider) and persisted
@@ -551,8 +552,8 @@ function Step1AddChildren({
 // ─── Step 2: Parent Identity ───────────────────────────────────────────────
 
 const PARENT_CARDS = [
-  { id: 'mom', label: 'Mom', emoji: '👩' },
-  { id: 'dad', label: 'Dad', emoji: '👨' },
+  { id: 'mom', label: 'Mom', image: require('../../assets/icons/Avatars/parentProfileMom.png') },
+  { id: 'dad', label: 'Dad', image: require('../../assets/icons/Avatars/parentProfileDad.png') },
 ] as const;
 
 const PARENT_CHIPS = ['Guardian', 'Grandma', 'Grandpa', 'Caregiver'] as const;
@@ -591,7 +592,7 @@ function Step2ParentIdentity({
                   onPress={() => selectCard(card.id)}
                   activeOpacity={0.8}
                 >
-                  <Text style={s.parentCardEmoji}>{card.emoji}</Text>
+                  <Image source={card.image} style={s.parentCardEmoji} resizeMode="contain" />
                   <Text style={[s.parentCardLabel, active && s.parentCardLabelActive]}>{card.label}</Text>
                 </TouchableOpacity>
               );
@@ -1010,7 +1011,7 @@ export function ParentOnboarding({ onComplete }: Props) {
       for (const ageChores of Object.values(CHORES_BY_AGE)) {
         for (const c of ageChores) {
           if (!choreMap[c.id]) {
-            choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty };
+            choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty, frequency: 'Every day' };
           }
         }
       }
@@ -1187,7 +1188,9 @@ const s = StyleSheet.create({
     }),
   },
   parentCardEmoji: {
-    fontSize: scale(40),
+    width: scale(80),
+    height: scale(80),
+    borderRadius: scale(40),
   },
   parentCardLabel: {
     fontSize: fontSize.xl,

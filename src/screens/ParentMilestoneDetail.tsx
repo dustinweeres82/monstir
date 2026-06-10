@@ -13,8 +13,10 @@ import { MILESTONES } from '../data/milestones';
 const PURPLE = '#7B3FF2';
 const BORDER = '#111111';
 const BG     = '#FFFDF7';
-const LIME   = '#D8F52F';
 const MUTED  = '#888888';
+
+// Cream hero background — distinguishes parent view from kid lime background
+const HERO_BG = '#FFFDF7';
 
 const CARD_SHADOW = {
   shadowColor: BORDER,
@@ -30,25 +32,24 @@ function getNextMilestone(current: MilestoneDef): MilestoneDef | undefined {
   return same[idx + 1];
 }
 
-export interface MilestoneDetailProps {
-  milestone:    MilestoneDef;
-  earned:       EarnedMilestone | undefined;
-  totalAllowance?: number;
-  onBack:       () => void;
-  allEarned?:   EarnedMilestone[];
+export interface ParentMilestoneDetailProps {
+  milestone:  MilestoneDef;
+  earned:     EarnedMilestone | undefined;
+  allEarned:  EarnedMilestone[];
+  onBack:     () => void;
 }
 
-export function MilestoneDetail({
+export function ParentMilestoneDetail({
   milestone,
   earned,
+  allEarned,
   onBack,
-  allEarned = [],
-}: MilestoneDetailProps) {
+}: ParentMilestoneDetailProps) {
   const { scaleAnim: backScale, pressIn: backPI, pressOut: backPO } = useScaleAnimation({ toScale: 0.85 });
 
-  // Build ordered list of kid milestones that have been earned
-  const kidMilestoneDefs = MILESTONES.filter(m => m.audience === 'kid');
-  const earnedKidDefs = kidMilestoneDefs
+  // Build ordered list of parent milestones that have been earned (newest first)
+  const parentDefs = MILESTONES.filter(m => m.audience === 'parent');
+  const earnedDefs = parentDefs
     .filter(m => allEarned.some(e => e.id === m.id))
     .sort((a, b) => {
       const aAt = allEarned.find(e => e.id === a.id)?.earnedAt ?? '';
@@ -56,16 +57,15 @@ export function MilestoneDetail({
       return bAt.localeCompare(aAt);
     });
 
-  // If no earned milestones or current not in earned list, show just current
-  const useCarousel = earnedKidDefs.length > 0;
-  const initialIdx = useCarousel
-    ? Math.max(0, earnedKidDefs.findIndex(m => m.id === milestone.id))
+  const useCarousel = earnedDefs.length > 0;
+  const initialIdx  = useCarousel
+    ? Math.max(0, earnedDefs.findIndex(m => m.id === milestone.id))
     : 0;
 
   const [carouselIdx, setCarouselIdx] = useState(initialIdx);
 
-  const activeMilestone = useCarousel && earnedKidDefs.length > 0
-    ? earnedKidDefs[carouselIdx]
+  const activeMilestone = useCarousel && earnedDefs.length > 0
+    ? earnedDefs[carouselIdx]
     : milestone;
 
   const activeEarned = allEarned.find(e => e.id === activeMilestone.id);
@@ -75,11 +75,7 @@ export function MilestoneDetail({
     : null;
 
   const nextMilestone = getNextMilestone(activeMilestone);
-
-  const carouselTotal = useCarousel ? earnedKidDefs.length : (earned ? 1 : 0);
-  const carouselIndex = useCarousel ? carouselIdx + 1 : (earned ? 1 : 1);
-
-  const dots = useCarousel ? earnedKidDefs : (earned ? [milestone] : []);
+  const dots          = useCarousel ? earnedDefs : (earned ? [milestone] : []);
 
   return (
     <View style={s.root}>
@@ -90,7 +86,7 @@ export function MilestoneDetail({
             <Text style={s.backBtnText}>←</Text>
           </Animated.View>
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Trophies</Text>
+        <Text style={s.headerTitle}>Your Milestones</Text>
         <View style={s.backBtn} />
       </View>
 
@@ -98,8 +94,9 @@ export function MilestoneDetail({
 
         <MilestoneHero
           type="milestone-kid"
-          items={useCarousel && earnedKidDefs.length > 0
-            ? earnedKidDefs.map(m => ({
+          bgOverride={HERO_BG}
+          items={useCarousel && earnedDefs.length > 0
+            ? earnedDefs.map(m => ({
                 typePillLabel: 'Milestone',
                 title: m.name,
                 footerText: m.tagline,
@@ -163,7 +160,7 @@ export function MilestoneDetail({
 
         {/* CTA */}
         <TouchableOpacity style={[s.ctaBtn, CARD_SHADOW]} activeOpacity={0.8}>
-          <Text style={s.ctaText}>Power up for the next boss →</Text>
+          <Text style={s.ctaText}>Keep going →</Text>
         </TouchableOpacity>
 
       </ScrollView>
@@ -191,24 +188,11 @@ const s = StyleSheet.create({
 
   scroll: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 120 },
 
-  dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: -spacing.xs,
-  },
-  dot: {
-    width: 8, height: 8, borderRadius: 4,
-    backgroundColor: '#CCCCCC',
-  },
-  dotActive: {
-    backgroundColor: PURPLE,
-  },
+  dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: -spacing.xs },
+  dot:       { width: 8, height: 8, borderRadius: 4, backgroundColor: '#CCCCCC' },
+  dotActive: { backgroundColor: PURPLE },
 
-  row: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
+  row: { flexDirection: 'row', gap: spacing.sm },
 
   nextCard: {
     backgroundColor: colors.white,
@@ -225,11 +209,11 @@ const s = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
-  nextRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  nextImg:  { width: 44, height: 44 },
-  nextIcon: { fontSize: 40 },
-  nextInfo: { flex: 1 },
-  nextName: { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.xl, color: BORDER },
+  nextRow:    { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  nextImg:    { width: 44, height: 44 },
+  nextIcon:   { fontSize: 40 },
+  nextInfo:   { flex: 1 },
+  nextName:   { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.xl, color: BORDER },
   nextTagline: { fontSize: fontSize.base, color: MUTED, fontFamily: nunitoFamily.regular, marginTop: 2 },
 
   ctaBtn: {

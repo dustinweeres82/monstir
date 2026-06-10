@@ -31,6 +31,7 @@ export interface ChestRevealProps {
   collectible: CollectibleItem;
   weekLabel: string;
   onDone: () => void;
+  kidName: string;             // owning kid profile (local per-kid storage)
   kidDbId?: string | null;     // Supabase kid ID for DB persistence
 }
 
@@ -136,7 +137,7 @@ function TierMeter({ activeTier }: { activeTier: ChestTier }) {
 
 // ─── ChestReveal component ────────────────────────────────────────────────────
 
-export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidDbId }: ChestRevealProps) {
+export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidName, kidDbId }: ChestRevealProps) {
   const [phase, setPhase]       = useState<Phase>('preOpen');
   const [tapCount, setTapCount] = useState(0);
   const [saved, setSaved]       = useState(false);
@@ -228,13 +229,13 @@ export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDon
       earnedAt:  new Date().toISOString(),
       weekLabel,
     };
-    saveCollectible(entry).catch(() => {});
+    saveCollectible(kidName, entry).catch(() => {});
 
     // Also save to Supabase
     if (kidDbId) {
       saveCollectibleToDb({ kidId: kidDbId, collectibleId: collectible.key, rarity: collectible.rarity }).catch(e => console.warn('[DB] saveCollectibleToDb error:', e));
     }
-  }, [phase, saved, collectible, weekLabel, kidDbId]);
+  }, [phase, saved, collectible, weekLabel, kidName, kidDbId]);
 
   const tierColor = TIER_COLORS[tier];
   const insets = useSafeAreaInsets();

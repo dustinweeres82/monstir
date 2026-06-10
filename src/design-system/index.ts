@@ -21,6 +21,7 @@ export { ScreenHeading } from './components/ScreenHeading';
 export { SettingsRow, ToggleRow } from './components/SettingsRow';
 export { TabBar }        from './components/TabBar';
 export { TogglePills }   from './components/TogglePills';
+export { Toggle }        from './components/Toggle';
 export { ArrowButton }   from './components/ArrowButton';
 export { BottomSheet }   from './components/BottomSheet';
 export { GamePanel }     from './components/GamePanel';

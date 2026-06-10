@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, fontSize, fontWeight, radii, spacing, scale } from '../design-system/tokens';
 import { Button } from '../design-system/components/Button';
 import { useScaleAnimation } from '../design-system/hooks';
+import { ArrowButton } from '../design-system/components/ArrowButton';
 
 const KID_PROFILE_DRAFT_KEY = 'monstir:kid-profile-draft';
 import { CreamBg } from '../components/CreamBg';
@@ -45,27 +46,27 @@ const LAVENDER_BG = '#EEE9FF';
 const AGE_RANGES = ['Ages 4–6', 'Ages 7–9', 'Ages 10–12', 'Ages 13+'];
 
 const AVATARS = [
-  require('../../assets/icons/kidProfile1.png'),
-  require('../../assets/icons/kidProfile2.png'),
-  require('../../assets/icons/kidProfile3.png'),
-  require('../../assets/icons/kidProfile4.png'),
-  require('../../assets/icons/kidProfile5.png'),
-  require('../../assets/icons/kidProfile6.png'),
-  require('../../assets/icons/kidProfile7.png'),
-  require('../../assets/icons/kidProfile8.png'),
-  require('../../assets/icons/kidProfile9.png'),
-  require('../../assets/icons/kidProfile10.png'),
-  require('../../assets/icons/kidProfile11.png'),
-  require('../../assets/icons/kidProfile12.png'),
-  require('../../assets/icons/kidProfile13.png'),
-  require('../../assets/icons/kidProfile14.png'),
-  require('../../assets/icons/kidProfile15.png'),
-  require('../../assets/icons/kidProfile16.png'),
-  require('../../assets/icons/kidProfile17.png'),
-  require('../../assets/icons/kidProfile18.png'),
-  require('../../assets/icons/kidProfile19.png'),
-  require('../../assets/icons/kidProfile20.png'),
-  require('../../assets/icons/kidProfile21.png'),
+  require('../../assets/icons/Avatars/kidProfile1.png'),
+  require('../../assets/icons/Avatars/kidProfile2.png'),
+  require('../../assets/icons/Avatars/kidProfile3.png'),
+  require('../../assets/icons/Avatars/kidProfile4.png'),
+  require('../../assets/icons/Avatars/kidProfile5.png'),
+  require('../../assets/icons/Avatars/kidProfile6.png'),
+  require('../../assets/icons/Avatars/kidProfile7.png'),
+  require('../../assets/icons/Avatars/kidProfile8.png'),
+  require('../../assets/icons/Avatars/kidProfile9.png'),
+  require('../../assets/icons/Avatars/kidProfile10.png'),
+  require('../../assets/icons/Avatars/kidProfile11.png'),
+  require('../../assets/icons/Avatars/kidProfile12.png'),
+  require('../../assets/icons/Avatars/kidProfile13.png'),
+  require('../../assets/icons/Avatars/kidProfile14.png'),
+  require('../../assets/icons/Avatars/kidProfile15.png'),
+  require('../../assets/icons/Avatars/kidProfile16.png'),
+  require('../../assets/icons/Avatars/kidProfile17.png'),
+  require('../../assets/icons/Avatars/kidProfile18.png'),
+  require('../../assets/icons/Avatars/kidProfile19.png'),
+  require('../../assets/icons/Avatars/kidProfile20.png'),
+  require('../../assets/icons/Avatars/kidProfile21.png'),
 ];
 
 export function getAvatarImage(idx: number) {
@@ -398,8 +399,6 @@ const CARD_GAP     = 16;
 const CARD_SNAP    = CARD_W + CARD_GAP;
 const CAROUSEL_PAD = (SCREEN_WIDTH - CARD_W) / 2;
 
-const ARROW = require('../../assets/arrow_icon.png');
-
 function StepMonsterCarousel({ onChoose, onBack }: {
   onChoose: (key: string) => void;
   onBack: () => void;
@@ -408,8 +407,6 @@ function StepMonsterCarousel({ onChoose, onBack }: {
   const scrollX  = useRef(new Animated.Value(0)).current;
   const bobAnim  = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<any>(null);
-  const { scaleAnim: leftScale, pressIn: leftPI, pressOut: leftPO } = useScaleAnimation({ toScale: 0.85 });
-  const { scaleAnim: rightScale, pressIn: rightPI, pressOut: rightPO } = useScaleAnimation({ toScale: 0.85 });
   const monster = STARTER_MONSTERS[activeIdx];
 
   useEffect(() => {
@@ -523,30 +520,22 @@ function StepMonsterCarousel({ onChoose, onBack }: {
         </Animated.ScrollView>
 
         {/* Left arrow */}
-        <TouchableOpacity
-          style={[s.arrowBtn, { left: 8 }, activeIdx === 0 && { opacity: 0.5 }]}
-          onPress={() => scrollTo(activeIdx - 1)}
-          onPressIn={leftPI} onPressOut={leftPO}
-          activeOpacity={1}
-          disabled={activeIdx === 0}
-        >
-          <Animated.View style={{ transform: [{ scale: leftScale }] }}>
-            <Image source={ARROW} style={[s.arrowIcon, { transform: [{ rotate: '180deg' }] }]} />
-          </Animated.View>
-        </TouchableOpacity>
+        <View style={[s.arrowBtn, { left: 8 }]}>
+          <ArrowButton
+            direction="left"
+            onPress={() => scrollTo(activeIdx - 1)}
+            disabled={activeIdx === 0}
+          />
+        </View>
 
         {/* Right arrow */}
-        <TouchableOpacity
-          style={[s.arrowBtn, { right: 8 }, activeIdx === STARTER_MONSTERS.length - 1 && { opacity: 0.5 }]}
-          onPress={() => scrollTo(activeIdx + 1)}
-          onPressIn={rightPI} onPressOut={rightPO}
-          activeOpacity={1}
-          disabled={activeIdx === STARTER_MONSTERS.length - 1}
-        >
-          <Animated.View style={{ transform: [{ scale: rightScale }] }}>
-            <Image source={ARROW} style={s.arrowIcon} />
-          </Animated.View>
-        </TouchableOpacity>
+        <View style={[s.arrowBtn, { right: 8 }]}>
+          <ArrowButton
+            direction="right"
+            onPress={() => scrollTo(activeIdx + 1)}
+            disabled={activeIdx === STARTER_MONSTERS.length - 1}
+          />
+        </View>
       </View>
 
       {/* Buttons */}
@@ -875,29 +864,11 @@ const s = StyleSheet.create({
   sheetRowLabelActive: { color: PURPLE },
   sheetCheck:      { fontSize: scale(17), color: PURPLE, fontFamily: 'Inter_700Bold' },
 
-  // Carousel arrow buttons
+  // Carousel arrow buttons — only positioning, appearance comes from ArrowButton
   arrowBtn: {
     position: 'absolute',
     top: '35%',
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.black,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
     zIndex: 10,
-  },
-  arrowIcon: {
-    width: 22,
-    height: 22,
-    resizeMode: 'contain',
   },
 
   // Choose monster screen — header

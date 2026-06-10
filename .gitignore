@@ -41,3 +41,6 @@ yarn-error.*
 /android
 .wrangler/
 assets/bosses/intros/*.mp4
+
+# Supabase CLI local state
+supabase/.temp/

@@ -372,7 +372,9 @@ function PickMonsterScreen({
         {/* ── Hero scene with arrows — negative margin breaks out of safe-area padding ── */}
         <View style={[s.heroWrap, { marginHorizontal: -20 }]}>
           {/* Arrows float above scene at zIndex 10 */}
-          <ArrowButton direction="left" onPress={prev} />
+          <View style={{ zIndex: 10 }}>
+            <ArrowButton direction="left" onPress={prev} />
+          </View>
 
           {/*
            * The bob wraps the whole scene so platform + monster float together,
