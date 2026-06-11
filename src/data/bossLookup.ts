@@ -18,7 +18,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "It hid under the couch. For years.",
     weakness: 'Sweeping',
     threat:   'Easy',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Lint Lurker.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Lint_Lurker.png'),
     image:    require('../../assets/bosses/boss=lintlurker.png'),
   },
   {
@@ -26,7 +26,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "It drips. It spreads. It never dries.",
     weakness: 'Wiping',
     threat:   'Easy',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Toothpaste Ooze.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Toothpaste_Ooze.png'),
     image:    require('../../assets/bosses/boss=toothpaste.png'),
   },
   {
@@ -42,7 +42,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "You kept adding to it. Now it fights back.",
     weakness: 'Organizing',
     threat:   'Medium',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The Pile.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The_Pile.png'),
     image:    require('../../assets/bosses/boss=pile.png'),
   },
   {
@@ -50,7 +50,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "He Collects It All. You Clean It Up.",
     weakness: 'Organizing',
     threat:   'Medium',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Junk Giant.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Junk_Giant.png'),
     image:    require('../../assets/bosses/boss=junkgiant.png'),
   },
   {
@@ -58,7 +58,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "Everything you left out. Now it's angry.",
     weakness: 'Folding',
     threat:   'Medium',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The Clatter.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The_Clatter.png'),
     image:    require('../../assets/bosses/boss=clatter.png'),
   },
   {
@@ -90,7 +90,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "The mess spilled over. There's no containing it.",
     weakness: 'Mopping',
     threat:   'Hard',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The Overflow.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The_Overflow.png'),
     image:    require('../../assets/bosses/boss=overflow.png'),
   },
   {
@@ -98,7 +98,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "She's been growing in the walls since last winter.",
     weakness: 'Scrubbing',
     threat:   'Extreme',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Mildew Queen.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Mildew_Queen.png'),
     image:    require('../../assets/bosses/boss=mildewqueen.png'),
   },
   {
@@ -114,7 +114,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "What's inside? Nobody checks. That's the problem.",
     weakness: 'Cleaning',
     threat:   'Extreme',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Void Fridge.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=Void_Fridge.png'),
     image:    require('../../assets/bosses/boss=voidfridge.png'),
   },
   {
@@ -122,7 +122,7 @@ export const BOSS_LOOKUP: BossDisplayData[] = [
     tagline:  "It was never cleaned. It never forgot.",
     weakness: 'Consistency',
     threat:   'Extreme',
-    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The Forgotten.png'),
+    jar:      require('../../assets/battleui/trophyitems/bossjars/boss=The_Forgotten.png'),
     image:    require('../../assets/bosses/boss=forgotten.png'),
   },
 ];

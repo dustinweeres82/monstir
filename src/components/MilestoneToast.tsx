@@ -57,24 +57,25 @@ export function MilestoneToast({ milestone, kidName, onView, onDismiss }: Milest
       ]}
       pointerEvents="box-none"
     >
-      {/* ── Small ── */}
+      {/* ── Small ── (tap anywhere to dismiss; "View →" still routes) */}
       {milestone.size === 'small' && (
-        <View style={s.small}>
+        <TouchableOpacity style={s.small} onPress={dismiss} activeOpacity={0.9}>
           <Text style={s.smallIcon}>{milestone.icon}</Text>
           <View style={s.smallInfo}>
             {kidName ? <Text style={s.attribution}>{kidName} earned</Text> : null}
             <Text style={s.smallName}>{milestone.name}</Text>
             <Text style={s.smallXp}>+{milestone.xpReward} XP</Text>
           </View>
-          <TouchableOpacity onPress={() => { dismiss(); onView(); }} activeOpacity={0.7}>
+          <TouchableOpacity onPress={() => { dismiss(); onView(); }} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Text style={s.viewLink}>View →</Text>
           </TouchableOpacity>
-        </View>
+          <Text style={s.closeX}>✕</Text>
+        </TouchableOpacity>
       )}
 
-      {/* ── Medium ── */}
+      {/* ── Medium ── (tap anywhere to dismiss; "View →" still routes) */}
       {milestone.size === 'medium' && (
-        <View style={[s.medium]}>
+        <TouchableOpacity style={s.medium} onPress={dismiss} activeOpacity={0.9}>
           <View style={s.mediumLeft}>
             <Text style={s.mediumIcon}>{milestone.icon}</Text>
           </View>
@@ -84,10 +85,11 @@ export function MilestoneToast({ milestone, kidName, onView, onDismiss }: Milest
             <Text style={s.mediumTagline}>{milestone.tagline}</Text>
             <Text style={s.smallXp}>+{milestone.xpReward} XP</Text>
           </View>
-          <TouchableOpacity onPress={() => { dismiss(); onView(); }} activeOpacity={0.7}>
+          <TouchableOpacity onPress={() => { dismiss(); onView(); }} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Text style={s.viewLink}>View →</Text>
           </TouchableOpacity>
-        </View>
+          <Text style={s.closeX}>✕</Text>
+        </TouchableOpacity>
       )}
 
       {/* ── Large ── */}
@@ -96,6 +98,7 @@ export function MilestoneToast({ milestone, kidName, onView, onDismiss }: Milest
           {/* Purple header */}
           <View style={s.largeHeader}>
             <Text style={s.largeSparkle}>✦</Text>
+            <Text style={s.largeCloseX}>✕</Text>
             <Text style={s.largeIcon}>{milestone.icon}</Text>
             {kidName ? <Text style={s.largeAttribution}>{kidName} earned</Text> : null}
             <Text style={s.largeName}>{milestone.name}</Text>
@@ -154,6 +157,8 @@ const s = StyleSheet.create({
   smallName: { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.base, color: BORDER },
   smallXp:   { fontFamily: nunitoFamily.semibold, fontSize: fontSize.xs, color: colors.muted },
   viewLink:  { fontFamily: nunitoFamily.bold, fontSize: fontSize.sm, color: PURPLE },
+  closeX:    { fontFamily: nunitoFamily.bold, fontSize: fontSize.base, color: colors.muted, marginLeft: spacing.xs },
+  largeCloseX: { position: 'absolute', top: 10, right: 14, fontSize: fontSize.lg, color: 'rgba(255,255,255,0.85)', zIndex: 2 },
 
   // Medium
   medium: {
