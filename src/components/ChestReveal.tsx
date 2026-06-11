@@ -33,6 +33,9 @@ export interface ChestRevealProps {
   onDone: () => void;
   kidName: string;             // owning kid profile (local per-kid storage)
   kidDbId?: string | null;     // Supabase kid ID for DB persistence
+  /** Fallback when kidDbId isn't resolved yet: hand the DB write up to be
+   *  queued + retried once the kid row id is available (Gap 6). */
+  onQueueDbWrite?: (kidName: string, collectibleId: string, rarity: string) => void;
 }
 
 // ─── Chest frame sequences ────────────────────────────────────────────────────
@@ -137,7 +140,7 @@ function TierMeter({ activeTier }: { activeTier: ChestTier }) {
 
 // ─── ChestReveal component ────────────────────────────────────────────────────
 
-export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidName, kidDbId }: ChestRevealProps) {
+export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidName, kidDbId, onQueueDbWrite }: ChestRevealProps) {
   const [phase, setPhase]       = useState<Phase>('preOpen');
   const [tapCount, setTapCount] = useState(0);
   const [saved, setSaved]       = useState(false);
@@ -231,11 +234,14 @@ export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDon
     };
     saveCollectible(kidName, entry).catch(() => {});
 
-    // Also save to Supabase
+    // Also save to Supabase — if the kid row id isn't ready, hand it up to be
+    // queued + retried so the durable copy isn't silently dropped (Gap 6).
     if (kidDbId) {
       saveCollectibleToDb({ kidId: kidDbId, collectibleId: collectible.key, rarity: collectible.rarity }).catch(e => console.warn('[DB] saveCollectibleToDb error:', e));
+    } else {
+      onQueueDbWrite?.(kidName, collectible.key, collectible.rarity);
     }
-  }, [phase, saved, collectible, weekLabel, kidName, kidDbId]);
+  }, [phase, saved, collectible, weekLabel, kidName, kidDbId, onQueueDbWrite]);
 
   const tierColor = TIER_COLORS[tier];
   const insets = useSafeAreaInsets();

@@ -27,10 +27,11 @@ import { ParentOnboarding } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
 import { TrophyRoom } from './src/screens/TrophyRoom';
 import { ParentMilestoneDetail } from './src/screens/ParentMilestoneDetail';
-import { saveBossCapture, mergeBossCaptures, type BossCaptureEntry } from './src/storage/bossCaptures';
+import { saveBossCapture, getBossCaptures, mergeBossCaptures, type BossCaptureEntry } from './src/storage/bossCaptures';
 import { getBossDisplay } from './src/data/bossLookup';
 import { getCollectibles, mergeCollectibles, type CollectibleEntry } from './src/storage/collectibles';
 import { earnMilestone, getEarnedMilestones, mergeMilestones, PARENT_OWNER, type EarnedMilestone } from './src/storage/milestones';
+import { evalKidMilestones, evalParentMilestones } from './src/lib/milestoneEval';
 import { getMilestone, MILESTONES, type MilestoneDef } from './src/data/milestones';
 import { MilestoneToast } from './src/components/MilestoneToast';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -65,7 +66,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, savePayoutToDb, updateKidStats, updateKid, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword } from './src/lib/db';
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -83,7 +84,7 @@ type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' |
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type ParentTab    = 'home' | 'chores' | 'money' | 'settings';
-type ParentScreen = 'parentHome' | 'chores' | 'choreLibrary' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings' | 'parentPayout' | 'moneyLedger' | 'parentMilestones';
+type ParentScreen = 'parentHome' | 'chores' | 'choreLibrary' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings' | 'parentPayout' | 'moneyLedger' | 'parentMilestones' | 'kidMilestones';
 type ViewMode     = 'kid' | 'parent';
 
 interface Chore   { id: ChoreId; name: string; icon: string | number; bg: string; xp: number; multiplier: number; }
@@ -1320,9 +1321,9 @@ function Header({ title, coins, showCoins = true }: { title: string; coins?: num
 }
 
 const NAV_TABS: { id: Tab; label: string; icon: ReturnType<typeof require> }[] = [
-  { id: 'home',     label: 'Monsters', icon: require('./assets/icons/Property 1=navHome.png')   },
+  { id: 'home',     label: 'Monsters', icon: require('./assets/icons/navHome.png')   },
   { id: 'world',    label: 'World',    icon: require('./assets/icons/navWorld.png') },
-  { id: 'wallet',   label: 'Wallet',   icon: require('./assets/icons/Property 1=navWallet.png') },
+  { id: 'wallet',   label: 'Wallet',   icon: require('./assets/icons/navWallet.png') },
   { id: 'trophies', label: 'Trophies', icon: require('./assets/icons/navTrophy.png') },
 ];
 
@@ -5863,6 +5864,21 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   const [payingKid, setPayingKid] = useState<string | null>(null);
   const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
   useEffect(() => { getEarnedMilestones(PARENT_OWNER).then(setEarnedMilestones); }, []);
+  // Recent kid achievements (most-recent first) for the dashboard card.
+  const [recentKidMilestones, setRecentKidMilestones] = useState<{ kidName: string; avatarIdx: number; def: MilestoneDef; earnedAt: string }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const all = await Promise.all(kidProfiles.map(async k => {
+        const earned = await getEarnedMilestones(k.name);
+        return earned
+          .map(e => { const def = getMilestone(e.id); return def ? { kidName: k.name, avatarIdx: k.avatarIdx, def, earnedAt: e.earnedAt } : null; })
+          .filter((x): x is { kidName: string; avatarIdx: number; def: MilestoneDef; earnedAt: string } => x != null);
+      }));
+      if (alive) setRecentKidMilestones(all.flat().sort((a, b) => b.earnedAt.localeCompare(a.earnedAt)));
+    })();
+    return () => { alive = false; };
+  }, [kidProfiles]);
   const parentMilestoneDefs = MILESTONES.filter(m => m.audience === 'parent');
   const earnedIds = new Set(earnedMilestones.map(m => m.id));
   // Newest earned = show yellow dot
@@ -6178,6 +6194,38 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                 );
               })}
             </ScrollView>
+          </View>
+        </View>
+
+        {/* ── 2c. Kids' Achievements ───────────────────────────────────────── */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, ...SOLID_SHADOW }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: recentKidMilestones.length > 0 ? 12 : 0 }}>
+              <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Kids' achievements</Text>
+              <TouchableOpacity onPress={() => onNav('kidMilestones')} activeOpacity={0.7}>
+                <Text style={{ fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: PURPLE }}>See all ›</Text>
+              </TouchableOpacity>
+            </View>
+            {recentKidMilestones.length === 0 ? (
+              <Text style={{ fontSize: scale(13), fontFamily: 'Inter_400Regular', color: '#ABABAB', marginTop: 8 }}>
+                Your kids haven't earned any milestones yet — they'll appear here as they do.
+              </Text>
+            ) : (
+              recentKidMilestones.slice(0, 3).map((e, i) => (
+                <View key={`${e.kidName}-${e.def.id}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 }}>
+                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', flexShrink: 0 }}>
+                    {e.def.image
+                      ? <Image source={e.def.image} style={{ width: 24, height: 24 }} resizeMode="contain" />
+                      : <Text style={{ fontSize: scale(18) }}>{e.def.icon}</Text>}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }} numberOfLines={1}>{e.def.name}</Text>
+                    <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: PURPLE }}>{e.kidName}</Text>
+                  </View>
+                  <Text style={{ fontSize: scale(11), fontFamily: 'Inter_600SemiBold', color: '#ABABAB', flexShrink: 0 }}>{timeAgo(e.earnedAt)}</Text>
+                </View>
+              ))
+            )}
           </View>
         </View>
 
@@ -7406,6 +7454,7 @@ function ParentSettingsScreen({ onNav, baseRate, onAddKid, onEditKid, kids, kidA
         <Text style={ps.sectionLabel}>Progress</Text>
         <View style={ps.group}>
           <SettingsRow iconBg="#6B35F0" iconEmoji="🏅" title="Your milestones" subtitle="Badges you've earned as a parent" onPress={() => onNav('parentMilestones')} />
+          <SettingsRow iconBg="#7B3FF2" iconEmoji="🌟" title="Kids' achievements" subtitle="Milestones your kids have earned" onPress={() => onNav('kidMilestones')} />
         </View>
 
         {/* Account */}
@@ -7511,6 +7560,111 @@ function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
             {locked.map(m => renderRow(m))}
           </>
         )}
+      </ScrollView>
+    </CreamBg>
+  );
+}
+
+// ─── Parent view of Kids' Milestones (aggregated, attributed feed) ─────────────
+
+interface KidMilestoneEvent { kidName: string; avatarIdx: number; def: MilestoneDef; earnedAt: string; }
+
+/** Relative "time ago" label for the achievement feed. */
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const day = 86_400_000;
+  if (diff < day)        return 'Today';
+  if (diff < 2 * day)    return 'Yesterday';
+  if (diff < 7 * day)    return `${Math.floor(diff / day)}d ago`;
+  if (diff < 30 * day)   return `${Math.floor(diff / (7 * day))}w ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
+  kidProfiles: { name: string; avatarIdx: number }[];
+  onBack: () => void;
+}) {
+  const [events, setEvents] = useState<KidMilestoneEvent[]>([]);
+  const [filter, setFilter] = useState<string>('All');
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const all = await Promise.all(kidProfiles.map(async k => {
+        const earned = await getEarnedMilestones(k.name);
+        return earned
+          .map(e => {
+            const def = getMilestone(e.id);
+            return def ? { kidName: k.name, avatarIdx: k.avatarIdx, def, earnedAt: e.earnedAt } : null;
+          })
+          .filter((x): x is KidMilestoneEvent => x != null);
+      }));
+      if (!alive) return;
+      const merged = all.flat().sort((a, b) => b.earnedAt.localeCompare(a.earnedAt));
+      setEvents(merged);
+    })();
+    return () => { alive = false; };
+  }, [kidProfiles]);
+
+  const shown = filter === 'All' ? events : events.filter(e => e.kidName === filter);
+
+  return (
+    <CreamBg>
+      <View style={p.screenHeader}>
+        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+          <Text style={p.backBtnText}>←</Text>
+        </TouchableOpacity>
+        <Text style={p.screenTitle}>Kids' Achievements</Text>
+        <View style={p.backBtn} />
+      </View>
+
+      {/* Filter chips: All + each kid */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 4 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+        {['All', ...kidProfiles.map(k => k.name)].map(name => {
+          const active = filter === name;
+          return (
+            <TouchableOpacity key={name} onPress={() => setFilter(name)} activeOpacity={0.8} style={{
+              backgroundColor: active ? PURPLE : '#FFFFFF',
+              borderRadius: 999, borderWidth: 2, borderColor: '#1A1A1A',
+              paddingHorizontal: 16, paddingVertical: 8,
+            }}>
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(13), color: active ? '#FFFFFF' : '#1A1A1A' }}>{name}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120 }}>
+        {shown.length === 0 ? (
+          <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+            <Text style={{ fontSize: scale(40), marginBottom: 12 }}>🏅</Text>
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 4 }}>No achievements yet</Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(13), color: '#ABABAB', textAlign: 'center' }}>
+              As your kids complete chores, win battles, and hit streaks, their milestones show up here.
+            </Text>
+          </View>
+        ) : shown.map((e, i) => (
+          <View key={`${e.kidName}-${e.def.id}-${i}`} style={{
+            flexDirection: 'row', alignItems: 'center', gap: 14,
+            backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A',
+            padding: 14, marginBottom: 10,
+          }}>
+            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', flexShrink: 0 }}>
+              {e.def.image
+                ? <Image source={e.def.image} style={{ width: 32, height: 32 }} resizeMode="contain" />
+                : <Text style={{ fontSize: scale(24) }}>{e.def.icon}</Text>}
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                <Image source={getAvatarImage(e.avatarIdx)} style={{ width: 18, height: 18, borderRadius: 9 }} />
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: PURPLE }}>{e.kidName}</Text>
+              </View>
+              <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(15), color: '#1A1A1A' }}>{e.def.name}</Text>
+              <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(13), color: '#ABABAB', lineHeight: 17 }}>{e.def.tagline}</Text>
+            </View>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(11), color: '#3B6D11', flexShrink: 0 }}>{timeAgo(e.earnedAt)}</Text>
+          </View>
+        ))}
       </ScrollView>
     </CreamBg>
   );
@@ -8721,24 +8875,43 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
 
 // ─── Landing Screen ───────────────────────────────────────────────────────────
 
-function LandingScreen({ onLogin, onCreateAccount }: { onLogin: (email?: string, password?: string) => void; onCreateAccount: () => void }) {
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [showPw, setShowPw]     = useState(false);
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+// ─── Social auth button (MON-54) ───────────────────────────────────────────────
+// Standard Monstir button treatment (3px ink border, 18px radius, 0px 6px 0px
+// solid shadow). Apple + Google must be displayed at equal prominence/size per
+// App Store Guideline 4.8. Native sign-in wiring is gated on console setup +
+// EAS dev builds, so these render as disabled "coming soon" placeholders for now.
+function SocialAuthButton({ provider, disabled }: { provider: 'apple' | 'google'; disabled?: boolean }) {
+  const isApple = provider === 'apple';
+  return (
+    <View
+      style={[
+        socialBtn.base,
+        isApple ? socialBtn.apple : socialBtn.google,
+        disabled && { opacity: 0.55 },
+      ]}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        {isApple
+          ? <Text style={{ fontSize: scale(20), color: '#FFFFFF', marginTop: -2 }}></Text>
+          : <Text style={{ fontSize: scale(18), color: '#4285F4', fontFamily: 'Inter_900Black' }}>G</Text>}
+        <Text style={[socialBtn.label, { color: isApple ? '#FFFFFF' : '#1A1A1A' }]}>
+          Sign in with {isApple ? 'Apple' : 'Google'}
+        </Text>
+      </View>
+      {disabled && (
+        <View style={socialBtn.soonPill}>
+          <Text style={socialBtn.soonText}>Coming soon</Text>
+        </View>
+      )}
+    </View>
+  );
+}
 
-  const handleLogin = async () => {
-    if (!email.trim() && !password) { onLogin(); return; }
-    if (!email.trim() || !password) { setError('Please enter your email and password.'); return; }
-    setError('');
-    setLoading(true);
-    const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
-    setLoading(false);
-    if (authError) { setError(authError.message); return; }
-    onLogin(email, password);
-  };
-
+// Screen 2 (MON-54): social-first sign-in/sign-up. Styling is final — Slime Lime
+// background + Monstir logo at top are kept; only contents/behavior change here.
+function LandingScreen({ onEmailPath }: { onEmailPath: () => void }) {
+  // On iOS, Apple is listed first per platform convention; Google leads elsewhere.
+  const appleFirst = Platform.OS === 'ios';
   return (
     <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
 
@@ -8762,51 +8935,57 @@ function LandingScreen({ onLogin, onCreateAccount }: { onLogin: (email?: string,
 
         <Image source={require('./assets/monstirLogo.png')} style={{ width: 280, height: 103, marginBottom: 36 }} resizeMode="contain" />
 
-        <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>Welcome back!</Text>
-        <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>Log in to your Monstir account.</Text>
+        <Text style={{ fontSize: scale(28), fontFamily: 'FredokaOne_400Regular', color: '#1A1A1A', textAlign: 'center', marginBottom: 8 }}>Sign in to continue</Text>
+        <Text style={{ fontSize: scale(16), fontFamily: 'Nunito_600SemiBold', color: '#4A4A4A', textAlign: 'center', marginBottom: 32 }}>So your family's monsters are always safe.</Text>
 
-        {/* Email */}
-        <TextInput
-          style={{ width: '100%', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18, fontSize: scale(16), color: '#1A1A1A', marginBottom: 12 }}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="Email"
-          placeholderTextColor="#C0BEB8"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          returnKeyType="next"
-        />
-
-        {/* Password */}
-        <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18, marginBottom: 20 }}>
-          <TextInput
-            style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Password"
-            placeholderTextColor="#C0BEB8"
-            secureTextEntry={!showPw}
-            returnKeyType="done"
-            onSubmitEditing={handleLogin}
-          />
-          <TouchableOpacity onPress={() => setShowPw(v => !v)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={{ fontSize: scale(16), color: '#ABABAB' }}>{showPw ? '🙈' : '👁'}</Text>
-          </TouchableOpacity>
+        {/* Social providers — equal prominence, Apple first on iOS */}
+        <View style={{ width: '100%', gap: 14 }}>
+          {appleFirst ? (
+            <>
+              <SocialAuthButton provider="apple"  disabled />
+              <SocialAuthButton provider="google" disabled />
+            </>
+          ) : (
+            <>
+              <SocialAuthButton provider="google" disabled />
+              <SocialAuthButton provider="apple"  disabled />
+            </>
+          )}
         </View>
 
-        {/* Error */}
-        {!!error && <Text style={{ color: '#ef4444', fontSize: scale(13), textAlign: 'center', fontFamily: 'Inter_400Regular', marginBottom: 8 }}>{error}</Text>}
-
-        {/* Log in */}
-        <Button label={loading ? 'Logging in…' : 'Log in'} onPress={handleLogin} style={{ marginBottom: 14 }} />
-
-        {/* Create an account */}
-        <Button label="Create an account" onPress={onCreateAccount} variant="secondary" />
+        {/* Email fallback — framed to steer Google/Apple holders to one-tap */}
+        <TouchableOpacity onPress={onEmailPath} activeOpacity={0.7} style={{ marginTop: 28 }} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <Text style={{ fontSize: scale(15), fontFamily: 'Nunito_700Bold', color: '#1A1A1A', textDecorationLine: 'underline' }}>
+            I don't have a Google or Apple account
+          </Text>
+        </TouchableOpacity>
 
       </View>
     </View>
   );
 }
+
+const socialBtn = StyleSheet.create({
+  base: {
+    width: '100%',
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: '#1A1A1A',
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios:     { shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 0 },
+      android: { elevation: 6 },
+      default: {},
+    }),
+  },
+  apple:  { backgroundColor: '#1A1A1A' },
+  google: { backgroundColor: '#FFFFFF' },
+  label:  { fontSize: scale(17), fontFamily: 'Inter_700Bold' },
+  soonPill: { marginTop: 6, backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: 100, paddingHorizontal: 10, paddingVertical: 2 },
+  soonText: { fontSize: scale(11), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
+});
 
 // ─── Login Screen ─────────────────────────────────────────────────────────────
 
@@ -8814,15 +8993,16 @@ interface LoginScreenProps {
   onBack: () => void;
   onSuccess: () => void;
   onSignUp: () => void;
+  onForgotPassword: () => void;
+  onUnconfirmed: (email: string) => void;
 }
 
-function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
+function LoginScreen({ onBack, onSuccess, onSignUp, onForgotPassword, onUnconfirmed }: LoginScreenProps) {
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError]               = useState('');
   const [loading, setLoading]           = useState(false);
-  const { scaleAnim: googleScale, pressIn: googlePI, pressOut: googlePO } = useScaleAnimation({ toScale: 0.96 });
 
   const handleLogin = async () => {
     // Dev shortcut: empty fields → skip auth
@@ -8830,97 +9010,125 @@ function LoginScreen({ onBack, onSuccess, onSignUp }: LoginScreenProps) {
     if (!email.trim() || !password) { setError('Please enter your email and password.'); return; }
     setError('');
     setLoading(true);
-    const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+    const trimmed = email.trim().toLowerCase();
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: trimmed, password });
     setLoading(false);
-    if (authError) { setError(authError.message); return; }
+    if (authError) {
+      // Unconfirmed email → friendly check-your-email state, not a generic failure (MON-54).
+      if (/email not confirmed/i.test(authError.message)) { onUnconfirmed(trimmed); return; }
+      setError(authError.message);
+      return;
+    }
     onSuccess();
   };
 
+  const inputStyle = {
+    width: '100%' as const,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 100,
+    borderWidth: 2,
+    borderColor: '#1A1A1A',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    fontSize: scale(16),
+    color: '#1A1A1A',
+  };
+
   return (
-    <CreamBg>
-      {/* Decorative elements */}
-      <Text style={auth.leafDecor}>🌿</Text>
-      <View style={auth.purpleBlob} />
-      <Text style={[auth.sparkle, { top: 120, right: 60 }]}>⭐</Text>
-      <Text style={[auth.sparkle, { top: 200, left: 40 }]}>✦</Text>
-      <Text style={[auth.sparkle, { bottom: 200, right: 40 }]}>⭐</Text>
+    <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
 
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {/* Back button */}
-        <TouchableOpacity onPress={onBack} style={auth.backBtn} activeOpacity={0.7}>
-          <Text style={auth.backBtnText}>←</Text>
-        </TouchableOpacity>
+      {/* ── Background texture ── */}
+      <Image
+        source={require('./assets/appBGsignup.png')}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        resizeMode="contain"
+      />
 
-        <Text style={auth.title}>Welcome back!</Text>
-        <Text style={auth.subtitle}>Log in to your Monstir account.</Text>
+      {/* ── Sparkle decorations ── */}
+      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: scale(28), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: scale(24), color: '#6B35F0'             }}>✦</Text>
+      <View style={{ position: 'absolute', top: 198, right: 28, width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+      <View style={{ position: 'absolute', top: 172, left: 118, width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF6B2B' }} />
+      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: scale(22), color: '#F5C518'          }}>✦</Text>
+      <View style={{ position: 'absolute', bottom: 210, right: 76, width: 5, height: 5, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
 
-        <View style={{ gap: 14, marginTop: 28 }}>
-          {/* Email input */}
-          <View style={auth.inputRow}>
-            <Text style={auth.inputIcon}>📧</Text>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 28, paddingTop: 56, paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Back button */}
+          <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ marginBottom: 16, alignSelf: 'flex-start' }}>
+            <Text style={{ fontSize: scale(24), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>←</Text>
+          </TouchableOpacity>
+
+          {/* Logo */}
+          <Image
+            source={require('./assets/monstirLogo.png')}
+            style={{ width: 280, height: 103, alignSelf: 'center', marginBottom: 32 }}
+            resizeMode="contain"
+          />
+
+          {/* Heading */}
+          <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>
+            Welcome back!
+          </Text>
+          <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>
+            Log in to your Monstir account.
+          </Text>
+
+          <View style={{ gap: 12 }}>
+            {/* Email */}
             <TextInput
-              style={auth.textInput}
+              style={inputStyle}
               value={email}
               onChangeText={setEmail}
               placeholder="Email"
               placeholderTextColor="#C0BEB8"
               keyboardType="email-address"
               autoCapitalize="none"
+              returnKeyType="next"
             />
-          </View>
 
-          {/* Password input */}
-          <View style={auth.inputRow}>
-            <Text style={auth.inputIcon}>🔒</Text>
-            <TextInput
-              style={[auth.textInput, { flex: 1 }]}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              placeholderTextColor="#C0BEB8"
-              secureTextEntry={!showPassword}
-            />
-            <TouchableOpacity onPress={() => setShowPassword(v => !v)} activeOpacity={0.7} style={{ paddingHorizontal: 8 }}>
-              <Text style={{ fontSize: scale(18) }}>{showPassword ? '🙈' : '👁'}</Text>
+            {/* Password */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18 }}>
+              <TextInput
+                style={{ flex: 1, fontSize: scale(16), color: '#1A1A1A' }}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor="#C0BEB8"
+                secureTextEntry={!showPassword}
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+              />
+              <TouchableOpacity onPress={() => setShowPassword(v => !v)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={{ fontSize: scale(16), color: '#ABABAB' }}>{showPassword ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Forgot password */}
+            <TouchableOpacity style={{ alignSelf: 'flex-end' }} activeOpacity={0.7} onPress={onForgotPassword}>
+              <Text style={{ fontSize: scale(14), color: '#6B35F0', fontFamily: 'Inter_700Bold' }}>Forgot password?</Text>
             </TouchableOpacity>
+
+            {/* Validation error */}
+            {!!error && (
+              <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontFamily: 'Inter_600SemiBold', marginTop: -4 }}>
+                {error}
+              </Text>
+            )}
+
+            {/* Log in button */}
+            <Button label={loading ? 'Logging in…' : 'Log in'} onPress={handleLogin} style={{ marginTop: 8 }} />
+
+            {/* Sign up link */}
+            <Button label="Create an account" onPress={onSignUp} variant="secondary" />
           </View>
-
-          {/* Forgot password */}
-          <TouchableOpacity style={{ alignSelf: 'flex-end' }} activeOpacity={0.7}>
-            <Text style={{ fontSize: scale(14), color: '#6B35F0', fontFamily: 'Inter_600SemiBold' }}>Forgot password?</Text>
-          </TouchableOpacity>
-
-          {/* Error message */}
-          {!!error && <Text style={{ color: '#ef4444', fontSize: scale(13), textAlign: 'center', fontFamily: 'Inter_400Regular' }}>{error}</Text>}
-
-          {/* Log in button */}
-          <Button label={loading ? 'Logging in…' : 'Log in'} onPress={handleLogin} />
-
-          {/* Divider */}
-          <View style={auth.dividerRow}>
-            <View style={auth.dividerLine} />
-            <Text style={auth.dividerText}>or</Text>
-            <View style={auth.dividerLine} />
-          </View>
-
-          {/* Google button */}
-          <TouchableOpacity style={auth.googleBtn} onPressIn={googlePI} onPressOut={googlePO} activeOpacity={1}>
-            <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, transform: [{ scale: googleScale }] }}>
-              <Text style={{ color: '#4285F4', fontFamily: 'Inter_900Black', fontSize: scale(18) }}>G</Text>
-              <Text style={auth.googleBtnText}>Continue with Google</Text>
-            </Animated.View>
-          </TouchableOpacity>
-
-          {/* Sign up link */}
-          <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 4 }}>
-            <Text style={{ fontSize: scale(14), color: '#ABABAB' }}>Don't have an account?</Text>
-            <TouchableOpacity onPress={onSignUp} activeOpacity={0.7}>
-              <Text style={{ fontSize: scale(14), color: '#6B35F0', fontFamily: 'Inter_700Bold' }}>Sign up</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </CreamBg>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -8932,11 +9140,15 @@ interface SignupScreenProps {
   onBack: () => void;
   onSuccess: (user: SessionUser) => void;
   onLogin: () => void;
+  /** Confirmation required → signUp returned a null session; route to Check Your Email (MON-54). */
+  onConfirmPending: (user: SessionUser) => void;
+  initialName?: string;
+  initialEmail?: string;
 }
 
-function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
-  const [name, setName]                       = useState('');
-  const [email, setEmail]                     = useState('');
+function SignupScreen({ onBack, onSuccess, onLogin, onConfirmPending, initialName = '', initialEmail = '' }: SignupScreenProps) {
+  const [name, setName]                       = useState(initialName);
+  const [email, setEmail]                     = useState(initialEmail);
   const [password, setPassword]               = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword]       = useState(false);
@@ -8957,14 +9169,19 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
     }
     setError('');
     setLoading(true);
-    const { error: authError } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName  = name.trim();
+    const { data, error: authError } = await supabase.auth.signUp({
+      email: cleanEmail,
       password,
-      options: { data: { name: name.trim() } },
+      options: { data: { name: cleanName } },
     });
     setLoading(false);
     if (authError) { setError(authError.message); return; }
-    onSuccess({ name: name.trim(), email: email.trim().toLowerCase() });
+    // With email confirmation on, signUp returns a null session — never enter the
+    // app shell pre-confirmation. Route to Check Your Email instead (MON-54).
+    if (!data.session) { onConfirmPending({ name: cleanName, email: cleanEmail }); return; }
+    onSuccess({ name: cleanName, email: cleanEmail });
   };
 
   const inputStyle = {
@@ -9099,9 +9316,197 @@ function SignupScreen({ onBack, onSuccess, onLogin }: SignupScreenProps) {
   );
 }
 
+// ─── Check Your Email (MON-54) ──────────────────────────────────────────────────
+// Reused by both the email-signup confirmation flow and the forgot-password flow
+// via the `mode` prop. Empty-state tone is anticipation, not limbo.
+function CheckEmailScreen({ email, mode, onBack }: {
+  email: string;
+  mode: 'confirm' | 'reset';
+  onBack: () => void;
+}) {
+  const [cooldown, setCooldown] = useState(0);
+  const [status, setStatus]     = useState('');
+  const [sending, setSending]   = useState(false);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const handleResend = async () => {
+    if (cooldown > 0 || sending) return;
+    setStatus('');
+    setSending(true);
+    const { error } = mode === 'confirm'
+      ? await supabase.auth.resend({ type: 'signup', email })
+      : await supabase.auth.resetPasswordForEmail(email, { redirectTo: RESET_PASSWORD_REDIRECT });
+    setSending(false);
+    if (error) { setStatus(error.message); return; }
+    setStatus('Sent! Check your inbox.');
+    setCooldown(30);   // throttle resends to prevent spam
+  };
+
+  const body = mode === 'confirm'
+    ? `We sent a confirmation link to ${email}. Tap it to verify your account, then come back and log in.`
+    : `If an account exists for ${email}, we've sent a link to reset your password. Open it to choose a new one.`;
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
+
+      {/* ── Background texture ── */}
+      <Image
+        source={require('./assets/appBGsignup.png')}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        resizeMode="contain"
+      />
+
+      {/* ── Sparkle decorations ── */}
+      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: scale(28), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: scale(24), color: '#6B35F0'             }}>✦</Text>
+      <View style={{ position: 'absolute', top: 198, right: 28, width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+      <View style={{ position: 'absolute', top: 172, left: 118, width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF6B2B' }} />
+      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: scale(22), color: '#F5C518'          }}>✦</Text>
+      <View style={{ position: 'absolute', bottom: 210, right: 76, width: 5, height: 5, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+
+      <ScrollView
+        contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 28, paddingTop: 56, paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Back button */}
+        <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ marginBottom: 16, alignSelf: 'flex-start' }}>
+          <Text style={{ fontSize: scale(24), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>←</Text>
+        </TouchableOpacity>
+
+        <View style={{ alignItems: 'center', marginTop: 24 }}>
+          <Text style={{ fontSize: scale(72), marginBottom: 16 }}>📬</Text>
+          <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>Check your email!</Text>
+          <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginTop: 4, lineHeight: scale(22) }}>{body}</Text>
+        </View>
+
+        <View style={{ gap: 14, marginTop: 32 }}>
+          {!!status && (
+            <Text style={{ textAlign: 'center', fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: status.startsWith('Sent') ? '#1A6B1A' : '#E53935' }}>
+              {status}
+            </Text>
+          )}
+
+          <Button
+            label={cooldown > 0 ? `Resend in ${cooldown}s` : sending ? 'Sending…' : 'Resend email'}
+            onPress={handleResend}
+            disabled={cooldown > 0 || sending}
+          />
+
+          <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ alignSelf: 'center', marginTop: 4 }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={{ fontSize: scale(14), color: '#6B35F0', fontFamily: 'Inter_700Bold' }}>
+              {mode === 'confirm' ? 'Wrong email? Go back' : 'Back to log in'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─── Forgot Password — in-app request screen (MON-54) ────────────────────────────
+function ForgotPasswordScreen({ onBack, onSent }: { onBack: () => void; onSent: (email: string) => void }) {
+  const [email, setEmail]     = useState('');
+  const [error, setError]     = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!email.trim()) { setError('Please enter your email.'); return; }
+    setError('');
+    setLoading(true);
+    const trimmed = email.trim().toLowerCase();
+    // Neutral outcome regardless of whether an account/password identity exists —
+    // don't reveal which providers an email uses (MON-54 edge cases).
+    const { error: authError } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo: RESET_PASSWORD_REDIRECT });
+    setLoading(false);
+    if (authError) { setError(authError.message); return; }
+    onSent(trimmed);
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
+
+      {/* ── Background texture ── */}
+      <Image
+        source={require('./assets/appBGsignup.png')}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        resizeMode="contain"
+      />
+
+      {/* ── Sparkle decorations ── */}
+      <Text style={{ position: 'absolute', top: 130, left: 28,  fontSize: scale(28), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>✦</Text>
+      <Text style={{ position: 'absolute', top: 108, right: 44, fontSize: scale(24), color: '#6B35F0'             }}>✦</Text>
+      <View style={{ position: 'absolute', top: 198, right: 28, width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+      <View style={{ position: 'absolute', top: 172, left: 118, width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF6B2B' }} />
+      <Text style={{ position: 'absolute', bottom: 168, right: 28, fontSize: scale(22), color: '#F5C518'          }}>✦</Text>
+      <View style={{ position: 'absolute', bottom: 210, right: 76, width: 5, height: 5, borderRadius: 3, backgroundColor: '#1A1A1A' }} />
+
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 28, paddingTop: 56, paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Back button */}
+          <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ marginBottom: 16, alignSelf: 'flex-start' }}>
+            <Text style={{ fontSize: scale(24), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>←</Text>
+          </TouchableOpacity>
+
+          {/* Logo */}
+          <Image
+            source={require('./assets/monstirLogo.png')}
+            style={{ width: 280, height: 103, alignSelf: 'center', marginBottom: 32 }}
+            resizeMode="contain"
+          />
+
+          {/* Heading */}
+          <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center', marginBottom: 6 }}>
+            Forgot password?
+          </Text>
+          <Text style={{ fontSize: scale(16), color: '#4A4A4A', textAlign: 'center', marginBottom: 28 }}>
+            Enter your email and we'll send you a link to reset it.
+          </Text>
+
+          <View style={{ gap: 12 }}>
+            {/* Email */}
+            <TextInput
+              style={{ width: '100%', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 24, paddingVertical: 18, fontSize: scale(16), color: '#1A1A1A' }}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
+              placeholderTextColor="#C0BEB8"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              returnKeyType="done"
+              onSubmitEditing={handleSubmit}
+            />
+
+            {/* Validation error */}
+            {!!error && (
+              <Text style={{ fontSize: scale(13), color: '#E53935', textAlign: 'center', fontFamily: 'Inter_600SemiBold', marginTop: -4 }}>
+                {error}
+              </Text>
+            )}
+
+            <Button label={loading ? 'Sending…' : 'Send reset link'} onPress={handleSubmit} style={{ marginTop: 8 }} />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
-type AppMode = 'splash' | 'onboarding' | 'landing' | 'login' | 'signup' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
+type AppMode = 'splash' | 'onboarding' | 'landing' | 'login' | 'signup' | 'checkEmail' | 'forgotPassword' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
+
+// Marketing-site page that receives the Supabase recovery token (MON-54).
+const RESET_PASSWORD_REDIRECT = 'https://monstirapp.com/reset-password';
 
 // ─── Splash Screen ────────────────────────────────────────────────────────────
 
@@ -9179,6 +9584,8 @@ interface KidMonsterState {
   weeklyShardsClaimed: boolean;
   /** Remaining HP of bosses that escaped this kid wounded, keyed by boss name. */
   woundedBossHp: Record<string, number>;
+  /** Consecutive boss wins with no escape in between — drives the Undefeated milestone. */
+  battleWinStreak: number;
 }
 
 const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
@@ -9196,13 +9603,18 @@ const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
   shards: 0,
   weeklyShardsClaimed: false,
   woundedBossHp: {},
+  battleWinStreak: 0,
 };
 
 function AppInner() {
-  const [activeToast, setActiveToast]     = useState<MilestoneDef | null>(null);
+  const [activeToast, setActiveToast]     = useState<{ def: MilestoneDef; kidName?: string } | null>(null);
   const [toastMilestoneId, setToastMid]   = useState<string | null>(null);
   const [appMode, setAppMode]             = useState<AppMode>('splash');
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  // Pending auth state for the email confirmation / password-reset round trips (MON-54).
+  const [pendingAuthEmail, setPendingAuthEmail] = useState('');
+  const [pendingAuthName, setPendingAuthName]   = useState('');
+  const [checkEmailMode, setCheckEmailMode]     = useState<'confirm' | 'reset'>('confirm');
   const [kidWelcomeName, setKidWelcomeName] = useState('there');
   const [kidMonsterState, setKidMonsterState] = useState<Record<string, KidMonsterState>>({});
   const getKidMonster = (name: string): KidMonsterState => kidMonsterState[name] ?? { ...DEFAULT_KID_MONSTER_STATE };
@@ -9611,6 +10023,15 @@ function AppInner() {
             console.warn('[DB] trophy hydration failed for', k.name, e);
           }
         }));
+
+        // Hydrate parent milestones from the profile (Part 1 gap) so the parent's
+        // own achievements survive reinstall / new device.
+        if (profile?.parent_milestones_json) {
+          try {
+            const parentMiles = JSON.parse(profile.parent_milestones_json) as EarnedMilestone[];
+            if (Array.isArray(parentMiles)) await mergeMilestones(PARENT_OWNER, parentMiles);
+          } catch {}
+        }
 
         setAppDataLoaded(true);
         setViewMode('parent');
@@ -10041,6 +10462,14 @@ function AppInner() {
   }, [lastWeekReset, appDataLoaded]);
 
   // ── Milestone helper ─────────────────────────────────────────────────────────
+  // Kid-milestone DB writes whose kid row id wasn't resolvable yet (e.g. kids not
+  // fully synced at trigger time). Flushed by an effect once ids are available so
+  // the write is never silently dropped (Finding B).
+  const pendingMilestoneWrites = useRef<{ kidName: string; milestoneId: string }[]>([]);
+  // (kidName:choreId) pairs that were rejected and are awaiting re-approval — drives
+  // the Grudging Respect milestone. In-memory only (a moment trigger, not durable).
+  const rejectedThenResubmitted = useRef<Set<string>>(new Set());
+
   const checkMilestone = useCallback(async (id: string, kidName?: string) => {
     const def = getMilestone(id);
     if (!def) return;
@@ -10051,15 +10480,162 @@ function AppInner() {
     const wasNew = await earnMilestone(owner, id);
     if (!wasNew) return;
     setToastMid(id);
-    setActiveToast(def);
-    // Save kid milestones to Supabase under that kid (parent milestones stay local).
-    if (!isParent) {
+    setActiveToast({ def, kidName: isParent ? undefined : name });
+    if (isParent) {
+      // Persist the full parent-milestone set to Supabase (Part 1 gap) so it
+      // survives reinstall / new device, mirroring the other profile *_json state.
+      const earned = await getEarnedMilestones(PARENT_OWNER);
+      saveAppState({ parent_milestones_json: JSON.stringify(earned) })
+        .catch(e => console.warn('[DB] saveAppState (parentMilestones) error:', e));
+    } else {
+      // Save kid milestones to Supabase under that kid; queue for retry if the
+      // kid row id isn't resolvable yet (Finding B).
       const kidDbId = setupChildren.find(c => c.name === name)?.id;
       if (kidDbId) {
         saveMilestoneToDb({ kidId: kidDbId, milestoneId: id }).catch(e => console.warn('[DB] saveMilestoneToDb error:', e));
+      } else {
+        pendingMilestoneWrites.current.push({ kidName: name, milestoneId: id });
       }
     }
   }, [currentKidName, setupChildren]);
+
+  // Flush queued kid-milestone writes once their kid row ids become available.
+  useEffect(() => {
+    if (pendingMilestoneWrites.current.length === 0) return;
+    const stillPending: { kidName: string; milestoneId: string }[] = [];
+    for (const w of pendingMilestoneWrites.current) {
+      const kidDbId = setupChildren.find(c => c.name === w.kidName)?.id;
+      if (kidDbId) {
+        saveMilestoneToDb({ kidId: kidDbId, milestoneId: w.milestoneId }).catch(e => console.warn('[DB] saveMilestoneToDb (retry) error:', e));
+      } else {
+        stillPending.push(w);
+      }
+    }
+    pendingMilestoneWrites.current = stillPending;
+  }, [setupChildren]);
+
+  // ── Trophy DB-write retry queue (Gap 6) ──────────────────────────────────────
+  // Boss captures and collectibles are written to local storage on earn, but
+  // their Supabase copy needs the kid's row id. If that id isn't resolved yet
+  // (e.g. kids not fully synced at earn time) the write was previously dropped
+  // silently. Queue it and flush once ids are available — mirrors the milestone
+  // retry queue above so the durable copy is never lost.
+  type PendingTrophyWrite =
+    | { kind: 'boss'; kidName: string; bossName: string; xpEarned: number; coinsEarned: number; completionPct: number }
+    | { kind: 'collectible'; kidName: string; collectibleId: string; rarity: string };
+  const pendingTrophyWrites = useRef<PendingTrophyWrite[]>([]);
+
+  const writeTrophyToDb = useCallback((w: PendingTrophyWrite, kidDbId: string) => {
+    if (w.kind === 'boss') {
+      saveBossCaptureToDb({ kidId: kidDbId, bossName: w.bossName, xpEarned: w.xpEarned, coinsEarned: w.coinsEarned, completionPct: w.completionPct })
+        .catch(e => console.warn('[DB] saveBossCaptureToDb error:', e));
+    } else {
+      saveCollectibleToDb({ kidId: kidDbId, collectibleId: w.collectibleId, rarity: w.rarity })
+        .catch(e => console.warn('[DB] saveCollectibleToDb error:', e));
+    }
+  }, []);
+
+  const queueOrWriteTrophy = useCallback((w: PendingTrophyWrite) => {
+    const kidDbId = setupChildren.find(c => c.name === w.kidName)?.id;
+    if (kidDbId) writeTrophyToDb(w, kidDbId);
+    else pendingTrophyWrites.current.push(w);
+  }, [setupChildren, writeTrophyToDb]);
+
+  // Flush queued trophy writes once their kid row ids become available.
+  useEffect(() => {
+    if (pendingTrophyWrites.current.length === 0) return;
+    const stillPending: PendingTrophyWrite[] = [];
+    for (const w of pendingTrophyWrites.current) {
+      const kidDbId = setupChildren.find(c => c.name === w.kidName)?.id;
+      if (kidDbId) writeTrophyToDb(w, kidDbId);
+      else stillPending.push(w);
+    }
+    pendingTrophyWrites.current = stillPending;
+  }, [setupChildren, writeTrophyToDb]);
+
+  // Recompute every count/streak/total-derived milestone from durable history and
+  // award any that are now satisfied. Idempotent (earnMilestone dedupes), so it's
+  // safe to call liberally — after approvals, payouts, battles, and on load. The
+  // event-only milestones (timestamps, one-shots) fire inline at their triggers.
+  const runMilestoneSweep = useCallback(async () => {
+    const today = getSimulatedToday(debugDayOffset);
+    const todayIsSunday = new Date(today).getDay() === 0;
+    const allKidNames = setupChildren.map(c => c.name);
+    const toDay = (iso: string) => new Date(iso).toDateString();
+
+    // ── Parent-scoped ──
+    const parentEntries = choreHistory.map(e => ({ kidName: e.kidName, date: toDay(e.approvedAt) }));
+    const lifetimePaidCents = payoutLog.reduce((s, p) => s + p.amount, 0);
+    const everyKidHasChore = allKidNames.length > 0 &&
+      allKidNames.every(n => managedChores.some(c => c.assignedTo.length === 0 || c.assignedTo.includes(n)));
+    // Awaited so the read-modify-write inside earnMilestone can't race itself when
+    // several milestones become earnable at once (e.g. on first load).
+    for (const id of evalParentMilestones({ entries: parentEntries, allKidNames, lifetimePaidCents, everyKidHasChore })) {
+      await checkMilestone(id);
+    }
+
+    // ── Per-kid-scoped ──
+    // Monday key of the previous week, derived from the (debug-aware) today.
+    const prevWeekMonday = (() => {
+      const d = new Date(today); d.setDate(d.getDate() - 7);
+      return weekMondayKeyForDate(d);
+    })();
+
+    for (const name of allKidNames) {
+      const mine = choreHistory.filter(e => e.kidName === name);
+      const approvalDates = mine.map(e => toDay(e.approvedAt));
+      const lifetimeEarnedCents = mine.reduce((s, e) => s + e.earnedCents, 0);
+      const [cols, caps] = await Promise.all([getCollectibles(name), getBossCaptures(name)]);
+
+      const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(name));
+      const target = myChores.reduce((s, c) => s + frequencyToWeeklyTarget(c.frequency), 0);
+      const doneThisWeek = myChores.reduce((s, c) => s + getChoreCompletions(c, name), 0);
+      const weekTargetMet = target > 0 && doneThisWeek >= target;
+
+      // Previous week (Mon–Sun) approvals from history, vs the current target (proxy
+      // — historical assignment data isn't retained, so the live target stands in).
+      const prevWeekApprovals = mine.filter(e => weekMondayKeyForDate(new Date(e.approvedAt)) === prevWeekMonday).length;
+      const prevWeekTargetMet = target > 0 && prevWeekApprovals >= target;
+
+      const todayCompletions = approvalDates.filter(d => d === today).length;
+      const goal = getKidGoals(name)[0];
+      const goalReached = !!goal && (() => {
+        const targetCents = Math.round(parseFloat(goal.amount || '0') * 100);
+        return targetCents > 0 && goal.savedCents >= targetCents;
+      })();
+
+      for (const id of evalKidMilestones({
+        approvalDates,
+        totalApproved: mine.length,
+        lifetimeEarnedCents,
+        collectibleCount: cols.length,
+        bossCaptureCount: caps.length,
+        // kid-undefeated (battle win streak) is awarded inline at battle end; the
+        // sweep doesn't track it, so pass 0 to keep this callback stable across
+        // XP changes (avoids per-XP AsyncStorage churn).
+        battleWinStreak: 0,
+        weekTargetMet,
+        prevWeekTargetMet,
+        goalReached,
+        sundayCompletions: todayIsSunday ? todayCompletions : 0,
+      })) {
+        await checkMilestone(id, name);
+      }
+    }
+  }, [choreHistory, payoutLog, managedChores, setupChildren, debugDayOffset, checkMilestone]);
+
+  // Re-evaluate derived milestones whenever the durable data behind them changes.
+  // Runs after the relevant setState commits, so the sweep sees fresh history.
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    runMilestoneSweep();
+  }, [choreHistory, payoutLog, managedChores, appDataLoaded, runMilestoneSweep]);
+
+  // Sunday Scaries — opened the app on the weekly boss-reveal day (Sunday).
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    if (new Date(getSimulatedToday(debugDayOffset)).getDay() === 0) checkMilestone('parent-sunday-scaries');
+  }, [appDataLoaded, debugDayOffset, checkMilestone]);
 
   // Grant ONE day's approval for (chore, kidName): consumes a single pending
   // unit — backlog (a prior day's submission) first so today's fresh instance is
@@ -10136,29 +10712,27 @@ function AppInner() {
     });
 
     // ── Milestone triggers ────────────────────────────────────────────────────
-    // Lifetime completions = this kid's history entries plus the one being
-    // granted now (+unitIdx for earlier grants in the same batch, which haven't
-    // landed in `choreHistory` yet — this callback reads the pre-click snapshot).
-    const totalApproved = choreHistory.filter(e => e.kidName === kidName).length + 1 + unitIdx;
-    if (totalApproved >= 1)  checkMilestone('first-chore', kidName);
-    if (totalApproved >= 10) checkMilestone('chores-10', kidName);
-    if (totalApproved >= 50) checkMilestone('chores-50', kidName);
-    // Use the LIVE streak — the stored value lingers after a missed day and
-    // would award streak milestones for a streak that's already broken.
-    if (legacyLiveStreak >= 3) checkMilestone('streak-3', kidName);
-    if (legacyLiveStreak >= 7) checkMilestone('streak-7', kidName);
-    const totalCoinsAfter = (kidCoins[kidName] ?? 0) + earnedCoins;
-    if (totalCoinsAfter >= 1000)  checkMilestone('money-10', kidName);
-    if (totalCoinsAfter >= 2500)  checkMilestone('money-25', kidName);
-    if (totalCoinsAfter >= 10000) checkMilestone('money-100', kidName);
-    const currentGoal = getKidGoals(kidName)[0];
-    if (currentGoal) {
-      const targetCents = Math.round(parseFloat(currentGoal.amount || '0') * 100);
-      if (targetCents > 0 && currentGoal.savedCents + earnedCoins >= targetCents) {
-        checkMilestone('goal-getter', kidName);
-      }
-    }
+    // Count/streak/total-derived milestones (first-chore, chores-10/50, streak-3,
+    // no-days-off, week-warrior, money-*, goal-getter, …) are awarded by
+    // runMilestoneSweep, fired from the [choreHistory] effect once this approval
+    // commits to durable state. Here we only fire the EVENT-only ones that need
+    // the approval moment's context (timestamps, one-shots).
     checkMilestone('parent-first-approval');
+    const hour = new Date().getHours();
+    if (hour >= 22) checkMilestone('parent-night-owl');
+    if (hour < 7)   checkMilestone('parent-morning-person');
+    // Quick Draw — approved within 5 minutes of the kid's submission.
+    const submittedAt = chore.childSubmittedAt?.[kidName];
+    if (submittedAt && Date.now() - new Date(submittedAt).getTime() <= 5 * 60_000) {
+      checkMilestone('parent-quick-draw');
+    }
+    // Grudging Respect — this (chore, kid) was rejected earlier, then resubmitted
+    // and is now being approved.
+    const rejectKey = `${kidName}:${id}`;
+    if (rejectedThenResubmitted.current.has(rejectKey)) {
+      rejectedThenResubmitted.current.delete(rejectKey);
+      checkMilestone('grudging-respect', kidName);
+    }
 
     // Save to Supabase
     const kidDbId = getKidDbId(kidName);
@@ -10220,6 +10794,13 @@ function AppInner() {
         childRejectionNote: note ? { ...base.childRejectionNote, [kidName]: note } : base.childRejectionNote,
       };
     }));
+    // Milestones: a real rejection (with a note) means the parent didn't just
+    // rubber-stamp it, and marks this (chore, kid) so re-approval earns Grudging
+    // Respect.
+    if (note) {
+      checkMilestone('parent-auditor');
+      rejectedThenResubmitted.current.add(`${kidName}:${id}`);
+    }
     // Save to Supabase
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
@@ -10227,7 +10808,7 @@ function AppInner() {
         if (realId) rejectChoreCompletion({ choreId: realId, kidId: kidDbId, rejectionNote: note }).catch(e => console.warn('[DB] rejectChoreCompletion error:', e));
       });
     }
-  }, [managedChores, setupChildren, ensureChoreInDb]);
+  }, [managedChores, setupChildren, ensureChoreInDb, checkMilestone]);
 
   const confirmPayout = useCallback((kidName: string) => {
     const amount = kidCoins[kidName] ?? 0;
@@ -10252,12 +10833,19 @@ function AppInner() {
     setKidPayoutPending(prev => ({ ...prev, [kidName]: true }));
     showParentToast(`Paid ${kidName} ${fmtCoins(amount)} ✓`);
 
+    // Milestones: first payout, and Clean Slate when no kid has an unpaid balance
+    // left after this payout. (parent-triple-digits / running-tab are lifetime
+    // totals handled by the sweep once payoutLog updates.)
+    checkMilestone('parent-first-payout');
+    const everyoneSettled = setupChildren.every(c => c.name === kidName || (kidCoins[c.name] ?? 0) === 0);
+    if (everyoneSettled) checkMilestone('parent-clean-slate');
+
     // Save to Supabase
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
       savePayoutToDb({ kidId: kidDbId, kidName, amountCents: amount }).catch(e => console.warn('[DB] savePayoutToDb error:', e));
     }
-  }, [kidCoins, resetKidCoins, choreHistory, payoutLog, managedChores]);
+  }, [kidCoins, resetKidCoins, choreHistory, payoutLog, managedChores, setupChildren, checkMilestone]);
 
   const openPayout = useCallback(() => {
     setParentScreen('parentPayout');
@@ -10308,6 +10896,9 @@ function AppInner() {
         shards: Math.max(0, entryShards - shardsUsed),
         weeklyShardsClaimed: true,
         woundedBossHp: woundedNext,
+        // Consecutive-win counter for the Undefeated milestone: bump on capture,
+        // reset on escape.
+        battleWinStreak: result === 'captured' ? (s.battleWinStreak ?? 0) + 1 : 0,
       };
     });
     // The battle consumes the week's power (weeklyXp) and hands out rewards, but it
@@ -10325,7 +10916,11 @@ function AppInner() {
       const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
       const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
       const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      checkMilestone('first-boss', currentKidName);
+      checkMilestone('boss-slayer', currentKidName);
+      // Undefeated — 4 captures in a row with no escape. Compute the post-win
+      // streak from the pre-battle value (state update above hasn't committed yet).
+      const winStreak = ((kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).battleWinStreak ?? 0) + 1;
+      if (winStreak >= 4) checkMilestone('kid-undefeated', currentKidName);
 
       saveBossCapture(currentKidName, {
         id:            `${Date.now()}-${boss.name}`,
@@ -10339,17 +10934,14 @@ function AppInner() {
         xpEarned:      xpSnapshot,
       }).catch(() => {});
 
-      // Also save to Supabase
-      const kidDbId = getKidDbId(currentKidName);
-      if (kidDbId) {
-        saveBossCaptureToDb({ kidId: kidDbId, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned, completionPct: pct }).catch(e => console.warn('[DB] saveBossCaptureToDb error:', e));
-      }
+      // Also save to Supabase — queued + retried if the kid row id isn't ready (Gap 6).
+      queueOrWriteTrophy({ kind: 'boss', kidName: currentKidName, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned, completionPct: pct });
 
       setScreen('chestReveal');
     } else {
       setScreen('result');
     }
-  }, [monsterIdx, lockedBossName, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset]);
+  }, [monsterIdx, lockedBossName, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone]);
 
   const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
 
@@ -10368,9 +10960,15 @@ function AppInner() {
     // Awarded here — when the evolution actually completes — so every trigger
     // path (auto-approve, parent approval, deferred) earns it exactly once.
     checkMilestone('first-evolution', currentKidName);
+    // Stage-based monster milestones. No variant/rarity system exists, so
+    // "rare variant" is proxied by reaching the 2nd evolution (Zorphax, idx 5)
+    // and "max level" by the final form (Vorthak, last index).
+    const newIdx = Math.min((kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).monsterIdx + 1, MONSTERS.length - 1);
+    if (newIdx >= 5) checkMilestone('rare-find', currentKidName);
+    if (newIdx >= MONSTERS.length - 1) checkMilestone('full-power', currentKidName);
     setTab('home');
     setScreen('home');
-  }, [currentKidName, checkMilestone]);
+  }, [currentKidName, checkMilestone, kidMonsterState]);
 
   // Parent navigation — always track where we came from so back buttons work correctly
   const navParent = (s: ParentScreen) => {
@@ -10382,6 +10980,8 @@ function AppInner() {
     else if (s === 'choreLibrary') setParentTab('settings');
     else if (s === 'moneyLedger' || s === 'parentPayout') setParentTab('money');
     else if (s === 'settings' || s === 'payRates' || s === 'rateGuide' || s === 'rewards') setParentTab('settings');
+    else if (s === 'kidMilestones') setParentTab('home');
+    if (s === 'settings') checkMilestone('parent-read-manual'); // Read the Manual
   };
   const navParentTab = (t: ParentTab) => {
     setParentTab(t);
@@ -10390,7 +10990,7 @@ function AppInner() {
     if (t === 'home')     setParentScreen('parentHome');
     if (t === 'chores')   setParentScreen('chores');
     if (t === 'money')    setParentScreen('moneyLedger');
-    if (t === 'settings') setParentScreen('settings');
+    if (t === 'settings') { setParentScreen('settings'); checkMilestone('parent-read-manual'); }
   };
   const goBack = () => setParentScreen(prevParentScreen);
   const openEditChore = (chore: ManagedChore) => {
@@ -10399,10 +10999,14 @@ function AppInner() {
     setParentScreen('editChore');
   };
   const saveChore = (chore: ManagedChore) => {
+    let isNew = false;
     setManagedChores(prev => {
       const exists = prev.find(c => c.id === chore.id);
+      isNew = !exists;
       return exists ? prev.map(c => c.id === chore.id ? chore : c) : [...prev, chore];
     });
+    // The Negotiator — parent created their first custom chore from the editor.
+    if (isNew) checkMilestone('parent-negotiator');
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
 
     const iconStr = serializeChoreIcon(chore.icon);
@@ -10534,8 +11138,7 @@ function AppInner() {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#C5F215' }}>
           <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
           <LandingScreen
-            onLogin={() => loadUserDataFromSupabase()}
-            onCreateAccount={() => setAppMode('signup')}
+            onEmailPath={() => setAppMode('login')}
           />
         </SafeAreaView>
       </SafeAreaProvider>
@@ -10545,12 +11148,14 @@ function AppInner() {
   if (appMode === 'login') {
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-          <StatusBar barStyle="dark-content" />
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#C5F215' }}>
+          <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
           <LoginScreen
-            onBack={() => setAppMode('onboarding')}
+            onBack={() => setAppMode('landing')}
             onSuccess={() => loadUserDataFromSupabase()}
             onSignUp={() => setAppMode('signup')}
+            onForgotPassword={() => setAppMode('forgotPassword')}
+            onUnconfirmed={(email) => { setPendingAuthEmail(email); setCheckEmailMode('confirm'); setAppMode('checkEmail'); }}
           />
         </SafeAreaView>
       </SafeAreaProvider>
@@ -10565,7 +11170,44 @@ function AppInner() {
           <SignupScreen
             onBack={() => setAppMode('landing')}
             onSuccess={(user) => { setSessionUser(user); setAppMode('parentOnboarding'); }}
-            onLogin={() => setAppMode('landing')}
+            onLogin={() => setAppMode('login')}
+            onConfirmPending={(user) => {
+              setPendingAuthEmail(user.email);
+              setPendingAuthName(user.name);
+              setCheckEmailMode('confirm');
+              setAppMode('checkEmail');
+            }}
+            initialName={pendingAuthName}
+            initialEmail={pendingAuthEmail}
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'checkEmail') {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#C5F215' }}>
+          <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
+          <CheckEmailScreen
+            email={pendingAuthEmail}
+            mode={checkEmailMode}
+            onBack={() => setAppMode(checkEmailMode === 'confirm' ? 'signup' : 'login')}
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'forgotPassword') {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#C5F215' }}>
+          <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
+          <ForgotPasswordScreen
+            onBack={() => setAppMode('login')}
+            onSent={(email) => { setPendingAuthEmail(email); setCheckEmailMode('reset'); setAppMode('checkEmail'); }}
           />
         </SafeAreaView>
       </SafeAreaProvider>
@@ -10751,6 +11393,7 @@ function AppInner() {
                   onDone={() => { setTrophyOrigin('home'); setScreen('trophyRoom'); }}
                   kidName={currentKidName}
                   kidDbId={getKidDbId(currentKidName)}
+                  onQueueDbWrite={(kidName, collectibleId, rarity) => queueOrWriteTrophy({ kind: 'collectible', kidName, collectibleId, rarity })}
                 />
               </ErrorBoundary>
             )}
@@ -10799,18 +11442,6 @@ function AppInner() {
               onSuccess={() => { setPinModalOpen(false); setViewMode('parent'); }}
               onClose={() => setPinModalOpen(false)}
             />
-            {activeToast && (
-              <MilestoneToast
-                milestone={activeToast}
-                onDismiss={() => setActiveToast(null)}
-                onView={() => {
-                  setActiveToast(null);
-                  setTrophyInitialKey(undefined);
-                  setTrophyOrigin(tab);
-                  setScreen('trophyRoom');
-                }}
-              />
-            )}
           </>
         ) : (
           <View style={{ flex: 1 }}>
@@ -10845,6 +11476,7 @@ function AppInner() {
             {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
             {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
+            {parentScreen === 'kidMilestones' && <ErrorBoundary key="kidMilestones"><ParentKidMilestonesScreen kidProfiles={setupChildren.map(c => ({ name: c.name, avatarIdx: c.avatarIdx }))} onBack={goBack} /></ErrorBoundary>}
             {parentScreen !== 'parentPayout' && (
               <ParentTabBar active={parentTab} onNav={navParentTab} />
             )}
@@ -10897,6 +11529,27 @@ function AppInner() {
       onSave={handleKidModalSave}
     />
     {parentToast && <Toast key={parentToast + Date.now()} message={parentToast} />}
+
+    {/* Milestone toast — rendered at root so it shows in BOTH parent and kid views
+        (kid milestones earned during a parent's approval now actually surface). */}
+    {activeToast && (
+      <MilestoneToast
+        milestone={activeToast.def}
+        kidName={activeToast.kidName}
+        onDismiss={() => setActiveToast(null)}
+        onView={() => {
+          const isKidMilestone = !!activeToast.kidName;
+          setActiveToast(null);
+          if (viewMode === 'kid') {
+            setTrophyInitialKey(undefined);
+            setTrophyOrigin(tab);
+            setScreen('trophyRoom');
+          } else {
+            navParent(isKidMilestone ? 'kidMilestones' : 'parentMilestones');
+          }
+        }}
+      />
+    )}
 
     {/* Global debug overlay */}
     {debugOpen && renderDebugPanel()}
@@ -11063,12 +11716,15 @@ function AppInner() {
                     { label: '👨‍👩‍👧  Parent Setup',      mode: 'parentOnboarding' },
                     { label: '🧒  Kid Profile Setup', mode: 'kidProfile'       },
                     { label: '👾  Kid Welcome',       mode: 'kidWelcome'       },
+                    { label: '📬  Check Email',       mode: 'checkEmail'       },
+                    { label: '🔑  Forgot Password',   mode: 'forgotPassword'   },
                   ] as { label: string; mode: AppMode }[]).map(({ label, mode }) => (
                     <TouchableOpacity
                       key={mode}
                       style={s.debugResetBtn}
                       onPress={() => {
                         if (mode === 'kidWelcome') setKidWelcomeName('Henry');
+                        if (mode === 'checkEmail') { setPendingAuthEmail('parent@monstir.app'); setCheckEmailMode('confirm'); }
                         setAppMode(mode);
                         setDebugOpen(false);
                       }}

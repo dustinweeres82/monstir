@@ -43,7 +43,7 @@ export async function loadGoals(): Promise<unknown[] | null> {
   try { return JSON.parse(data.goals_json); } catch { return null; }
 }
 
-export async function saveAppState(fields: { chore_history_json?: string; week_approval_days_json?: string; chores_state_json?: string; kid_approval_settings_json?: string; last_week_reset?: string }): Promise<void> {
+export async function saveAppState(fields: { chore_history_json?: string; week_approval_days_json?: string; chores_state_json?: string; kid_approval_settings_json?: string; last_week_reset?: string; parent_milestones_json?: string }): Promise<void> {
   const userId = await getCurrentUserId();
   if (!userId) return;
   const { data, error } = await supabase.from('profiles').update(fields).eq('id', userId);

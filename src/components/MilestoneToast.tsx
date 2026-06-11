@@ -15,11 +15,13 @@ const BORDER = '#111111';
 
 interface MilestoneToastProps {
   milestone: MilestoneDef;
+  /** Kid who earned it — shown as attribution. Omit for parent milestones. */
+  kidName?:  string;
   onView:    () => void;
   onDismiss: () => void;
 }
 
-export function MilestoneToast({ milestone, onView, onDismiss }: MilestoneToastProps) {
+export function MilestoneToast({ milestone, kidName, onView, onDismiss }: MilestoneToastProps) {
   const insets   = useSafeAreaInsets();
   const slideY   = useRef(new Animated.Value(-200)).current;
   const opacity  = useRef(new Animated.Value(0)).current;
@@ -60,6 +62,7 @@ export function MilestoneToast({ milestone, onView, onDismiss }: MilestoneToastP
         <View style={s.small}>
           <Text style={s.smallIcon}>{milestone.icon}</Text>
           <View style={s.smallInfo}>
+            {kidName ? <Text style={s.attribution}>{kidName} earned</Text> : null}
             <Text style={s.smallName}>{milestone.name}</Text>
             <Text style={s.smallXp}>+{milestone.xpReward} XP</Text>
           </View>
@@ -76,6 +79,7 @@ export function MilestoneToast({ milestone, onView, onDismiss }: MilestoneToastP
             <Text style={s.mediumIcon}>{milestone.icon}</Text>
           </View>
           <View style={s.mediumInfo}>
+            {kidName ? <Text style={s.attribution}>{kidName} earned</Text> : null}
             <Text style={s.mediumName}>{milestone.name}</Text>
             <Text style={s.mediumTagline}>{milestone.tagline}</Text>
             <Text style={s.smallXp}>+{milestone.xpReward} XP</Text>
@@ -93,6 +97,7 @@ export function MilestoneToast({ milestone, onView, onDismiss }: MilestoneToastP
           <View style={s.largeHeader}>
             <Text style={s.largeSparkle}>✦</Text>
             <Text style={s.largeIcon}>{milestone.icon}</Text>
+            {kidName ? <Text style={s.largeAttribution}>{kidName} earned</Text> : null}
             <Text style={s.largeName}>{milestone.name}</Text>
             <Text style={s.largeTagline}>{milestone.tagline}</Text>
             <Text style={s.largeSparkleR}>✦</Text>
@@ -145,6 +150,7 @@ const s = StyleSheet.create({
   },
   smallIcon: { fontSize: fontSize.xxxl },
   smallInfo: { flex: 1 },
+  attribution: { fontFamily: nunitoFamily.bold, fontSize: fontSize.xs, color: PURPLE, letterSpacing: 0.3 },
   smallName: { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.base, color: BORDER },
   smallXp:   { fontFamily: nunitoFamily.semibold, fontSize: fontSize.xs, color: colors.muted },
   viewLink:  { fontFamily: nunitoFamily.bold, fontSize: fontSize.sm, color: PURPLE },
@@ -175,6 +181,7 @@ const s = StyleSheet.create({
   largeSparkle:  { position: 'absolute', top: 12, left: 16, fontSize: fontSize.lg, color: 'rgba(255,255,255,0.5)' },
   largeSparkleR: { position: 'absolute', top: 12, right: 16, fontSize: fontSize.lg, color: 'rgba(255,255,255,0.5)' },
   largeIcon:    { fontSize: scale(40) },
+  largeAttribution: { fontFamily: nunitoFamily.bold, fontSize: fontSize.xs, color: LIME, letterSpacing: 0.5, textTransform: 'uppercase' },
   largeName:    { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.h2, color: colors.white, textAlign: 'center' },
   largeTagline: { fontFamily: nunitoFamily.regular, fontSize: fontSize.sm, color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
   largeRewards: {
