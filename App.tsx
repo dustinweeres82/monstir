@@ -2012,11 +2012,16 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
       ? boss.tagline
       : `Boss arrives in ${days} day${days === 1 ? '' : 's'}`;
 
-  // Power forecast: XP remaining to reach next level
-  const xpToNextLevel = Math.max(0, monster.needed - xp);
-  const powerForecastMsg = xpToNextLevel === 0
-    ? 'You\'re at max power — ready to evolve!'
-    : `${xpToNextLevel} XP to reach Lv ${monster.level + 1}`;
+  // Battle-readiness forecast for THIS week's boss. Reads off battle power
+  // (`weeklyXp`) and the win-odds heuristic — NOT cumulative `xp`/evolution,
+  // which is a separate track handled by the evolve flow. (Evolution isn't
+  // something the kid triggers by maxing weekly power, so we never say "evolve"
+  // here.)
+  const powerForecastMsg = power === 0
+    ? 'No battle power yet — do chores to power up for the boss!'
+    : winOdds >= 70
+      ? `You're battle-ready — ${winOdds}% chance to beat this boss!`
+      : `${winOdds}% win odds — do more chores to boost your power.`;
 
   const cdParts = countdownParts(countdownMs);
   const threatSkulls = { Easy: 1, Medium: 3, Hard: 4, Extreme: 5 }[boss.threat] ?? 3;
@@ -10193,6 +10198,45 @@ function AppInner() {
   const [debugDayOffset, setDebugDayOffset] = useState(0);
   // Active kid's streak as it stands today (reads 0 the moment a day is missed).
   const liveCurrentStreak = liveStreak(currentStreak, lastChoreDate, getSimulatedToday(debugDayOffset));
+
+  // ── Battle-power reconciliation: keep weekly power honest with completions ──
+  // "Battle power" (`weeklyXp`) is a scalar on the kid row; "Chores completed"
+  // is restored from the chores blob. The two are persisted through different
+  // paths and can drift across reloads/devices — e.g. a lost or reset weekly_xp
+  // write leaves a kid showing 10/21 chores done but 0 battle power. On load —
+  // and only AFTER the weekly reset has reconciled this week's marker, so we
+  // never recompute from completions that are about to be wiped — derive the
+  // completion floor (completions × base XP) and heal `weeklyXp` up to it if it
+  // has fallen below. We heal UP only, never down: the live value can legitimately
+  // sit above the floor thanks to streak bonuses, and clobbering it would drop
+  // power the kid actually earned.
+  //
+  // CRUCIAL: skip any kid who has already battled this week (`battleResult != null`).
+  // The battle deliberately consumes the week's power to 0 while leaving the chore
+  // board intact, so post-battle "completions > 0, weeklyXp 0" is correct, not a
+  // lost write — healing it would resurrect spent power. `battleResult` is null at
+  // week start and only set once a battle happens, so it's the right discriminator.
+  // Runs once.
+  const didReconcilePower = useRef(false);
+  useEffect(() => {
+    if (!appDataLoaded || didReconcilePower.current) return;
+    if (lastWeekReset !== getWeekMondayKey(debugDayOffset)) return; // wait for reset to settle
+    didReconcilePower.current = true;
+    setKidMonsterState(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const name of Object.keys(prev)) {
+        if (prev[name].battleResult != null) continue; // power already spent this week
+        const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(name));
+        const floor = myChores.reduce((sum, c) => sum + getChoreCompletions(c, name) * XP_BY_DIFFICULTY[c.difficulty], 0);
+        if (floor > prev[name].weeklyXp) {
+          next[name] = { ...prev[name], weeklyXp: floor };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [appDataLoaded, lastWeekReset, debugDayOffset, managedChores]);
 
   useEffect(() => {
     const today = getSimulatedToday(debugDayOffset);
