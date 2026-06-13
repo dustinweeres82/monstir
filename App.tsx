@@ -10165,7 +10165,11 @@ function AppInner() {
 
         setAppDataLoaded(true);
         setViewMode('parent');
-        setAppMode('app');
+        // A freshly created account (social sign-in or an email signup that never
+        // finished onboarding) has no kids yet — send them through parent
+        // onboarding instead of dropping them into an empty app shell (MON-54).
+        const hasOnboarded = Array.isArray(dbKids) && dbKids.length > 0;
+        setAppMode(hasOnboarded ? 'app' : 'parentOnboarding');
         return true;
     } catch (e) {
       console.warn('[DB] loadUserData failed, falling back to AsyncStorage:', e);
