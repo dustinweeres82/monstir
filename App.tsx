@@ -9014,6 +9014,9 @@ function LandingScreen({ onEmailPath, onSocialSuccess }: {
 
   // Render a provider button: real + pressable when configured, else "coming soon".
   const renderProvider = (provider: 'apple' | 'google') => {
+    // Apple sign-in is iOS-only — never render the Apple row on other platforms
+    // (no disabled "coming soon" placeholder on Android/web).
+    if (provider === 'apple' && Platform.OS !== 'ios') return null;
     if (!socialAuthEnabled) return <SocialAuthButton key={provider} provider={provider} disabled />;
     // Apple configured but unavailable on this device → fall back to placeholder.
     if (provider === 'apple' && !appleAvailable) return <SocialAuthButton key={provider} provider="apple" disabled />;
