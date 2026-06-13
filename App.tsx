@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, Platform, Image, TextInput, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
-  LogBox, type LayoutChangeEvent,
+  ActivityIndicator, LogBox, type LayoutChangeEvent,
 } from 'react-native';
 
 // Suppress spurious dev-mode RN warning — not a real bug in this codebase
@@ -23,6 +23,10 @@ const PARENT_AVATAR_MOM = require('./assets/icons/Avatars/parentProfileMom.png')
 function getParentAvatar(role: string) {
   return role === 'dad' ? PARENT_AVATAR_DAD : PARENT_AVATAR_MOM;
 }
+import {
+  socialAuthEnabled, googleEnabled, isAppleSignInAvailable,
+  signInWithGoogle, signInWithApple, type SocialUser,
+} from './src/lib/socialAuth';
 import { ParentOnboarding } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
 import { TrophyRoom } from './src/screens/TrophyRoom';
@@ -8937,40 +8941,93 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
 // ─── Social auth button (MON-54) ───────────────────────────────────────────────
 // Standard Monstir button treatment (3px ink border, 18px radius, 0px 6px 0px
 // solid shadow). Apple + Google must be displayed at equal prominence/size per
-// App Store Guideline 4.8. Native sign-in wiring is gated on console setup +
-// EAS dev builds, so these render as disabled "coming soon" placeholders for now.
-function SocialAuthButton({ provider, disabled }: { provider: 'apple' | 'google'; disabled?: boolean }) {
+// App Store Guideline 4.8. Until the console setup + client IDs land (see
+// socialAuth.ts), `disabled` is set and these render as inert "coming soon"
+// placeholders; once configured they become real pressable sign-in buttons.
+function SocialAuthButton({ provider, disabled, loading, onPress }: {
+  provider: 'apple' | 'google';
+  disabled?: boolean;
+  loading?: boolean;
+  onPress?: () => void;
+}) {
   const isApple = provider === 'apple';
-  return (
-    <View
-      style={[
-        socialBtn.base,
-        isApple ? socialBtn.apple : socialBtn.google,
-        disabled && { opacity: 0.55 },
-      ]}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-        {isApple
-          ? <Text style={{ fontSize: scale(20), color: '#FFFFFF', marginTop: -2 }}></Text>
-          : <Text style={{ fontSize: scale(18), color: '#4285F4', fontFamily: 'Inter_900Black' }}>G</Text>}
-        <Text style={[socialBtn.label, { color: isApple ? '#FFFFFF' : '#1A1A1A' }]}>
-          Sign in with {isApple ? 'Apple' : 'Google'}
-        </Text>
-      </View>
+  const inner = (
+    <>
+      {loading ? (
+        <ActivityIndicator color={isApple ? '#FFFFFF' : '#1A1A1A'} />
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+          {isApple
+            ? <Text style={{ fontSize: scale(20), color: '#FFFFFF', marginTop: -2 }}></Text>
+            : <Text style={{ fontSize: scale(18), color: '#4285F4', fontFamily: 'Inter_900Black' }}>G</Text>}
+          <Text style={[socialBtn.label, { color: isApple ? '#FFFFFF' : '#1A1A1A' }]}>
+            Sign in with {isApple ? 'Apple' : 'Google'}
+          </Text>
+        </View>
+      )}
       {disabled && (
         <View style={socialBtn.soonPill}>
           <Text style={socialBtn.soonText}>Coming soon</Text>
         </View>
       )}
-    </View>
+    </>
+  );
+
+  const style = [socialBtn.base, isApple ? socialBtn.apple : socialBtn.google, disabled && { opacity: 0.55 }];
+
+  // Placeholder (not configured) → non-interactive View.
+  if (disabled || !onPress) return <View style={style}>{inner}</View>;
+
+  return (
+    <TouchableOpacity style={style} activeOpacity={0.85} onPress={onPress} disabled={loading}>
+      {inner}
+    </TouchableOpacity>
   );
 }
 
 // Screen 2 (MON-54): social-first sign-in/sign-up. Styling is final — Slime Lime
 // background + Monstir logo at top are kept; only contents/behavior change here.
-function LandingScreen({ onEmailPath }: { onEmailPath: () => void }) {
+function LandingScreen({ onEmailPath, onSocialSuccess }: {
+  onEmailPath: () => void;
+  onSocialSuccess: (user: SocialUser) => void;
+}) {
   // On iOS, Apple is listed first per platform convention; Google leads elsewhere.
   const appleFirst = Platform.OS === 'ios';
+  const [busy, setBusy]   = useState<'apple' | 'google' | null>(null);
+  const [error, setError] = useState('');
+  // Apple availability is re-checked at runtime (device/OS support); the button is
+  // hidden if the SDK reports it unavailable so we never show a dead control.
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  useEffect(() => { isAppleSignInAvailable().then(setAppleAvailable); }, []);
+
+  const handleSocial = async (provider: 'apple' | 'google') => {
+    if (busy) return;
+    setError('');
+    setBusy(provider);
+    const result = provider === 'apple' ? await signInWithApple() : await signInWithGoogle();
+    setBusy(null);
+    if (result.ok) { onSocialSuccess(result.user); return; }
+    // Cancelled → return to this screen silently (no toast), per ticket edge cases.
+    if (result.cancelled) return;
+    setError(result.message ?? 'Sign-in failed. Please try again.');
+  };
+
+  // Render a provider button: real + pressable when configured, else "coming soon".
+  const renderProvider = (provider: 'apple' | 'google') => {
+    if (!socialAuthEnabled) return <SocialAuthButton key={provider} provider={provider} disabled />;
+    // Apple configured but unavailable on this device → fall back to placeholder.
+    if (provider === 'apple' && !appleAvailable) return <SocialAuthButton key={provider} provider="apple" disabled />;
+    if (provider === 'google' && !googleEnabled) return <SocialAuthButton key={provider} provider="google" disabled />;
+    return (
+      <SocialAuthButton
+        key={provider}
+        provider={provider}
+        loading={busy === provider}
+        onPress={() => handleSocial(provider)}
+      />
+    );
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
 
@@ -8999,18 +9056,15 @@ function LandingScreen({ onEmailPath }: { onEmailPath: () => void }) {
 
         {/* Social providers — equal prominence, Apple first on iOS */}
         <View style={{ width: '100%', gap: 14 }}>
-          {appleFirst ? (
-            <>
-              <SocialAuthButton provider="apple"  disabled />
-              <SocialAuthButton provider="google" disabled />
-            </>
-          ) : (
-            <>
-              <SocialAuthButton provider="google" disabled />
-              <SocialAuthButton provider="apple"  disabled />
-            </>
-          )}
+          {(appleFirst ? ['apple', 'google'] : ['google', 'apple']).map(p => renderProvider(p as 'apple' | 'google'))}
         </View>
+
+        {/* Social sign-in error (cancellations stay silent) */}
+        {!!error && (
+          <Text style={{ fontSize: scale(13), color: '#B3261E', fontFamily: 'Nunito_700Bold', textAlign: 'center', marginTop: 14 }}>
+            {error}
+          </Text>
+        )}
 
         {/* Email fallback — framed to steer Google/Apple holders to one-tap */}
         <TouchableOpacity onPress={onEmailPath} activeOpacity={0.7} style={{ marginTop: 28 }} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -11300,6 +11354,9 @@ function AppInner() {
           <StatusBar barStyle="dark-content" backgroundColor="#C5F215" />
           <LandingScreen
             onEmailPath={() => setAppMode('login')}
+            // Social sign-in already established a Supabase session — hydrate from it
+            // the same way email login does (loader routes into the app shell).
+            onSocialSuccess={() => loadUserDataFromSupabase()}
           />
         </SafeAreaView>
       </SafeAreaProvider>

@@ -7,7 +7,13 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "channel": "development"
+      "channel": "development",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://vxdoxtbuwfoghlugfpjp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_vmWTTJK1Mb2koko7ZJ-Xwg_iaBwhvyG",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "570608100975-p8gopitd63ot9ivh8culmbulevgoje9m.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "570608100975-47t9kikfmkm6rjgb7hbqshbcgnla91c0.apps.googleusercontent.com"
+      }
     },
     "preview": {
       "distribution": "internal",

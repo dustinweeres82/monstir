@@ -15,6 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dweeres.monstir",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -35,7 +36,14 @@
       "expo-font",
       "expo-audio",
       "expo-video",
-      "expo-asset"
+      "expo-asset",
+      "expo-apple-authentication",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.570608100975-47t9kikfmkm6rjgb7hbqshbcgnla91c0"
+        }
+      ]
     ],
     "extra": {
       "eas": {
