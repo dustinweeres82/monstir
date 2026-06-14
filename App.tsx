@@ -9758,6 +9758,10 @@ function AppInner() {
   const [chestTier, setChestTier]           = useState<ChestTier>('Common');
   const [chorePctAtBattle, setChorePctAtBattle] = useState(0);
   const [chestCollectible, setChestCollectible] = useState(() => pickForTier('Common'));
+  // Cooperative win outcome (MON-84), captured at battle end and shown on the
+  // reveal screen: did this win finish the family capture, or just wear the
+  // boss down further (and how many fights remain)?
+  const [coopWin, setCoopWin] = useState<{ familyCaptured: boolean; fightsLeft: number; totalFighters: number; bossName: string } | null>(null);
   const [battleCoinBonusEnabled,    setBattleCoinBonusEnabled]    = useState(false);
   const [battleCoinBonusMultiplier, setBattleCoinBonusMultiplier] = useState(1.0);
 
@@ -11120,6 +11124,20 @@ function AppInner() {
     // real week boundary, handled by the weekly reset effect.
 
     if (result === 'captured') {
+      // Co-op outcome for the reveal screen: compute the post-win meter so we can
+      // tell "you wore him down, N left" from "the family captured him."
+      const felledAfter = householdBoss.felledBy.includes(currentKidName)
+        ? householdBoss.felledBy
+        : [...householdBoss.felledBy, currentKidName];
+      const eligibleFelled = felledAfter.filter(n => householdKidNames.includes(n)).length;
+      const familyCaptured = householdKidNames.length > 0 && eligibleFelled >= householdKidNames.length;
+      setCoopWin({
+        familyCaptured,
+        fightsLeft: Math.max(0, householdKidNames.length - eligibleFelled),
+        totalFighters: householdKidNames.length,
+        bossName: boss.name,
+      });
+
       // Cooperative capture meter (MON-84): this kid felled their instance —
       // drain a notch. When every household kid has felled it, the family
       // captures the boss and it rotates to a fresh identity; until then the
@@ -11169,7 +11187,7 @@ function AppInner() {
     } else {
       setScreen('result');
     }
-  }, [monsterIdx, activeKidBoss, householdKidNames, householdTier, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone]);
+  }, [monsterIdx, activeKidBoss, householdBoss, householdKidNames, householdTier, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone]);
 
   const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
 
@@ -11625,6 +11643,10 @@ function AppInner() {
                   kidName={currentKidName}
                   kidDbId={getKidDbId(currentKidName)}
                   onQueueDbWrite={(kidName, collectibleId, rarity) => queueOrWriteTrophy({ kind: 'collectible', kidName, collectibleId, rarity })}
+                  bossName={coopWin?.bossName}
+                  coopFamilyCaptured={coopWin?.familyCaptured}
+                  coopFightsLeft={coopWin?.fightsLeft}
+                  coopTotalFighters={coopWin?.totalFighters}
                 />
               </ErrorBoundary>
             )}
@@ -11971,6 +11993,7 @@ function AppInner() {
                       const dt = tierFromPct(dbgCompletionPct);
                       setChestTier(dt);
                       setChestCollectible(pickForTier(dt));
+                      setCoopWin(null); // debug chest: no co-op banner
                       setScreen('chestReveal');
                       setDebugOpen(false);
                     }}
