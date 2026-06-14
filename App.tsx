@@ -11,7 +11,7 @@ import {
 LogBox.ignoreLogs(['Text strings must be rendered within a <Text> component']);
 import { SafeAreaView, SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Ellipse, Circle, Path, Polygon, Line, Defs, LinearGradient as SvgLinearGradient, RadialGradient, Stop } from 'react-native-svg';
-import { EvolutionAnimation } from './src/components/EvolutionAnimation';
+import { EvolutionFX } from './src/components/EvolutionFX';
 import { ChestReveal, type ChestTier } from './src/components/ChestReveal';
 import { pickForTier, COLLECTIBLES } from './src/data/collectibles';
 import { MascotBanner } from './src/components/MascotBanner';
@@ -83,7 +83,7 @@ TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: 
 
 type ChoreId = 'dishes' | 'trash' | 'bed' | 'vacuum' | 'laundry' | 'sweep' | 'wipe' | 'mop' | 'plants' | 'recycling' | 'windows' | 'bathroom';
 type Tab     = 'home' | 'world' | 'wallet' | 'trophies';
-type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'evolve' | 'goalFlow' | 'kidPayout' | 'chestReveal' | 'trophyRoom';
+type Screen  = Tab | 'boss-intro' | 'arena' | 'result' | 'goalFlow' | 'kidPayout' | 'chestReveal' | 'trophyRoom';
 type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type ParentTab    = 'home' | 'chores' | 'money' | 'settings';
@@ -1793,7 +1793,7 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, platformImg, platformAspect, baseRate, parentRole, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid, initialAvatarIdx }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, nextMonsterImg, platformImg, platformAspect, baseRate, parentRole, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid, initialAvatarIdx, evolutionAutoOpen, onConsumeAutoOpen, onEvolveComplete }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
   currentKidName: string;
@@ -1804,6 +1804,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   dbgPlatformSize: number;
   dbgPlatformY: number;
   monsterImg: number;
+  nextMonsterImg: number;
   platformImg: number;
   platformAspect: number;
   baseRate: string;
@@ -1814,10 +1815,21 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   onSwitchToKid: (name: string) => void;
   initialAvatarIdx: number;
+  // MON-6 — in-place evolution moment. `evolutionAutoOpen` mirrors the kid's
+  // pendingEvolution flag (auto-opens the confirm modal on launch);
+  // `onConsumeAutoOpen` clears it so a decline won't re-pop the same launch;
+  // `onEvolveComplete` commits the form advance once the result modal is dismissed.
+  evolutionAutoOpen: boolean;
+  onConsumeAutoOpen: () => void;
+  onEvolveComplete: () => void;
 }) {
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
   const pct        = Math.min(100, Math.round((xp / need) * 100));
+  // MON-6 — evolution eligibility is derived live so the "Ready to evolve" pill
+  // persists after a decline (the auto-open flag is one-shot; this is not).
+  const nextM             = MONSTERS[Math.min(monsterIdx + 1, MONSTERS.length - 1)];
+  const evolutionEligible = monsterIdx < MONSTERS.length - 1 && xp >= need;
   const allAssignedChores = managedChores.filter(c =>
     c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName)
   );
@@ -1832,6 +1844,58 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const [showRename, setShowRename]     = useState(false);
   const [renameText, setRenameText]     = useState(monsterName);
   const [toastMsg, setToastMsg]         = useState<string | null>(null);
+
+  // ── MON-6 — in-place evolution moment ─────────────────────────────────────
+  // The moment plays *inside* the real monster card: its background turns cosmic
+  // and the monster cross-fades in place (no overlaid duplicate card). A light
+  // full-screen scrim dims the surrounding chrome; the apex flash punches over it.
+  const [showEvolveConfirm, setShowEvolveConfirm] = useState(false);
+  const [showEvolveResult,  setShowEvolveResult]  = useState(false);
+  const [evolving,          setEvolving]          = useState(false);
+  const autoOpenedRef = useRef(false);
+  const chromeDim = useRef(new Animated.Value(0)).current; // dims chrome around the card
+  const evoFlash  = useRef(new Animated.Value(0)).current; // full-screen apex flash
+
+  // Auto-open the confirm modal on launch while eligible (interrupt pattern).
+  // Consume the flag immediately so declining won't re-pop on this launch — the
+  // pill (still eligible) remains the re-entry point.
+  useEffect(() => {
+    if (evolutionAutoOpen && evolutionEligible && !autoOpenedRef.current && !evolving) {
+      autoOpenedRef.current = true;
+      setShowEvolveConfirm(true);
+      onConsumeAutoOpen();
+    }
+  }, [evolutionAutoOpen, evolutionEligible, evolving]);
+
+  // "Yes! ✨" — play the in-place moment. No state commit yet; the form advance
+  // lands only when the result modal is dismissed.
+  const startEvolve = useCallback(() => {
+    setShowEvolveConfirm(false);
+    setEvolving(true);
+    Animated.timing(chromeDim, { toValue: 0.4, duration: 1600, useNativeDriver: true }).start();
+  }, []);
+
+  // Apex — fire the full-screen white flash (driven by EvolutionFX's timeline).
+  const onEvolveApex = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(evoFlash, { toValue: 1, duration: 90, useNativeDriver: true }),
+      Animated.timing(evoFlash, { toValue: 0, duration: 360, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  // "Awesome! 🎉" — commit the advance and settle into the new normal.
+  const finishEvolve = useCallback(() => {
+    setShowEvolveResult(false);
+    setEvolving(false);
+    chromeDim.setValue(0);
+    evoFlash.setValue(0);
+    // Snap the XP bar straight to the new baseline. Letting the normal spring run
+    // from the old full bar (100%) down to the reset value overshoots past 0 and
+    // rebounds — reading as a flicker as the card returns to its resting state.
+    const carry = Math.max(0, xp - need);
+    xpWidthAnim.setValue(Math.min(100, Math.round((carry / nextM.needed) * 100)));
+    onEvolveComplete();
+  }, [onEvolveComplete, xp, need, nextM]);
   const toastTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (msg: string) => {
     setToastMsg(null);
@@ -1933,7 +1997,9 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
       </View>
 
       <ScrollView style={{ flex: 1, overflow: 'visible' }} showsVerticalScrollIndicator={false} contentContainerStyle={s.homeScroll}>
-        {/* Character Card — long press opens debug menu */}
+        {/* Character Card — long press opens debug menu. During the evolution
+            moment, EvolutionFX paints over the card in place (cosmic background +
+            monster cross-fade), so the normal monster + stat plate fade out. */}
         <View style={s.homeCharCard}>
           <TouchableOpacity
             activeOpacity={1}
@@ -1943,7 +2009,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
           >
             <View style={s.homeCharImage} pointerEvents="box-none">
               {/* Outer bob wraps both monster + platform so they float together */}
-              <Animated.View style={{ alignItems: 'center', transform: [{ translateY: bobTranslate }, { scale: monsterScale }] }} pointerEvents="none">
+              <Animated.View style={{ alignItems: 'center', opacity: evolving ? 0 : 1, transform: [{ translateY: bobTranslate }, { scale: monsterScale }] }} pointerEvents="none">
                 {/* Monster — independent Y offset */}
                 <View style={{ transform: [{ translateY: dbgMonsterY }], zIndex: 2 }}>
                   <Image
@@ -1961,13 +2027,15 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
               </Animated.View>
             </View>
           </TouchableOpacity>
-          <View style={s.homeCharInfo}>
+          <View style={[s.homeCharInfo, evolving && { opacity: 0 }]}>
             <View style={s.homeCharNameRow}>
               <TouchableOpacity onPress={() => { setRenameText(monsterName); setShowRename(true); }} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={s.homeCharName}>{monsterName}</Text>
                 <Image source={require('./assets/icons/icon-pencil.png')} style={{ width: scale(16), height: scale(16), opacity: 0.5 }} resizeMode="contain" />
               </TouchableOpacity>
-              <Text style={s.homeCharLevel}>LEVEL {monster.level}</Text>
+              {evolutionEligible
+                ? <ReadyToEvolvePill onPress={() => setShowEvolveConfirm(true)} />
+                : <Text style={s.homeCharLevel}>LEVEL {monster.level}</Text>}
             </View>
             <View style={s.homeXpTrack}>
               <Animated.View style={[s.homeXpFill, {
@@ -1976,6 +2044,27 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
             </View>
             <Text style={s.homeXpText}>{Math.min(xp, need)}/{need}xp</Text>
           </View>
+
+          {/* In-place evolution FX — fills the card exactly (no measured overlay) */}
+          {evolving && (
+            <EvolutionFX
+              monsterAreaH={340}
+              oldImg={monsterImg}
+              newImg={nextMonsterImg}
+              platformImg={platformImg}
+              platformAspect={platformAspect}
+              monsterSize={dbgMonsterSize}
+              monsterY={dbgMonsterY}
+              platformSize={dbgPlatformSize}
+              platformY={dbgPlatformY}
+              oldName={monsterName}
+              newName={monsterName}
+              oldLevel={monster.level}
+              newLevel={nextM.level}
+              onApex={onEvolveApex}
+              onResolve={() => setShowEvolveResult(true)}
+            />
+          )}
         </View>
 
         {/* Quests Header */}
@@ -2068,8 +2157,70 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* MON-6 — chrome dim + apex flash. The cosmic card transform itself is
+          rendered in-place inside the card (EvolutionFX); these two full-screen
+          layers just dim the surroundings and flash at the burst. */}
+      {/* Rendered in a window-level Modal so the dim sits above the bottom tab bar
+          and the status bar. Hidden once the result modal takes over (its own
+          scrim covers the chrome), avoiding stacked modals. */}
+      <Modal transparent visible={evolving && !showEvolveResult} animationType="none" statusBarTranslucent onRequestClose={() => {}}>
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#0A0814', opacity: chromeDim }]} />
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#FFFFFF', opacity: evoFlash }]} />
+      </Modal>
+
+      {/* Confirm modal — auto-opens on launch when eligible, or via the pill */}
+      <Modal visible={showEvolveConfirm} transparent animationType="fade" onRequestClose={() => setShowEvolveConfirm(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 24 }}>
+          <View style={{ backgroundColor: '#FAF9F4', borderRadius: 24, borderWidth: 2.5, borderColor: '#1A1A1A', padding: 24, gap: 16, ...SOLID_SHADOW }}>
+            <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center' }}>Evolve {monsterName}?</Text>
+            <Text style={{ fontSize: scale(15), fontFamily: 'Inter_500Medium', color: '#6B6B6B', textAlign: 'center' }}>{monsterName} is ready to grow into its next form.</Text>
+            <Button label="Yes! ✨" onPress={startEvolve} />
+            <TouchableOpacity onPress={() => setShowEvolveConfirm(false)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <Text style={{ fontSize: scale(14), color: '#ABABAB', fontFamily: 'Inter_600SemiBold' }}>Not yet</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Result modal — celebrates the new form once the moment settles */}
+      <Modal visible={showEvolveResult} transparent animationType="fade" onRequestClose={finishEvolve}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', paddingHorizontal: 24 }}>
+          <View style={{ backgroundColor: '#FAF9F4', borderRadius: 24, borderWidth: 2.5, borderColor: '#1A1A1A', padding: 24, gap: 14, alignItems: 'center', ...SOLID_SHADOW }}>
+            <Image source={nextMonsterImg} style={{ width: scale(160), height: scale(160) }} resizeMode="contain" />
+            <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A', textAlign: 'center' }}>You evolved!</Text>
+            <Text style={{ fontSize: scale(15), fontFamily: 'Inter_500Medium', color: '#6B6B6B', textAlign: 'center' }}>{MONSTERS[monsterIdx].name} grew into {nextM.name}!</Text>
+            <View style={{ alignSelf: 'stretch' }}><Button label="Awesome! 🎉" onPress={finishEvolve} /></View>
+          </View>
+        </View>
+      </Modal>
+
       {toastMsg && <Toast key={toastMsg + Date.now()} message={toastMsg} />}
     </View>
+  );
+}
+
+// MON-6 — pulsing slime-lime "Ready to evolve" pill that replaces the level
+// badge in the stat plate when the monster has hit its XP gate. Tap re-opens the
+// confirm modal. Reuses existing tokens (lime + ink border + offset shadow).
+function ReadyToEvolvePill({ onPress }: { onPress: () => void }) {
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  const sc = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85}>
+      <Animated.View style={{ backgroundColor: '#C5F215', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 12, paddingVertical: 5, transform: [{ scale: sc }], ...SOLID_SHADOW_SM }}>
+        <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', letterSpacing: 0.3 }}>READY TO EVOLVE</Text>
+      </Animated.View>
+    </TouchableOpacity>
   );
 }
 
@@ -5125,303 +5276,6 @@ function WalletScreen({ coins, done, battleResult, monsterIdx, baseRate, goals, 
 
       {/* Toast */}
       {toastMsg && <Toast key={toastMsg + Date.now()} message={toastMsg} />}
-    </View>
-  );
-}
-
-function EvolveScreen({ fromIdx, onDone, monsterId }: { fromIdx: MonsterIdx; onDone: () => void; monsterId: MonsterId }) {
-  const toIdx     = Math.min(fromIdx + 1, 7) as MonsterIdx;
-  const toM       = MONSTERS[toIdx];
-  const fromImg   = monsterImgSrc(monsterId, fromIdx);
-  const toImg     = monsterImgSrc(monsterId, toIdx);
-  const { scaleAnim: ctaScale, pressIn: ctaPressIn, pressOut: ctaPressOut } = useScaleAnimation({ toScale: 0.96 });
-
-  const { width: W, height: H } = Dimensions.get('window');
-  const cx        = W / 2;
-  const monsterCY = H * 0.44;
-
-  // All animation state kept in a ref to avoid stale closures in the RAF loop
-  const v = useRef({
-    t: 0,
-    bgDark: 0, beamReach: 0, beamIntensity: 0,
-    sourceFlare: 0, chargeRing: 0, screenWhite: 0, purpleFlash: 0,
-    monsterAlpha: 1, monsterScale: 1,
-    newMonsterAlpha: 0, newMonsterScale: 0,
-    bannerOpacity: 0, ctaOpacity: 0,
-    shakeX: 0, shakeY: 0,
-  }).current;
-
-  type Ring     = { r: number; alpha: number; key: number };
-  type Particle = { x: number; y: number; vx: number; vy: number; r: number; color: string; alpha: number; key: number };
-  const ringsRef     = useRef<Ring[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const ringKey      = useRef(0);
-  const pKey         = useRef(0);
-
-  const [, setTick]  = useState(0);
-  const isMounted    = useRef(true);
-  useEffect(() => () => { isMounted.current = false; }, []);
-
-  useEffect(() => {
-    let rafId: number;
-    let running = true;
-
-    // Frame loop — updates rings/particles and triggers re-render
-    const frame = () => {
-      if (!running) return;
-      v.t += 0.025;
-      ringsRef.current.forEach(r => { r.r += 2.5; r.alpha -= 0.016; });
-      ringsRef.current = ringsRef.current.filter(r => r.alpha > 0);
-      particlesRef.current.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.alpha -= 0.013; });
-      particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-      if (isMounted.current) setTick(n => n + 1);
-      rafId = requestAnimationFrame(frame);
-    };
-    rafId = requestAnimationFrame(frame);
-
-    // Smooth value interpolator
-    const animV = (set: (x: number) => void, from: number, to: number, dur: number, ease = (t: number) => t) =>
-      new Promise<void>(resolve => {
-        const start = Date.now();
-        const tick = () => {
-          if (!running) { resolve(); return; }
-          const p = Math.min((Date.now() - start) / dur, 1);
-          set(from + (to - from) * ease(p));
-          if (p < 1) requestAnimationFrame(tick); else resolve();
-        };
-        requestAnimationFrame(tick);
-      });
-
-    const wait      = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-    const easeOut   = (t: number) => 1 - (1 - t) ** 2;
-    const easeInOut = (t: number) => t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-    const easeOut5  = (t: number) => 1 - (1 - t) ** 5;
-
-    const spawnRing = () => ringsRef.current.push({ r: 8, alpha: 0.85, key: ringKey.current++ });
-    const spawnParticles = () => {
-      // Heavy purple palette — just a few whites for pop
-      const cols = ['#a855f7', '#9333ea', '#c084fc', '#7c3aed', '#d8b4fe', '#a855f7', '#6d28d9', '#ffffff', '#e9d5ff', '#c5f215'];
-      // Radial burst — 30 particles
-      for (let i = 0; i < 30; i++) {
-        const a   = (i / 30) * Math.PI * 2;
-        const spd = 6 + Math.random() * 10;
-        particlesRef.current.push({ x: cx, y: monsterCY, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd - 3, r: 5 + Math.random() * 9, color: cols[i % cols.length], alpha: 1, key: pKey.current++ });
-      }
-      // Upward shower sparks
-      for (let i = 0; i < 20; i++) {
-        particlesRef.current.push({ x: cx + (Math.random() - 0.5) * 120, y: monsterCY - Math.random() * 80, vx: (Math.random() - 0.5) * 5, vy: -(7 + Math.random() * 10), r: 3 + Math.random() * 6, color: cols[Math.floor(Math.random() * cols.length)], alpha: 1, key: pKey.current++ });
-      }
-      // Chunky close-range shards
-      for (let i = 0; i < 10; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const spd = 2 + Math.random() * 4;
-        particlesRef.current.push({ x: cx + (Math.random()-0.5)*40, y: monsterCY + (Math.random()-0.5)*40, vx: Math.cos(a)*spd, vy: Math.sin(a)*spd - 1, r: 8 + Math.random() * 10, color: i % 2 === 0 ? '#7c3aed' : '#a855f7', alpha: 0.85, key: pKey.current++ });
-      }
-    };
-    const doShake = (amp: number, dur: number) => {
-      const start = Date.now();
-      const tick = () => {
-        if (!running) return;
-        const e = Date.now() - start;
-        if (e < dur) {
-          const d = 1 - e / dur;
-          v.shakeX = (Math.random() - 0.5) * amp * 2 * d;
-          v.shakeY = (Math.random() - 0.5) * amp * 2 * d;
-          setTimeout(tick, 28);
-        } else { v.shakeX = 0; v.shakeY = 0; }
-      };
-      tick();
-    };
-
-    (async () => {
-      // 1. Charge build-up
-      await Promise.all([
-        animV(x => v.bgDark = x,      0, 1,   1300, easeInOut),
-        animV(x => v.chargeRing = x,  0, 1,   1300, easeOut),
-        animV(x => v.sourceFlare = x, 0, 0.4, 900,  easeOut),
-      ]);
-      // 2. Beam shoots down (fast!)
-      await Promise.all([
-        animV(x => v.beamReach = x,     0,   1,    210, easeOut5),
-        animV(x => v.beamIntensity = x, 0,   0.75, 190, easeOut),
-        animV(x => v.sourceFlare = x,   0.4, 1,    190, easeOut),
-      ]);
-      // 3. Hold — monster trembles in beam
-      doShake(4, 900);
-      spawnRing(); spawnRing();
-      await wait(200); spawnRing();
-      await animV(x => v.beamIntensity = x, 0.75, 1, 180, easeOut);
-      await wait(320); spawnRing();
-      await wait(150);
-      // 4. Flash!
-      doShake(30, 800);
-      // Purple pre-flash then white out
-      await Promise.all([
-        animV(x => v.purpleFlash = x,   0, 1,   80, easeOut5),
-        animV(x => v.beamIntensity = x, 1, 2.5, 80),
-        animV(x => v.sourceFlare = x,   1, 2,   80),
-      ]);
-      await Promise.all([
-        animV(x => v.screenWhite = x,   0, 1,   90, easeOut5),
-        animV(x => v.purpleFlash = x,   1, 0,   90),
-        animV(x => v.beamIntensity = x, 2.5, 0, 90),
-        animV(x => v.sourceFlare = x,   2, 0,   90),
-        animV(x => v.monsterAlpha = x,  1, 0,   90),
-      ]);
-      spawnParticles(); spawnParticles(); // double burst
-      spawnRing(); spawnRing(); spawnRing(); spawnRing(); spawnRing();
-      await wait(75);
-      // 5. Reveal new monster
-      await Promise.all([
-        animV(x => v.screenWhite = x,      1, 0,   700, easeOut),
-        animV(x => v.newMonsterScale = x,  0, 1.2, 420, easeOut5),
-        animV(x => v.newMonsterAlpha = x,  0, 1,   420, easeOut),
-        animV(x => v.chargeRing = x,       1, 0,   400),
-        animV(x => v.bgDark = x,           1, 0.5, 650),
-      ]);
-      await animV(x => v.newMonsterScale = x, 1.2, 1, 320, easeOut);
-      await animV(x => v.bannerOpacity = x, 0, 1, 400, easeOut);
-      await animV(x => v.ctaOpacity = x,    0, 1, 300, easeOut);
-    })().catch(() => {});
-
-    return () => { running = false; cancelAnimationFrame(rafId); };
-  }, []);
-
-  const beamBottom  = v.beamReach * monsterCY;
-  const bOuter = 140, bMid = 60, bCore = 10;
-
-  return (
-    <View style={{ flex: 1, backgroundColor: '#0a0814' }}>
-
-      {/* SVG layer: beam, charge rings, particles */}
-      <Svg width={W} height={H} style={StyleSheet.absoluteFill} pointerEvents="none">
-        <Defs>
-          <SvgLinearGradient id="bOuter" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0"   stopColor="#c084fc" stopOpacity={Math.min(1, v.beamIntensity * 0.7)} />
-            <Stop offset="0.5" stopColor="#a855f7" stopOpacity={Math.min(1, v.beamIntensity * 0.4)} />
-            <Stop offset="1"   stopColor="#7c3aed" stopOpacity="0" />
-          </SvgLinearGradient>
-          <SvgLinearGradient id="bMid" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0"   stopColor="#e9d5ff" stopOpacity={Math.min(1, v.beamIntensity * 0.85)} />
-            <Stop offset="0.7" stopColor="#c084fc" stopOpacity={Math.min(1, v.beamIntensity * 0.5)} />
-            <Stop offset="1"   stopColor="#a855f7" stopOpacity="0" />
-          </SvgLinearGradient>
-          <SvgLinearGradient id="bCore" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#ffffff" stopOpacity={Math.min(1, v.beamIntensity)} />
-            <Stop offset="1" stopColor="#e9d5ff" stopOpacity={Math.min(1, v.beamIntensity * 0.7)} />
-          </SvgLinearGradient>
-        </Defs>
-
-        {/* Full-screen nebula glow when beam fires */}
-        {v.beamIntensity > 0.05 && (
-          <Ellipse cx={cx} cy={-20} rx={W} ry={H * 0.55} fill={`rgba(120,60,220,${Math.min(0.4, v.beamIntensity * 0.25)})`} />
-        )}
-
-        {/* Charge rings + spokes */}
-        {v.chargeRing > 0 && [0,1,2,3,4,5].map(i => {
-          const r = 70 + i * 18 + Math.sin(v.t * 4) * 6;
-          return <Circle key={i} cx={cx} cy={monsterCY} r={r} fill="none" stroke={`rgba(190,140,255,${v.chargeRing * (0.28 - i * 0.04)})`} strokeWidth={2.5 + i * 0.5} />;
-        })}
-        {v.chargeRing > 0 && Array.from({ length: 12 }, (_, i) => {
-          const a = (i / 12) * Math.PI * 2 + v.t * 1.2;
-          const d = 130 + v.chargeRing * 22;
-          return (
-            <Line key={i}
-              x1={cx + Math.cos(a) * d}  y1={monsterCY + Math.sin(a) * d}
-              x2={cx + Math.cos(a) * 52} y2={monsterCY + Math.sin(a) * 52}
-              stroke={`rgba(220,180,255,${v.chargeRing * 0.55})`} strokeWidth={2}
-            />
-          );
-        })}
-
-        {/* Ground rings */}
-        {ringsRef.current.map(r => (
-          <Circle key={r.key} cx={cx} cy={monsterCY + 55} r={r.r} fill="none" stroke={`rgba(168,85,247,${r.alpha})`} strokeWidth={2.5} />
-        ))}
-
-        {/* Beam — three layers */}
-        {v.beamIntensity > 0.01 && beamBottom > 2 && <>
-          {/* Wide outer purple glow */}
-          <Polygon points={`${cx},0 ${cx-bOuter},${beamBottom} ${cx+bOuter},${beamBottom}`} fill="url(#bOuter)" />
-          {/* Mid white-purple layer */}
-          <Polygon points={`${cx},0 ${cx-bMid},${beamBottom}   ${cx+bMid},${beamBottom}`}   fill="url(#bMid)" />
-          {/* Bright core */}
-          <Polygon points={`${cx},0 ${cx-bCore},${beamBottom}  ${cx+bCore},${beamBottom}`}  fill="url(#bCore)" />
-          {/* Huge bloom at impact */}
-          <Ellipse cx={cx} cy={beamBottom} rx={180} ry={55} fill={`rgba(168,85,247,${Math.min(0.5, v.beamIntensity * 0.4)})`} />
-          <Ellipse cx={cx} cy={beamBottom} rx={110} ry={36} fill={`rgba(220,180,255,${Math.min(0.7, v.beamIntensity * 0.55)})`} />
-          <Ellipse cx={cx} cy={beamBottom} rx={55}  ry={20} fill={`rgba(255,255,255,${Math.min(0.9, v.beamIntensity * 0.75)})`} />
-        </>}
-
-        {/* Source flare — huge */}
-        {v.sourceFlare > 0.01 && <>
-          <Ellipse cx={cx} cy={0} rx={Math.min(W, 160 + v.sourceFlare * 120)} ry={Math.min(W, 160 + v.sourceFlare * 120)} fill={`rgba(160,80,255,${Math.min(0.6, v.sourceFlare * 0.5)})`} />
-          <Ellipse cx={cx} cy={0} rx={80 + v.sourceFlare * 60} ry={80 + v.sourceFlare * 60} fill={`rgba(220,170,255,${Math.min(0.8, v.sourceFlare * 0.7)})`} />
-          <Ellipse cx={cx} cy={0} rx={36} ry={36} fill={`rgba(255,255,255,${Math.min(1, v.sourceFlare)})`} />
-        </>}
-
-        {/* Particles */}
-        {particlesRef.current.map(p => (
-          <Circle key={p.key} cx={p.x} cy={p.y} r={p.r} fill={p.color} opacity={Math.max(0, p.alpha)} />
-        ))}
-      </Svg>
-
-      {/* Old monster (shakes in beam) */}
-      {v.monsterAlpha > 0.01 && (
-        <View style={{
-          position: 'absolute',
-          top: monsterCY - 170, left: cx - 100, width: 200, height: 200,
-          opacity: v.monsterAlpha,
-          transform: [{ scale: v.monsterScale }, { translateX: v.shakeX }, { translateY: v.shakeY }],
-        }}>
-          <View style={{ flex: 1, borderRadius: 100, backgroundColor: 'rgba(168,85,247,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Image source={fromImg} style={{ width: 180, height: 180 }} resizeMode="contain" />
-          </View>
-        </View>
-      )}
-
-      {/* New monster springs in */}
-      {v.newMonsterAlpha > 0.01 && (
-        <View style={{
-          position: 'absolute',
-          top: monsterCY - 230, left: cx - 160, width: 320, height: 320,
-          opacity: v.newMonsterAlpha,
-          transform: [{ scale: v.newMonsterScale }],
-        }}>
-          <View style={{ flex: 1, borderRadius: 160, backgroundColor: 'rgba(197,242,21,0.12)', borderWidth: 3, borderColor: '#C5F215', alignItems: 'center', justifyContent: 'center' }}>
-            <Image source={toImg} style={{ width: 300, height: 300 }} resizeMode="contain" />
-          </View>
-        </View>
-      )}
-
-      {/* EVOLVED! banner */}
-      {v.bannerOpacity > 0.01 && (
-        <View style={{ position: 'absolute', bottom: 200, left: 0, right: 0, alignItems: 'center', opacity: v.bannerOpacity }}>
-          <Text style={{ fontSize: scale(52), fontFamily: 'Inter_900Black', color: '#C5F215', letterSpacing: -1 }}>EVOLVED!</Text>
-          <Text style={{ fontSize: scale(15), color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>{toM.name} · Level {toM.level}</Text>
-        </View>
-      )}
-
-      {/* Continue button */}
-      {v.ctaOpacity > 0.01 && (
-        <View style={{ position: 'absolute', bottom: 60, left: 24, right: 24, opacity: v.ctaOpacity }}>
-          <TouchableOpacity style={s.evCta} onPress={onDone} onPressIn={ctaPressIn} onPressOut={ctaPressOut} activeOpacity={1}>
-            <Animated.View style={{ transform: [{ scale: ctaScale }], alignItems: 'center' }}>
-              <Text style={s.evCtaText}>Continue</Text>
-            </Animated.View>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Purple pre-flash */}
-      {v.purpleFlash > 0.01 && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#7c3aed', opacity: v.purpleFlash }]} pointerEvents="none" />
-      )}
-
-      {/* White mega-flash */}
-      {v.screenWhite > 0.01 && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'white', opacity: v.screenWhite }]} pointerEvents="none" />
-      )}
     </View>
   );
 }
@@ -10443,13 +10297,9 @@ function AppInner() {
     setKwDbg(prev => ({ ...KW_DEBUG_DEFAULTS, ...prev }));
   }, []);
 
-  // Fire deferred evolution when the kid switches back to their view
-  useEffect(() => {
-    if (viewMode === 'kid' && currentKidName && pendingEvolution) {
-      setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }));
-      setScreen('evolve');
-    }
-  }, [viewMode, pendingEvolution, currentKidName]);
+  // MON-6 — the deferred-evolution navigation effect is gone: `pendingEvolution`
+  // now feeds HomeScreen as `evolutionAutoOpen` (auto-opens the in-place confirm
+  // modal), and HomeScreen clears the flag via `onConsumeAutoOpen`. No screen nav.
 
   // Fire deferred kid payout celebration when the kid switches back to their view
   useEffect(() => {
@@ -11194,6 +11044,9 @@ function AppInner() {
   const navTab = useCallback((t: Tab) => { setTab(t); setScreen(t); }, []);
   const showTabBar = ['home', 'world', 'wallet', 'trophies'].includes(screen);
 
+  // MON-6 — commit the form advance. Called by HomeScreen once the in-place
+  // moment's result modal is dismissed (we're already on the home screen, so no
+  // navigation is needed). Clears `pendingEvolution` so it won't re-fire.
   const handleEvolveDone = useCallback(() => {
     setKidMonster(currentKidName, s => ({
       ...s,
@@ -11201,6 +11054,7 @@ function AppInner() {
       // Carry excess XP into the next level rather than dropping it to 0,
       // so a kid who overshoots the threshold doesn't lose those points.
       xp: Math.max(0, s.xp - MONSTERS[s.monsterIdx].needed),
+      pendingEvolution: false,
       done: {},
     }));
     // Awarded here — when the evolution actually completes — so every trigger
@@ -11212,8 +11066,6 @@ function AppInner() {
     const newIdx = Math.min((kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).monsterIdx + 1, MONSTERS.length - 1);
     if (newIdx >= 5) checkMilestone('rare-find', currentKidName);
     if (newIdx >= MONSTERS.length - 1) checkMilestone('full-power', currentKidName);
-    setTab('home');
-    setScreen('home');
   }, [currentKidName, checkMilestone, kidMonsterState]);
 
   // Parent navigation — always track where we came from so back buttons work correctly
@@ -11596,7 +11448,7 @@ function AppInner() {
                   setKidMonster(currentKidName, s => ({ ...s, selectedMonsterName: name }));
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
-                }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} /></ErrorBoundary>}
+                }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
             {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} captureCoins={activeKidBoss.captureCoins} fightsLeft={fightsLeft} totalFighters={householdKidNames.length} hasFelled={activeKidHasFelled} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : activeKidBoss} /></ErrorBoundary>
@@ -11754,12 +11606,6 @@ function AppInner() {
             </Modal>
           </View>
         )}
-        <EvolutionAnimation
-          monsterBefore={currentMonsterImg}
-          monsterAfter={nextMonsterImg}
-          onComplete={handleEvolveDone}
-          visible={screen === 'evolve'}
-        />
       </View>
     </SafeAreaView>
 
@@ -12388,17 +12234,6 @@ const s = StyleSheet.create({
   resultSub:       { fontSize: scale(13), color: C.muted, marginBottom: 6 },
   resultCoins:     { fontSize: scale(22), fontFamily: 'Inter_900Black', color: C.gold },
   resultCoinsLbl:  { fontSize: scale(12), color: C.muted, marginBottom: 20 },
-  evCta:              { backgroundColor: '#C5F215', borderRadius: 14, paddingHorizontal: 36, paddingVertical: 15, borderWidth: 2, borderColor: '#1A1A1A', width: '100%', alignItems: 'center' },
-  evCtaText:          { fontSize: scale(16), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -0.3 },
-  evolveScreen:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
-  evolveOverlayBg:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#1A0A2E' },
-  evolveRingContainer:{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
-  evolveRing:         { position: 'absolute', width: 200, height: 200, borderRadius: 100, borderWidth: 2, borderColor: '#6B35F0', opacity: 0 },
-  evolveBanner:       { fontSize: scale(42), fontFamily: 'Inter_900Black', color: '#C5F215', letterSpacing: -1, textAlign: 'center' },
-  evolveSide:         { alignItems: 'center', gap: 6 },
-  evolveName:         { fontSize: scale(14), fontFamily: 'Inter_900Black', color: C.text },
-  evolveLvl:          { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: C.muted },
-  evolveSub:          { fontSize: scale(14), color: 'rgba(255,255,255,0.6)', textAlign: 'center', marginTop: 8 },
   walletTotal:     { backgroundColor: C.surface, borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, paddingBottom: 12, ...SOLID_SHADOW },
   walletLabel:     { fontSize: scale(10), fontFamily: 'Inter_700Bold', letterSpacing: 1.8, color: C.muted, marginBottom: 4 },
   walletAmount:    { fontSize: scale(34), fontFamily: 'Inter_900Black', color: C.text, letterSpacing: -1 },
