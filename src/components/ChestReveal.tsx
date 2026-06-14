@@ -36,6 +36,12 @@ export interface ChestRevealProps {
   /** Fallback when kidDbId isn't resolved yet: hand the DB write up to be
    *  queued + retried once the kid row id is available (Gap 6). */
   onQueueDbWrite?: (kidName: string, collectibleId: string, rarity: string) => void;
+  // Cooperative boss outcome (MON-84). Shown as a banner when the household has
+  // 2+ kids: either "you wore him down, N left" or "the family captured him!".
+  bossName?: string;
+  coopFamilyCaptured?: boolean;
+  coopFightsLeft?: number;
+  coopTotalFighters?: number;
 }
 
 // ─── Chest frame sequences ────────────────────────────────────────────────────
@@ -140,7 +146,18 @@ function TierMeter({ activeTier }: { activeTier: ChestTier }) {
 
 // ─── ChestReveal component ────────────────────────────────────────────────────
 
-export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidName, kidDbId, onQueueDbWrite }: ChestRevealProps) {
+export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidName, kidDbId, onQueueDbWrite, bossName, coopFamilyCaptured, coopFightsLeft = 0, coopTotalFighters = 1 }: ChestRevealProps) {
+  // Cooperative "wearing him down" banner — only meaningful in a 2+ kid household.
+  const showCoop  = coopTotalFighters > 1 && !!bossName;
+  const coopTitle = coopFamilyCaptured
+    ? `🎉 The family captured ${bossName}!`
+    : `💥 You staggered ${bossName}!`;
+  const coopSub   = coopFamilyCaptured
+    ? 'You all wore him down — he’s in the collection.'
+    : coopFightsLeft <= 1
+      ? 'One more fight and the family captures him!'
+      : `${coopFightsLeft} more fights and the family captures him!`;
+
   const [phase, setPhase]       = useState<Phase>('preOpen');
   const [tapCount, setTapCount] = useState(0);
   const [saved, setSaved]       = useState(false);
@@ -337,6 +354,14 @@ export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDon
       {/* ── Collectible card ── */}
       {phase === 'collectible' && (
         <View style={styles.collectibleArea}>
+          {/* Cooperative boss outcome (MON-84) */}
+          {showCoop && (
+            <Animated.View style={[styles.coopBanner, coopFamilyCaptured ? styles.coopBannerWin : styles.coopBannerStagger, { opacity: cardOpacity }]}>
+              <Text style={styles.coopTitle}>{coopTitle}</Text>
+              <Text style={styles.coopSub}>{coopSub}</Text>
+            </Animated.View>
+          )}
+
           <Animated.View style={[styles.itemWrap, { opacity: itemOpacity, transform: [{ translateY: itemY }, { scale: itemScale }] }]}>
             <Image source={collectible.image} style={styles.itemImg} resizeMode="contain" />
           </Animated.View>
@@ -506,5 +531,37 @@ const styles = StyleSheet.create({
     ...textStyles.secondaryText,
     color: '#C5F215',
     marginTop: 4,
+  },
+
+  // Cooperative boss outcome banner (MON-84)
+  coopBanner: {
+    width: '100%',
+    borderRadius: scale(16),
+    borderWidth: 2.5,
+    borderColor: '#1A1A1A',
+    paddingHorizontal: scale(18),
+    paddingVertical: scale(12),
+    alignItems: 'center',
+    gap: scale(3),
+    marginBottom: scale(16),
+    shadowColor: '#1A1A1A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 4,
+  },
+  coopBannerWin:     { backgroundColor: '#D8F52F' },
+  coopBannerStagger: { backgroundColor: '#FFFFFF' },
+  coopTitle: {
+    fontFamily: 'FredokaOne_400Regular',
+    fontSize: scale(18),
+    color: '#1A1A1A',
+    textAlign: 'center',
+  },
+  coopSub: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: scale(13),
+    color: '#5A23C8',
+    textAlign: 'center',
   },
 });
