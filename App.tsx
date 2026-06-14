@@ -11294,12 +11294,10 @@ function AppInner() {
   if (appMode === 'onboarding') {
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-          <StatusBar barStyle="dark-content" />
-          <OnboardingFlow
-            onReady={() => setAppMode('roleSelect')}
-          />
-        </SafeAreaView>
+        <StatusBar barStyle="dark-content" />
+        <OnboardingFlow
+          onReady={() => setAppMode('roleSelect')}
+        />
       </SafeAreaProvider>
     );
   }
