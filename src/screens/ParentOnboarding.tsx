@@ -80,9 +80,8 @@ const DIFF_HARD_TEXT  = '#993C1D';
 const AGE_RANGES: OnboardingChild['ageRange'][] = ['5-6', '7-9', '10-12', '13+'];
 const DIFFICULTIES: OnboardingChild['difficulty'][] = ['Easy', 'Medium', 'Hard'];
 
-// MON-85 parent flow: Add kids → Identity → Shared chores → Base pay →
-// Pairing codes → Notifications → All set.
-const TOTAL_STEPS = 7;
+// MON-85 parent flow (prototype order): Identity → Add kid → Anyone else →
+// Shared chores → Base pay → Pairing codes → Notifications → All set.
 
 const AVATAR_COLORS = ['#E0D4FF', '#FFD6E4', '#C8EEFF', '#D6FFE8', '#FFF3C8', '#FFE0CC'];
 
@@ -216,35 +215,17 @@ function makeChild(index: number): OnboardingChild {
 
 // ─── Shared sub-components ─────────────────────────────────────────────────
 
-function StepDots({ step, total }: { step: number; total: number }) {
+// Prototype top bar: a single back chevron (no step dots). When `onBack` is
+// omitted (the first parent step) we render an empty spacer to keep layout
+// height consistent.
+function ObTopBar({ onBack }: { onBack?: () => void }) {
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-      {Array.from({ length: total }).map((_, i) => {
-        const active = i + 1 === step;
-        return (
-          <View
-            key={i}
-            style={{
-              width: active ? 26 : 9,
-              height: 9,
-              borderRadius: active ? 6 : 5,
-              borderWidth: active ? 0 : 2,
-              borderColor: BLACK,
-              backgroundColor: active ? PURPLE : colors.white,
-            }}
-          />
-        );
-      })}
-    </View>
-  );
-}
-
-function StepHeader({ step, total, title, subtitle }: { step: number; total: number; title: string; subtitle?: string }) {
-  return (
-    <View style={{ paddingHorizontal: 24, paddingTop: 48, paddingBottom: 4 }}>
-      <StepDots step={step} total={total} />
-      <Text style={s.heading}>{title}</Text>
-      {!!subtitle && <Text style={s.subtitle}>{subtitle}</Text>}
+    <View style={s.topBar}>
+      {onBack ? (
+        <TouchableOpacity onPress={onBack} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} activeOpacity={0.7}>
+          <Text style={s.backChevron}>‹</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -281,8 +262,8 @@ function useBottomSheet(height = 300) {
 }
 
 function AgeRangePicker({
-  value, onChange,
-}: { value: OnboardingChild['ageRange']; onChange: (v: OnboardingChild['ageRange']) => void }) {
+  value, onChange, fullWidth,
+}: { value: OnboardingChild['ageRange']; onChange: (v: OnboardingChild['ageRange']) => void; fullWidth?: boolean }) {
   const { open, openSheet, closeSheet, sheetY, scrimOpacity } = useBottomSheet();
 
   function handlePress() {
@@ -291,10 +272,17 @@ function AgeRangePicker({
 
   return (
     <>
-      <TouchableOpacity style={s.selectPill} onPress={handlePress} activeOpacity={0.7}>
-        <Text style={s.selectPillLabel}>{value}</Text>
-        <Text style={s.selectChevron}>▾</Text>
-      </TouchableOpacity>
+      {fullWidth ? (
+        <TouchableOpacity style={s.ageField} onPress={handlePress} activeOpacity={0.8}>
+          <Text style={s.ageFieldLabel}>{value}</Text>
+          <Text style={s.ageFieldChevron}>▾</Text>
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity style={s.selectPill} onPress={handlePress} activeOpacity={0.7}>
+          <Text style={s.selectPillLabel}>{value}</Text>
+          <Text style={s.selectChevron}>▾</Text>
+        </TouchableOpacity>
+      )}
 
       <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet()}>
         <Animated.View style={[s.sheetScrim, { opacity: scrimOpacity }]}>
@@ -494,77 +482,108 @@ function PaySlider({ value, onChange, onLiveChange, onDragging }: { value: numbe
   );
 }
 
-// ─── Step 1: Add Children ──────────────────────────────────────────────────
+// ─── Add kid (single) ──────────────────────────────────────────────────────
+// MON-85: the prototype splits kid setup into two screens — a single-kid form
+// here (name + age + pairing note), then the "Anyone else?" roster. We edit a
+// working draft; the parent flow commits it into `children` on Continue.
 
-function Step1AddChildren({
-  children, setChildren, onNext,
+function AddKidScreen({
+  draft, setDraft, isFirst, canRemove, onContinue, onRemove, onBack,
 }: {
-  children: OnboardingChild[];
-  setChildren: React.Dispatch<React.SetStateAction<OnboardingChild[]>>;
-  onNext: () => void;
+  draft: OnboardingChild;
+  setDraft: React.Dispatch<React.SetStateAction<OnboardingChild | null>>;
+  isFirst: boolean;
+  canRemove: boolean;
+  onContinue: (draft: OnboardingChild) => void;
+  onRemove: () => void;
+  onBack: () => void;
 }) {
-  const canContinue = children.every(c => c.name.trim().length > 0);
-
-  const updateChild = (id: string, patch: Partial<OnboardingChild>) => {
-    setChildren(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
-    if (patch.ageRange) {
-      setChildren(prev => prev.map(c =>
-        c.id === id
-          ? { ...c, ...patch, selectedChoreIds: CHORES_BY_AGE[patch.ageRange!].slice(0, 4).map(ch => ch.id) }
-          : c
-      ));
-    }
-  };
-
-  const removeChild = (id: string) => {
-    if (children.length > 1) setChildren(prev => prev.filter(c => c.id !== id));
-  };
+  const canContinue = draft.name.trim().length > 0;
+  const patch = (p: Partial<OnboardingChild>) => setDraft(prev => (prev ? { ...prev, ...p } : prev));
 
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={1} total={TOTAL_STEPS} title="Add your kids" />
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
-          <Helper text="Add your kids now. Each gets their own Monstir. You can add as many as you like." />
-          {children.map((child, i) => (
-            <View key={child.id} style={s.childCard}>
-              <View style={s.childCardHeader}>
-                <AvatarPicker avatarIdx={child.avatarIdx} color={child.avatarColor} name={child.name} onChange={idx => updateChild(child.id, { avatarIdx: idx })} />
-                <View style={{ flex: 1 }}>
-                  <TextInput
-                    style={s.childNameInput}
-                    value={child.name}
-                    onChangeText={v => updateChild(child.id, { name: v })}
-                    placeholder={`Child ${i + 1}'s name`}
-                    placeholderTextColor={colors.hint}
-                    autoCapitalize="words"
-                    returnKeyType="done"
-                  />
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <Text style={s.kidAgeLabel}>Age</Text>
-                    <AgeRangePicker value={child.ageRange} onChange={v => updateChild(child.id, { ageRange: v })} />
-                  </View>
-                </View>
-                {children.length > 1 && (
-                  <TouchableOpacity onPress={() => removeChild(child.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Text style={{ fontSize: scale(18), color: colors.muted }}>🗑</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          ))}
+        <ObTopBar onBack={onBack} />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Helper text={isFirst ? 'Add your first kid. You can add the rest on the next step.' : 'Add another kid. They get their own Monstir too.'} />
 
-          <TouchableOpacity
-            style={s.addChildBtn}
-            onPress={() => setChildren(prev => [...prev, makeChild(prev.length)])}
-            activeOpacity={0.7}
-          >
-            <Text style={s.addChildLabel}>+ Add another kid</Text>
+          <Text style={s.fieldLabel}>KID'S NAME</Text>
+          <TextInput
+            style={s.fieldInput}
+            value={draft.name}
+            onChangeText={v => patch({ name: v })}
+            placeholder="Name"
+            placeholderTextColor={colors.hint}
+            autoCapitalize="words"
+            returnKeyType="done"
+          />
+
+          <Text style={[s.fieldLabel, { marginTop: 20 }]}>AGE</Text>
+          <AgeRangePicker value={draft.ageRange} onChange={v => patch({ ageRange: v })} fullWidth />
+
+          <View style={s.pairingNote}>
+            <Text style={s.pairingNoteText}>💡  They'll join with a pairing code. No email or password needed for the kid.</Text>
+          </View>
+
+          {canRemove && (
+            <TouchableOpacity onPress={onRemove} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 10, marginTop: 8 }}>
+              <Text style={s.removeKidLink}>Remove this kid</Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+
+        <View style={s.footer}>
+          <Button label="Continue" onPress={() => onContinue(draft)} disabled={!canContinue} />
+        </View>
+      </SafeAreaView>
+    </DotGridBg>
+  );
+}
+
+// ─── Anyone else? (roster) ─────────────────────────────────────────────────
+
+function AnyoneElseScreen({
+  children, onAddAnother, onEdit, onContinue, onBack,
+}: {
+  children: OnboardingChild[];
+  onAddAnother: () => void;
+  onEdit: (child: OnboardingChild) => void;
+  onContinue: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <DotGridBg>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <ObTopBar onBack={onBack} />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
+          <Helper text="Got more kids? Add them all now. Chores come next." />
+          <Text style={[s.heading, { marginBottom: 16 }]}>Anyone else?</Text>
+
+          <View style={{ gap: 14 }}>
+            {children.map(child => (
+              <TouchableOpacity key={child.id} style={s.rosterCard} onPress={() => onEdit(child)} activeOpacity={0.85}>
+                <View style={s.rosterAvatar}>
+                  <Image source={AVATARS[child.avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.rosterName}>{child.name}</Text>
+                  <Text style={s.rosterSub}>Added</Text>
+                </View>
+                <View style={s.rosterCheck}>
+                  <Text style={s.rosterCheckMark}>✓</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TouchableOpacity style={s.rosterAddBtn} onPress={onAddAnother} activeOpacity={0.8}>
+            <Text style={s.rosterAddLabel}>+ Add another kid</Text>
           </TouchableOpacity>
         </ScrollView>
 
         <View style={s.footer}>
-          <Button label="Continue" onPress={onNext} disabled={!canContinue} />
+          <Button label="That's everyone" onPress={onContinue} disabled={children.length === 0} />
         </View>
       </SafeAreaView>
     </DotGridBg>
@@ -584,12 +603,10 @@ function Step2ParentIdentity({
   parentRole,
   setParentRole,
   onNext,
-  onBack,
 }: {
   parentRole: string;
   setParentRole: (v: string) => void;
   onNext: () => void;
-  onBack: () => void;
 }) {
   const selectedCard = PARENT_CARDS.find(c => c.id === parentRole) ? parentRole : null;
   const selectedChip = PARENT_CHIPS.map(c => c.toLowerCase()).includes(parentRole.toLowerCase()) && !selectedCard ? parentRole : null;
@@ -600,10 +617,11 @@ function Step2ParentIdentity({
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={2} total={TOTAL_STEPS} title="Who's the boss?" />
+        <ObTopBar />
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, gap: 24 }} showsVerticalScrollIndicator={false}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, gap: 24 }} showsVerticalScrollIndicator={false}>
           <Helper text="Pick your role. This shows up when you leave notes for your kids." />
+          <Text style={s.heading}>Who's the boss?</Text>
           {/* 2-column avatar card grid */}
           <View style={{ flexDirection: 'row', gap: 14 }}>
             {PARENT_CARDS.map(card => {
@@ -645,7 +663,6 @@ function Step2ParentIdentity({
 
         <View style={s.footer}>
           <Button label="Continue" onPress={onNext} />
-          <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
     </DotGridBg>
@@ -700,10 +717,13 @@ function Step3AssignChores({
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={3} total={TOTAL_STEPS} title="Pick a few chores" />
+        <ObTopBar onBack={onBack} />
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
-          <Helper text="These apply to everyone to start. You can add more and give them to specific kids later." />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
+          <View style={{ paddingHorizontal: 8 }}>
+            <Helper text="These apply to everyone to start. You can add more and give them to specific kids later." />
+            <Text style={[s.heading, { marginBottom: 12 }]}>Pick starter chores</Text>
+          </View>
           <View style={{ gap: 10, marginTop: 4 }}>
             {allChores.map(chore => {
               const checked = sharedChoreIds.includes(chore.id);
@@ -774,7 +794,6 @@ function Step3AssignChores({
 
         <View style={s.footer}>
           <Button label="Continue" onPress={onNext} />
-          <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
     </DotGridBg>
@@ -836,10 +855,13 @@ function Step4ChooseReward({
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={4} total={TOTAL_STEPS} title="Set your payout" />
+        <ObTopBar onBack={onBack} />
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }} showsVerticalScrollIndicator={false} scrollEnabled={!isDragging}>
-          <Helper text="Set one base rate. Difficulty does the rest, you can change it later." />
+          <View style={{ paddingHorizontal: 8 }}>
+            <Helper text="Set one base rate. Difficulty does the rest, you can change it later." />
+            <Text style={s.heading}>Set your payout</Text>
+          </View>
           {/* Slider card */}
           <View style={s.payCard}>
             <Text style={s.payCardLabel}>Base pay per chore</Text>
@@ -864,7 +886,6 @@ function Step4ChooseReward({
 
         <View style={s.footer}>
           <Button label="Looks good!" onPress={onNext} />
-          <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
     </DotGridBg>
@@ -912,11 +933,11 @@ function Step5AllSet({
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepDots step={7} total={TOTAL_STEPS} />
+        <ObTopBar onBack={onBack} />
 
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ alignItems: 'center', paddingHorizontal: 24, paddingTop: 32, paddingBottom: 16, gap: 20 }}
+          contentContainerStyle={{ alignItems: 'center', paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16, gap: 20 }}
           showsVerticalScrollIndicator={false}
         >
           {/* Bouncing emoji */}
@@ -949,7 +970,6 @@ function Step5AllSet({
             </Text>
           )}
           <Button label="Go to home" onPress={onComplete} />
-          <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
     </DotGridBg>
@@ -978,10 +998,13 @@ function StepPairingCodes({
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={5} total={TOTAL_STEPS} title="Connect your kids" />
+        <ObTopBar onBack={onBack} />
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
-          <Helper text="Each kid opens Monstir on their device and enters their code to join. You can also just hand them yours." />
+          <View style={{ paddingHorizontal: 8 }}>
+            <Helper text="Each kid opens Monstir on their device and enters their code to join. You can also just hand them yours." />
+            <Text style={[s.heading, { marginBottom: 4 }]}>Connect your kids</Text>
+          </View>
           {children.map((child, i) => (
             <View key={child.id} style={s.pairCard}>
               <View style={{ flex: 1 }}>
@@ -999,7 +1022,6 @@ function StepPairingCodes({
 
         <View style={s.footer}>
           <Button label="Continue" onPress={onNext} />
-          <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
     </DotGridBg>
@@ -1020,10 +1042,13 @@ function StepNotifications({ onNext, onBack }: { onNext: () => void; onBack: () 
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={6} total={TOTAL_STEPS} title="Stay in the loop" />
+        <ObTopBar onBack={onBack} />
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
-          <Helper text="We'll ping you when there's something to do, and stay quiet the rest of the time." />
+          <View style={{ paddingHorizontal: 8 }}>
+            <Helper text="We'll ping you when there's something to do, and stay quiet the rest of the time." />
+            <Text style={[s.heading, { marginBottom: 4 }]}>Stay in the loop</Text>
+          </View>
           {NOTIF_ROWS.map((row, i) => (
             <View key={i} style={s.infoChip}>
               <Text style={s.infoChipEmoji}>{row.emoji}</Text>
@@ -1037,9 +1062,6 @@ function StepNotifications({ onNext, onBack }: { onNext: () => void; onBack: () 
         <View style={s.footer}>
           <Button label="Turn on notifications" onPress={onNext} />
           <Button label="Maybe later" onPress={onNext} variant="secondary" />
-          <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 4 }}>
-            <Text style={{ fontSize: fontSize.sm, color: colors.muted, fontFamily: interFamily.semibold }}>Back</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     </DotGridBg>
@@ -1050,10 +1072,15 @@ function StepNotifications({ onNext, onBack }: { onNext: () => void; onBack: () 
 
 export function ParentOnboarding({ onComplete }: Props) {
   const [step, setStep]               = useState(0);
-  const [children, setChildren]       = useState<OnboardingChild[]>([makeChild(0)]);
+  const [children, setChildren]       = useState<OnboardingChild[]>([]);
   const [rewardType, setRewardType]   = useState('payout:1');
   const [parentRole, setParentRole]   = useState('');
   const [submitError, setSubmitError] = useState('');
+  // MON-85: the "Add kid" screen edits a working draft; we commit it into
+  // `children` on Continue. `kidDraftMode` distinguishes a brand-new kid from
+  // editing one tapped on the roster.
+  const [kidDraft, setKidDraft]         = useState<OnboardingChild | null>(null);
+  const [kidDraftMode, setKidDraftMode] = useState<'new' | 'edit'>('new');
   // MON-85 shared chore set: one family list (+ any custom chores), seeded from
   // the default age band. Saved as chores assigned to everyone.
   const [sharedChoreIds, setSharedChoreIds] = useState<string[]>(() => [...STARTER_DEFAULT_IDS]);
@@ -1071,7 +1098,11 @@ export function ParentOnboarding({ onComplete }: Props) {
           if (draft.parentRole)       setParentRole(draft.parentRole);
           if (draft.sharedChoreIds)   setSharedChoreIds(draft.sharedChoreIds);
           if (draft.customChores)     setCustomChores(draft.customChores);
-          if (typeof draft.step === 'number') setStep(draft.step);
+          // The AddKid step (1) edits a non-persisted draft — if a resumed draft
+          // lands there, route to the roster (or the first parent step) instead.
+          if (typeof draft.step === 'number') {
+            setStep(draft.step === 1 ? (draft.children?.length ? 2 : 0) : draft.step);
+          }
         } catch {
           // ignore corrupt drafts
         }
@@ -1083,8 +1114,39 @@ export function ParentOnboarding({ onComplete }: Props) {
     AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ step, children, rewardType, parentRole, sharedChoreIds, customChores })).catch(() => undefined);
   }, [step, children, rewardType, parentRole, sharedChoreIds, customChores]);
 
-  const next = () => setStep(s => s + 1);
-  const back = () => setStep(s => s - 1);
+  // ── Kid add/edit handlers ─────────────────────────────────────────────────
+  // After ParentIdentity: go straight to the roster if kids already exist
+  // (resumed draft), otherwise open the AddKid form for the first kid.
+  const startKids = () => {
+    if (children.length > 0) { setStep(2); return; }
+    setKidDraft(makeChild(0));
+    setKidDraftMode('new');
+    setStep(1);
+  };
+  const openAddAnother = () => {
+    setKidDraft(makeChild(children.length));
+    setKidDraftMode('new');
+    setStep(1);
+  };
+  const openEditKid = (child: OnboardingChild) => {
+    setKidDraft(child);
+    setKidDraftMode('edit');
+    setStep(1);
+  };
+  const commitKid = (d: OnboardingChild) => {
+    setChildren(prev => (kidDraftMode === 'edit' ? prev.map(c => (c.id === d.id ? d : c)) : [...prev, d]));
+    setKidDraft(null);
+    setStep(2);
+  };
+  const removeDraftKid = () => {
+    if (kidDraft) setChildren(prev => prev.filter(c => c.id !== kidDraft.id));
+    setKidDraft(null);
+    setStep(2);
+  };
+  const addKidBack = () => {
+    setKidDraft(null);
+    setStep(children.length > 0 ? 2 : 0);
+  };
 
   const finish = () => {
     setSubmitError('');
@@ -1113,14 +1175,30 @@ export function ParentOnboarding({ onComplete }: Props) {
     }
   };
 
+  // Prototype order (chip strip): Parent → Add kid → Anyone else → Chores →
+  // Base pay → Codes → Notif → Done.
   switch (step) {
-    case 0: return <Step1AddChildren children={children} setChildren={setChildren} onNext={next} />;
-    case 1: return <Step2ParentIdentity parentRole={parentRole} setParentRole={setParentRole} onNext={next} onBack={back} />;
-    case 2: return <Step3AssignChores children={children} sharedChoreIds={sharedChoreIds} setSharedChoreIds={setSharedChoreIds} customChores={customChores} setCustomChores={setCustomChores} onNext={next} onBack={back} />;
-    case 3: return <Step4ChooseReward rewardType={rewardType} setRewardType={setRewardType} onNext={next} onBack={back} children={children} />;
-    case 4: return <StepPairingCodes children={children} onNext={next} onBack={back} />;
-    case 5: return <StepNotifications onNext={next} onBack={back} />;
-    case 6: return <Step5AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={back} submitError={submitError} />;
+    case 0: return <Step2ParentIdentity parentRole={parentRole} setParentRole={setParentRole} onNext={startKids} />;
+    case 1:
+      // kidDraft is always set when we navigate here; guard defensively.
+      if (!kidDraft) { setStep(children.length > 0 ? 2 : 0); return null; }
+      return (
+        <AddKidScreen
+          draft={kidDraft}
+          setDraft={setKidDraft}
+          isFirst={children.length === 0}
+          canRemove={kidDraftMode === 'edit' && children.length > 1}
+          onContinue={commitKid}
+          onRemove={removeDraftKid}
+          onBack={addKidBack}
+        />
+      );
+    case 2: return <AnyoneElseScreen children={children} onAddAnother={openAddAnother} onEdit={openEditKid} onContinue={() => setStep(3)} onBack={() => setStep(0)} />;
+    case 3: return <Step3AssignChores children={children} sharedChoreIds={sharedChoreIds} setSharedChoreIds={setSharedChoreIds} customChores={customChores} setCustomChores={setCustomChores} onNext={() => setStep(4)} onBack={() => setStep(2)} />;
+    case 4: return <Step4ChooseReward rewardType={rewardType} setRewardType={setRewardType} onNext={() => setStep(5)} onBack={() => setStep(3)} children={children} />;
+    case 5: return <StepPairingCodes children={children} onNext={() => setStep(6)} onBack={() => setStep(4)} />;
+    case 6: return <StepNotifications onNext={() => setStep(7)} onBack={() => setStep(5)} />;
+    case 7: return <Step5AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={() => setStep(6)} submitError={submitError} />;
     default: return null;
   }
 }
@@ -1156,6 +1234,123 @@ const s = StyleSheet.create({
     paddingBottom: 8,
     gap: 12,
   },
+
+  // Top bar (back chevron)
+  topBar: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    height: 44,
+    justifyContent: 'center',
+  },
+  backChevron: {
+    fontFamily: obc.display,
+    fontSize: scale(32),
+    lineHeight: scale(34),
+    color: BLACK,
+  },
+
+  // Form fields (AddKid)
+  fieldLabel: {
+    fontFamily: obc.bodyHeavy,
+    fontSize: scale(13),
+    letterSpacing: 0.8,
+    color: BLACK,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  fieldInput: {
+    backgroundColor: colors.white,
+    borderWidth: 3,
+    borderColor: BLACK,
+    borderRadius: obc.radius,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    fontSize: scale(20),
+    fontFamily: obc.display,
+    color: BLACK,
+    ...cardShadow,
+  },
+  ageField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.white,
+    borderWidth: 3,
+    borderColor: BLACK,
+    borderRadius: obc.radius,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    ...cardShadow,
+  },
+  ageFieldLabel:   { fontFamily: obc.display, fontSize: scale(20), color: BLACK },
+  ageFieldChevron: { fontFamily: obc.display, fontSize: scale(18), color: BLACK },
+
+  pairingNote: {
+    backgroundColor: obc.purpleSoft,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 18,
+  },
+  pairingNoteText: {
+    fontFamily: obc.bodyHeavy,
+    fontSize: scale(15),
+    lineHeight: scale(20),
+    color: PURPLE,
+  },
+  removeKidLink: {
+    fontFamily: obc.display,
+    fontSize: scale(15),
+    color: colors.muted,
+    textDecorationLine: 'underline',
+  },
+
+  // Roster (Anyone else?)
+  rosterCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: colors.white,
+    borderRadius: obc.radius,
+    borderWidth: 3,
+    borderColor: BLACK,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    ...cardShadow,
+  },
+  rosterAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: BLACK,
+    backgroundColor: colors.bg,
+  },
+  rosterName: { fontFamily: obc.display, fontSize: scale(20), color: BLACK },
+  rosterSub:  { fontFamily: obc.bodySemi, fontSize: scale(14), color: colors.muted, marginTop: 1 },
+  rosterCheck: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 3,
+    borderColor: BLACK,
+    backgroundColor: obc.lime,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rosterCheckMark: { fontFamily: obc.display, fontSize: scale(20), color: BLACK },
+  rosterAddBtn: {
+    backgroundColor: colors.white,
+    borderWidth: 3,
+    borderColor: BLACK,
+    borderRadius: obc.radius,
+    paddingVertical: 18,
+    alignItems: 'center',
+    marginTop: 14,
+    ...cardShadow,
+  },
+  rosterAddLabel: { fontFamily: obc.display, fontSize: scale(18), color: BLACK },
 
   // Avatar
   avatarCircle: {
