@@ -12,8 +12,17 @@
 //
 // Activation checklist lives in docs/mon-54-social-auth-setup.md.
 
-import { Platform } from 'react-native';
+import { Platform, TurboModuleRegistry } from 'react-native';
 import { supabase } from './supabase';
+
+/** Whether the native Google module is actually present in this binary. Expo Go
+ *  (and dev builds made before the google-signin pod was added) don't include it,
+ *  and `require()`-ing the JS wrapper triggers a throwing `getEnforcing` call.
+ *  `TurboModuleRegistry.get` (non-enforcing) returns null without throwing, so we
+ *  can detect the missing module and degrade gracefully instead of redboxing. */
+function googleNativeAvailable(): boolean {
+  try { return TurboModuleRegistry.get('RNGoogleSignin') != null; } catch { return false; }
+}
 
 // ── Env-gated rollout ──────────────────────────────────────────────────────────
 // Supabase verifies the Google id token against the *web* client id, so that one
@@ -64,6 +73,12 @@ function ensureGoogleConfigured() {
 
 export async function signInWithGoogle(): Promise<SocialResult> {
   if (!googleEnabled) return { ok: false, cancelled: false, message: 'Google sign-in is not configured yet.' };
+  // Env says Google is on, but the running binary may not contain the native
+  // module (Expo Go / a stale dev build). Bail with a friendly message rather
+  // than letting require() throw a redbox.
+  if (!googleNativeAvailable()) {
+    return { ok: false, cancelled: false, message: 'Google sign-in needs the native dev build — it isn’t available in Expo Go.' };
+  }
   try {
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
     ensureGoogleConfigured();
