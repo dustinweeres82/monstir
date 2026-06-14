@@ -8841,9 +8841,9 @@ function KidPairingScreen({ onSubmit, onBack }: { onSubmit: (code: string) => vo
           <Text style={[obText.titleSm, { textAlign: 'center', marginTop: 4 }]}>Enter your{'\n'}pairing code</Text>
           <Text style={[obText.sub, { textAlign: 'center', marginTop: 6 }]}>Ask a parent for the 6-digit code from their app.</Text>
           <CodeCells code={code} />
+          <View style={{ flex: 1 }} />
           <Keypad onKey={press} onDelete={del} />
           <Text style={rs.note}>Pairing isn't connected yet. This previews your Monstir setup.</Text>
-          <View style={{ flex: 1 }} />
         </ScreenEnter>
       </SafeAreaView>
     </DotGridBg>

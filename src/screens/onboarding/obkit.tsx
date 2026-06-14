@@ -249,7 +249,7 @@ const obs = StyleSheet.create({
 
   // Keypad
   keypad:   { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 11 },
-  key:      { width: '31%', borderWidth: 3, borderColor: obc.ink, borderRadius: 14, backgroundColor: obc.purpleSoft, paddingVertical: 13, alignItems: 'center', ...cardShadow },
+  key:      { width: '31%', borderWidth: 3, borderColor: obc.ink, borderRadius: 14, backgroundColor: obc.white, paddingVertical: 13, alignItems: 'center', ...cardShadow },
   keyBlank: { width: '31%' },
   keyText:  { fontFamily: obc.display, fontSize: scale(26), color: obc.ink },
 });
