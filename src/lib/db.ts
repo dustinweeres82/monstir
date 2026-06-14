@@ -210,40 +210,21 @@ export async function saveOnboardingSetup(
     kidIdMap[child.name] = data.id;
   }
 
-  // 3. Group chores by choreId across all kids so shared chores have one row with multiple assigned_to
-  const choreKidsMap: Record<string, { name: string; icon: string; frequency: string; difficulty: number; kidIds: string[] }> = {};
-  for (const child of setup.children) {
-    const kidId = kidIdMap[child.name];
-    if (!kidId) continue;
-    for (const choreId of child.selectedChoreIds) {
-      const catalogue = choreCatalogue[choreId];
-      if (!choreKidsMap[choreId]) {
-        choreKidsMap[choreId] = {
-          name:       catalogue?.name ?? choreId,
-          icon:       catalogue?.icon ?? '✅',
-          frequency:  catalogue?.frequency ?? 'Every day',
-          difficulty: catalogue?.difficulty === 'Hard' ? 3 : catalogue?.difficulty === 'Medium' ? 2 : 1,
-          kidIds:     [],
-        };
-      }
-      if (!choreKidsMap[choreId].kidIds.includes(kidId)) {
-        choreKidsMap[choreId].kidIds.push(kidId);
-      }
-    }
-  }
-
+  // 3. MON-85: one shared chore set for the whole family. Each selected chore is
+  // inserted once with assigned_to: [] (everyone), so kids added later inherit it.
   const choreNameToId: Record<string, string> = {};
-  for (const [, chore] of Object.entries(choreKidsMap)) {
+  for (const choreId of setup.sharedChoreIds) {
+    const catalogue = choreCatalogue[choreId];
     const { data, error } = await supabase.from('chores').insert({
       parent_id:   userId,
-      name:        chore.name,
-      icon:        chore.icon,
-      frequency:   chore.frequency,
-      difficulty:  chore.difficulty,
-      assigned_to: chore.kidIds,
+      name:        catalogue?.name ?? choreId,
+      icon:        catalogue?.icon ?? '✅',
+      frequency:   catalogue?.frequency ?? 'Every day',
+      difficulty:  catalogue?.difficulty === 'Hard' ? 3 : catalogue?.difficulty === 'Medium' ? 2 : 1,
+      assigned_to: [],
     }).select('id, name').single();
-    console.log('[DB] saveOnboardingSetup insert chore', chore.name, 'data:', data, 'error:', error);
-    if (data?.id) choreNameToId[chore.name] = data.id;
+    console.log('[DB] saveOnboardingSetup insert shared chore', catalogue?.name ?? choreId, 'data:', data, 'error:', error);
+    if (data?.id && data?.name) choreNameToId[data.name] = data.id;
   }
 
   return { kidIdMap, choreNameToId };

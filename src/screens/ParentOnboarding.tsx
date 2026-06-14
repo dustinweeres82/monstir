@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Image, Modal, Platform, ActionSheetIOS,
@@ -8,8 +8,7 @@ import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, fontSize, fontWeight, radii, spacing, scale, interFamily, textStyles } from '../design-system/tokens';
-import { Button } from '../design-system/components/Button';
-import { CreamBg } from '../components/CreamBg';
+import { obc, cardShadow, DotGridBg, ObButton as Button, Helper } from './onboarding/obkit';
 
 const DRAFT_KEY = 'monstir:parent-onboarding-draft';
 
@@ -38,6 +37,9 @@ export interface ParentSetupResult {
   rewardType: string;
   parentRole: string;
   choreMap: Record<string, ChoreMapEntry>;
+  // MON-85: one shared chore set for the whole family. These become chores with
+  // assigned_to: [] (everyone), and can be reassigned to specific kids later.
+  sharedChoreIds: string[];
 }
 
 interface Props {
@@ -62,7 +64,9 @@ const BLACK                = '#111111';
 const CHORE_ROW_CHECKED_BG = '#F7F2FE';
 const AVATAR_INITIAL_COLOR = '#3A2080';
 const SUBMIT_ERROR_COLOR   = '#E53935';
-const FREDOKA_BOLD         = 'Fredoka_700Bold';
+// FredokaOne is the only Fredoka weight loaded at the app root; use it as the
+// rounded display face (the variable "Fredoka_700Bold" was never bundled).
+const FREDOKA_BOLD         = 'FredokaOne_400Regular';
 
 // Difficulty badge tints — no token; these are specific to the difficulty
 // spectrum and don't map to any existing design-system color.
@@ -75,6 +79,10 @@ const DIFF_HARD_TEXT  = '#993C1D';
 
 const AGE_RANGES: OnboardingChild['ageRange'][] = ['5-6', '7-9', '10-12', '13+'];
 const DIFFICULTIES: OnboardingChild['difficulty'][] = ['Easy', 'Medium', 'Hard'];
+
+// MON-85 parent flow: Add kids → Identity → Shared chores → Base pay →
+// Pairing codes → Notifications → All set.
+const TOTAL_STEPS = 7;
 
 const AVATAR_COLORS = ['#E0D4FF', '#FFD6E4', '#C8EEFF', '#D6FFE8', '#FFF3C8', '#FFE0CC'];
 
@@ -152,6 +160,17 @@ const CHORE_ICONS: { icon: ReturnType<typeof require>; bg: string }[] = [
   { icon: require('../../assets/icons/chores/chore=iconVacuum.png'),  bg: colors.iconBlue },
 ];
 
+// MON-85: the onboarding chore picker offers exactly this fixed starter set
+// (not the age-derived union). Parents add more / reassign later.
+const STARTER_CHORES: SuggestedChore[] = [
+  { id: 'set_table',   name: 'Set the table', xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconDishes.png'), iconBg: colors.iconDishes },
+  { id: 'make_bed',    name: 'Make bed',       xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBed.png'),    iconBg: colors.iconBed },
+  { id: 'vacuum',      name: 'Vacuum',         xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconVacuum.png'), iconBg: colors.iconBlue },
+  { id: 'wash_dishes', name: 'Wash dishes',    xp: 25, difficulty: 'Hard',   icon: require('../../assets/icons/chores/chore=iconSoap.png'),   iconBg: colors.iconBlue },
+];
+// Default-checked on entry (Wash dishes starts unchecked).
+const STARTER_DEFAULT_IDS = ['set_table', 'make_bed', 'vacuum'];
+
 // Reward type still used in Step4ChooseReward (payout/slider) and persisted
 const REWARD_TYPES = [
   { id: 'screen_time',        label: 'Screen time',       desc: 'e.g. 30 mins extra',   icon: '🎮' },
@@ -206,10 +225,12 @@ function StepDots({ step, total }: { step: number; total: number }) {
           <View
             key={i}
             style={{
-              width: active ? 10 : 8,
-              height: active ? 10 : 8,
-              borderRadius: active ? 5 : 4,
-              backgroundColor: active ? PURPLE : colors.inputBorder,
+              width: active ? 26 : 9,
+              height: 9,
+              borderRadius: active ? 6 : 5,
+              borderWidth: active ? 0 : 2,
+              borderColor: BLACK,
+              backgroundColor: active ? PURPLE : colors.white,
             }}
           />
         );
@@ -218,12 +239,12 @@ function StepDots({ step, total }: { step: number; total: number }) {
   );
 }
 
-function StepHeader({ step, total, title, subtitle }: { step: number; total: number; title: string; subtitle: string }) {
+function StepHeader({ step, total, title, subtitle }: { step: number; total: number; title: string; subtitle?: string }) {
   return (
     <View style={{ paddingHorizontal: 24, paddingTop: 48, paddingBottom: 4 }}>
       <StepDots step={step} total={total} />
       <Text style={s.heading}>{title}</Text>
-      <Text style={s.subtitle}>{subtitle}</Text>
+      {!!subtitle && <Text style={s.subtitle}>{subtitle}</Text>}
     </View>
   );
 }
@@ -500,10 +521,11 @@ function Step1AddChildren({
   };
 
   return (
-    <CreamBg>
+    <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={1} total={5} title="Add your kids" subtitle="Each kid gets their own monster and chore list." />
+        <StepHeader step={1} total={TOTAL_STEPS} title="Add your kids" />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
+          <Helper text="Add your kids now. Each gets their own Monstir. You can add as many as you like." />
           {children.map((child, i) => (
             <View key={child.id} style={s.childCard}>
               <View style={s.childCardHeader}>
@@ -545,7 +567,7 @@ function Step1AddChildren({
           <Button label="Continue" onPress={onNext} disabled={!canContinue} />
         </View>
       </SafeAreaView>
-    </CreamBg>
+    </DotGridBg>
   );
 }
 
@@ -576,11 +598,12 @@ function Step2ParentIdentity({
   const selectChip = (label: string) => setParentRole(label.toLowerCase());
 
   return (
-    <CreamBg>
+    <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={2} total={5} title="Who's the boss?" subtitle="Pick your role — this shows up when you leave notes for your kids." />
+        <StepHeader step={2} total={TOTAL_STEPS} title="Who's the boss?" />
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, gap: 24 }} showsVerticalScrollIndicator={false}>
+          <Helper text="Pick your role. This shows up when you leave notes for your kids." />
           {/* 2-column avatar card grid */}
           <View style={{ flexDirection: 'row', gap: 14 }}>
             {PARENT_CARDS.map(card => {
@@ -625,50 +648,40 @@ function Step2ParentIdentity({
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
-    </CreamBg>
+    </DotGridBg>
   );
 }
 
 // ─── Step 3: Assign Chores ─────────────────────────────────────────────────
 
 function Step3AssignChores({
-  children, setChildren, onNext, onBack,
+  children, sharedChoreIds, setSharedChoreIds, customChores, setCustomChores, onNext, onBack,
 }: {
   children: OnboardingChild[];
-  setChildren: React.Dispatch<React.SetStateAction<OnboardingChild[]>>;
+  sharedChoreIds: string[];
+  setSharedChoreIds: React.Dispatch<React.SetStateAction<string[]>>;
+  customChores: SuggestedChore[];
+  setCustomChores: React.Dispatch<React.SetStateAction<SuggestedChore[]>>;
   onNext: () => void;
   onBack: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState(0);
-  const [customChores, setCustomChores] = useState<Record<string, SuggestedChore[]>>({});
-  const [removedIds, setRemovedIds] = useState<Record<string, string[]>>({});
   const [choreInput, setChoreInput] = useState('');
   const [selectedIconIdx, setSelectedIconIdx] = useState(0);
   const { open: addSheetOpen, openSheet: openAddSheet, closeSheet: closeAddSheet, sheetY: addSheetY, scrimOpacity: addScrimOpacity } = useBottomSheet(380);
 
-  const child = children[activeTab];
-  const excluded = removedIds[child.id] ?? [];
-  const suggested = CHORES_BY_AGE[child.ageRange].filter(c => !excluded.includes(c.id));
-  const extras = (customChores[child.id] ?? []).filter(c => !excluded.includes(c.id));
+  // One shared starter set for the whole family: a fixed list of starter chores,
+  // plus any custom chores the parent adds.
+  const allChores = [...STARTER_CHORES, ...customChores];
 
   const removeChore = (choreId: string) => {
-    setRemovedIds(prev => ({ ...prev, [child.id]: [...(prev[child.id] ?? []), choreId] }));
-    setChildren(prev => prev.map((c, i) =>
-      i === activeTab ? { ...c, selectedChoreIds: c.selectedChoreIds.filter(id => id !== choreId) } : c
-    ));
+    setSharedChoreIds(prev => prev.filter(id => id !== choreId));
+    setCustomChores(prev => prev.filter(c => c.id !== choreId));
   };
 
   const toggleChore = (choreId: string) => {
-    setChildren(prev => prev.map((c, i) =>
-      i === activeTab
-        ? {
-            ...c,
-            selectedChoreIds: c.selectedChoreIds.includes(choreId)
-              ? c.selectedChoreIds.filter(id => id !== choreId)
-              : [...c.selectedChoreIds, choreId],
-          }
-        : c
-    ));
+    setSharedChoreIds(prev =>
+      prev.includes(choreId) ? prev.filter(id => id !== choreId) : [...prev, choreId]
+    );
   };
 
   const addCustomChore = () => {
@@ -677,49 +690,23 @@ function Step3AssignChores({
     const id = `custom_${Date.now()}`;
     const { icon, bg } = CHORE_ICONS[selectedIconIdx];
     const chore: SuggestedChore = { id, name, xp: 15, difficulty: 'Easy', icon, iconBg: bg };
-    setCustomChores(prev => ({ ...prev, [child.id]: [...(prev[child.id] ?? []), chore] }));
-    setChildren(prev => prev.map((c, i) =>
-      i === activeTab ? { ...c, selectedChoreIds: [...c.selectedChoreIds, id] } : c
-    ));
+    setCustomChores(prev => [...prev, chore]);
+    setSharedChoreIds(prev => [...prev, id]);
     setChoreInput('');
     setSelectedIconIdx(0);
     closeAddSheet();
   };
 
-  // age display: e.g. "Maya, 9" — use midpoint of range
-  const ageLabel = (range: OnboardingChild['ageRange']) => {
-    const map: Record<OnboardingChild['ageRange'], string> = { '5-6': '5-6', '7-9': '7-9', '10-12': '10-12', '13+': '13+' };
-    return map[range];
-  };
-
   return (
-    <CreamBg>
+    <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <View style={{ paddingHorizontal: 24, paddingTop: 48, paddingBottom: 4 }}>
-          <StepDots step={3} total={5} />
-          <Text style={s.heading}>Pick a few chores</Text>
-          <Text style={s.subtitle}>Age-appropriate picks — grab what fits. You can always add more later.</Text>
-          {/* Tab row per kid */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 12, alignItems: 'center' }}>
-            {children.map((c, i) => (
-              <TouchableOpacity
-                key={c.id}
-                style={[s.choreTab, i === activeTab && s.choreTabActive]}
-                onPress={() => setActiveTab(i)}
-                activeOpacity={0.8}
-              >
-                <Text style={[s.choreTabLabel, i === activeTab && s.choreTabLabelActive]}>
-                  {c.name || `Kid ${i + 1}`}{c.name ? `, ${ageLabel(c.ageRange)}` : ''}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+        <StepHeader step={3} total={TOTAL_STEPS} title="Pick a few chores" />
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
+          <Helper text="These apply to everyone to start. You can add more and give them to specific kids later." />
           <View style={{ gap: 10, marginTop: 4 }}>
-            {[...suggested, ...extras].map(chore => {
-              const checked = child.selectedChoreIds.includes(chore.id);
+            {allChores.map(chore => {
+              const checked = sharedChoreIds.includes(chore.id);
               return (
                 <TouchableOpacity
                   key={chore.id}
@@ -790,7 +777,7 @@ function Step3AssignChores({
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
-    </CreamBg>
+    </DotGridBg>
   );
 }
 
@@ -847,11 +834,12 @@ function Step4ChooseReward({
   }
 
   return (
-    <CreamBg>
+    <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepHeader step={4} total={5} title="Set your payout" subtitle="How much is a basic chore worth? Harder chores pay more automatically." />
+        <StepHeader step={4} total={TOTAL_STEPS} title="Set your payout" />
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }} showsVerticalScrollIndicator={false} scrollEnabled={!isDragging}>
+          <Helper text="Set one base rate. Difficulty does the rest, you can change it later." />
           {/* Slider card */}
           <View style={s.payCard}>
             <Text style={s.payCardLabel}>Base pay per chore</Text>
@@ -879,7 +867,7 @@ function Step4ChooseReward({
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
-    </CreamBg>
+    </DotGridBg>
   );
 }
 
@@ -922,9 +910,9 @@ function Step5AllSet({
   }, []);
 
   return (
-    <CreamBg>
+    <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-        <StepDots step={5} total={5} />
+        <StepDots step={7} total={TOTAL_STEPS} />
 
         <ScrollView
           style={{ flex: 1 }}
@@ -937,9 +925,9 @@ function Step5AllSet({
           </Animated.Text>
 
           <Text style={[s.heading, { textAlign: 'center' }]}>You're all set!</Text>
-          <Text style={[s.subtitle, { textAlign: 'center', marginTop: -12 }]}>
-            Your monsters are waiting. Share your family code with your kids so they can join.
-          </Text>
+          <View style={{ width: '100%' }}>
+            <Helper text="Your Monstirs are waiting. Share your family code with your kids so they can join." />
+          </View>
 
           {/* 3 info chips */}
           <View style={{ width: '100%', gap: 12, marginTop: 8 }}>
@@ -964,7 +952,97 @@ function Step5AllSet({
           <Button label="Back" onPress={onBack} variant="secondary" />
         </View>
       </SafeAreaView>
-    </CreamBg>
+    </DotGridBg>
+  );
+}
+
+// ─── Step 5: Pairing codes ─────────────────────────────────────────────────
+// MON-85 two-device model. PHASE 1: codes are display-only placeholders minted
+// client-side. Real per-device pairing (a parent-session-minted, time-limited,
+// single-use code that authenticates a kid device + RLS scoping) is a Phase-2
+// backend ticket — see MON-54 / MON-63.
+
+function StepPairingCodes({
+  children, onNext, onBack,
+}: {
+  children: OnboardingChild[];
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  // One placeholder code per kid, stable for the life of this screen.
+  const codes = useMemo(
+    () => children.map(() => String(Math.floor(100000 + Math.random() * 900000))),
+    [children.length],
+  );
+
+  return (
+    <DotGridBg>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <StepHeader step={5} total={TOTAL_STEPS} title="Connect your kids" />
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
+          <Helper text="Each kid opens Monstir on their device and enters their code to join. You can also just hand them yours." />
+          {children.map((child, i) => (
+            <View key={child.id} style={s.pairCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.pairKidName}>{child.name || `Kid ${i + 1}`}</Text>
+                <Text style={s.pairHint}>Enter on their device</Text>
+              </View>
+              <Text style={s.pairCode}>{codes[i]}</Text>
+            </View>
+          ))}
+          <Text style={s.pairExpires}>⏱ Codes expire in 14:57</Text>
+          <TouchableOpacity onPress={onNext} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 6 }}>
+            <Text style={s.pairLink}>I'll connect their devices later</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        <View style={s.footer}>
+          <Button label="Continue" onPress={onNext} />
+          <Button label="Back" onPress={onBack} variant="secondary" />
+        </View>
+      </SafeAreaView>
+    </DotGridBg>
+  );
+}
+
+// ─── Step 6: Notification priming ──────────────────────────────────────────
+// Value/priming screen only — `expo-notifications` isn't installed, so neither
+// CTA requests an OS permission yet (real registration is follow-up infra).
+
+const NOTIF_ROWS = [
+  { emoji: '✅', text: 'When a kid finishes a chore, you get **one tap to approve**.' },
+  { emoji: '⚔️', text: 'Sunday: a heads-up when the family **boss battle** is ready.' },
+  { emoji: '🤫', text: "That's it. **We won't nag** you with anything else." },
+] as const;
+
+function StepNotifications({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+  return (
+    <DotGridBg>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <StepHeader step={6} total={TOTAL_STEPS} title="Stay in the loop" />
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
+          <Helper text="We'll ping you when there's something to do, and stay quiet the rest of the time." />
+          {NOTIF_ROWS.map((row, i) => (
+            <View key={i} style={s.infoChip}>
+              <Text style={s.infoChipEmoji}>{row.emoji}</Text>
+              <Text style={s.infoChipText}>
+                {renderBoldText(row.text, s.infoChipText, s.infoChipTextBold)}
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
+
+        <View style={s.footer}>
+          <Button label="Turn on notifications" onPress={onNext} />
+          <Button label="Maybe later" onPress={onNext} variant="secondary" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 4 }}>
+            <Text style={{ fontSize: fontSize.sm, color: colors.muted, fontFamily: interFamily.semibold }}>Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </DotGridBg>
   );
 }
 
@@ -976,6 +1054,10 @@ export function ParentOnboarding({ onComplete }: Props) {
   const [rewardType, setRewardType]   = useState('payout:1');
   const [parentRole, setParentRole]   = useState('');
   const [submitError, setSubmitError] = useState('');
+  // MON-85 shared chore set: one family list (+ any custom chores), seeded from
+  // the default age band. Saved as chores assigned to everyone.
+  const [sharedChoreIds, setSharedChoreIds] = useState<string[]>(() => [...STARTER_DEFAULT_IDS]);
+  const [customChores, setCustomChores]     = useState<SuggestedChore[]>([]);
 
   // ── Draft persistence ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -983,10 +1065,12 @@ export function ParentOnboarding({ onComplete }: Props) {
       .then(raw => {
         if (!raw) return;
         try {
-          const draft = JSON.parse(raw) as { step: number; children: OnboardingChild[]; rewardType: string; parentRole?: string };
+          const draft = JSON.parse(raw) as { step: number; children: OnboardingChild[]; rewardType: string; parentRole?: string; sharedChoreIds?: string[]; customChores?: SuggestedChore[] };
           if (draft.children?.length) setChildren(draft.children);
           if (draft.rewardType)       setRewardType(draft.rewardType);
           if (draft.parentRole)       setParentRole(draft.parentRole);
+          if (draft.sharedChoreIds)   setSharedChoreIds(draft.sharedChoreIds);
+          if (draft.customChores)     setCustomChores(draft.customChores);
           if (typeof draft.step === 'number') setStep(draft.step);
         } catch {
           // ignore corrupt drafts
@@ -996,8 +1080,8 @@ export function ParentOnboarding({ onComplete }: Props) {
   }, []);
 
   useEffect(() => {
-    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ step, children, rewardType, parentRole })).catch(() => undefined);
-  }, [step, children, rewardType, parentRole]);
+    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ step, children, rewardType, parentRole, sharedChoreIds, customChores })).catch(() => undefined);
+  }, [step, children, rewardType, parentRole, sharedChoreIds, customChores]);
 
   const next = () => setStep(s => s + 1);
   const back = () => setStep(s => s - 1);
@@ -1006,7 +1090,8 @@ export function ParentOnboarding({ onComplete }: Props) {
     setSubmitError('');
     try {
       AsyncStorage.removeItem(DRAFT_KEY).catch(() => undefined);
-      // Build a flat lookup of every selected choreId → chore details
+      // Flat lookup of every choreId → details, covering the suggested catalogue
+      // plus any custom chores the parent added.
       const choreMap: Record<string, ChoreMapEntry> = {};
       for (const ageChores of Object.values(CHORES_BY_AGE)) {
         for (const c of ageChores) {
@@ -1015,7 +1100,14 @@ export function ParentOnboarding({ onComplete }: Props) {
           }
         }
       }
-      onComplete({ children, rewardType, parentRole, choreMap });
+      // Starter chores win over any same-id age entry (e.g. set_table = Easy).
+      for (const c of STARTER_CHORES) {
+        choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty, frequency: 'Every day' };
+      }
+      for (const c of customChores) {
+        choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty, frequency: 'Every day' };
+      }
+      onComplete({ children, rewardType, parentRole, choreMap, sharedChoreIds });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     }
@@ -1024,9 +1116,11 @@ export function ParentOnboarding({ onComplete }: Props) {
   switch (step) {
     case 0: return <Step1AddChildren children={children} setChildren={setChildren} onNext={next} />;
     case 1: return <Step2ParentIdentity parentRole={parentRole} setParentRole={setParentRole} onNext={next} onBack={back} />;
-    case 2: return <Step3AssignChores children={children} setChildren={setChildren} onNext={next} onBack={back} />;
+    case 2: return <Step3AssignChores children={children} sharedChoreIds={sharedChoreIds} setSharedChoreIds={setSharedChoreIds} customChores={customChores} setCustomChores={setCustomChores} onNext={next} onBack={back} />;
     case 3: return <Step4ChooseReward rewardType={rewardType} setRewardType={setRewardType} onNext={next} onBack={back} children={children} />;
-    case 4: return <Step5AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={back} submitError={submitError} />;
+    case 4: return <StepPairingCodes children={children} onNext={next} onBack={back} />;
+    case 5: return <StepNotifications onNext={next} onBack={back} />;
+    case 6: return <Step5AllSet children={children} rewardType={rewardType} onComplete={finish} onBack={back} submitError={submitError} />;
     default: return null;
   }
 }
@@ -1042,11 +1136,17 @@ const SOLID_SHADOW = Platform.select({
 const s = StyleSheet.create({
   // Header
   heading: {
-    ...textStyles.screenTitle,
+    fontFamily: obc.display,
+    fontSize: scale(27),
+    lineHeight: scale(30),
+    color: obc.ink,
   },
   subtitle: {
-    ...textStyles.bodySecondary,
-    marginTop: 4,
+    fontFamily: obc.body,
+    fontSize: scale(15),
+    lineHeight: scale(20),
+    color: obc.muted,
+    marginTop: 6,
     marginBottom: 8,
   },
 
@@ -1132,12 +1232,12 @@ const s = StyleSheet.create({
   // Child card (Step 1)
   childCard: {
     backgroundColor: colors.white,
-    borderRadius: radii.xxl,
-    borderWidth: 2,
+    borderRadius: obc.radius,
+    borderWidth: 3,
     borderColor: BLACK,
     padding: 16,
     gap: 12,
-    ...SOLID_SHADOW,
+    ...cardShadow,
   },
   childCardHeader: {
     flexDirection: 'row',
@@ -1146,7 +1246,7 @@ const s = StyleSheet.create({
   },
   childNameInput: {
     fontSize: fontSize.xl,
-    fontFamily: interFamily.bold,
+    fontFamily: obc.body,
     color: colors.black,
     paddingVertical: 4,
   },
@@ -1161,8 +1261,8 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   addChildLabel: {
-    fontSize: fontSize.base,
-    fontFamily: interFamily.semibold,
+    fontSize: fontSize.lg,
+    fontFamily: obc.display,
     color: PURPLE,
   },
 
@@ -1171,18 +1271,18 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white,
-    borderRadius: radii.xxl,
-    borderWidth: 2.5,
+    borderRadius: obc.radius,
+    borderWidth: 3,
     borderColor: BLACK,
     paddingVertical: 28,
     gap: 8,
-    ...SOLID_SHADOW,
+    ...cardShadow,
   },
   parentCardActive: {
-    backgroundColor: LAVENDER,
+    backgroundColor: obc.purpleSoft,
     borderColor: PURPLE,
     ...Platform.select({
-      ios:     { shadowColor: PURPLE, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0 },
+      ios:     { shadowColor: PURPLE, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
       android: { elevation: 4 },
       default: {},
     }),
@@ -1202,7 +1302,7 @@ const s = StyleSheet.create({
   },
   orPickLabel: {
     fontSize: fontSize.sm,
-    fontFamily: interFamily.semibold,
+    fontFamily: obc.bodySemi,
     color: colors.muted,
     textAlign: 'center',
     marginBottom: -6,
@@ -1213,17 +1313,17 @@ const s = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: radii.full,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: BLACK,
     backgroundColor: colors.white,
   },
   parentChipActive: {
     borderColor: PURPLE,
-    backgroundColor: LAVENDER,
+    backgroundColor: obc.purpleSoft,
   },
   parentChipLabel: {
     fontSize: fontSize.base,
-    fontFamily: interFamily.semibold,
+    fontFamily: obc.bodyHeavy,
     color: colors.black,
   },
   parentChipLabelActive: {
@@ -1258,23 +1358,25 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     backgroundColor: colors.white,
-    borderRadius: radii.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: 14,
+    borderRadius: obc.radius,
+    borderWidth: 3,
+    borderColor: BLACK,
+    padding: 13,
+    ...cardShadow,
   },
   choreRowChecked: {
     borderColor: PURPLE,
-    backgroundColor: CHORE_ROW_CHECKED_BG,
+    backgroundColor: obc.purpleSoft,
   },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: BLACK,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.white,
   },
   checkboxChecked: {
     backgroundColor: PURPLE,
@@ -1282,8 +1384,8 @@ const s = StyleSheet.create({
   },
   choreName: {
     flex: 1,
-    fontSize: fontSize.base,
-    fontFamily: interFamily.semibold,
+    fontSize: scale(17),
+    fontFamily: obc.display,
     color: colors.black,
   },
   choreRemove: {
@@ -1301,38 +1403,40 @@ const s = StyleSheet.create({
   },
   diffBadgeText: {
     fontSize: fontSize.xs,
-    fontFamily: interFamily.bold,
+    fontFamily: obc.bodyHeavy,
   },
 
   // Pay card (Step 4)
   payCard: {
     backgroundColor: colors.white,
-    borderRadius: radii.xxl,
-    borderWidth: 2,
+    borderRadius: obc.radius,
+    borderWidth: 3,
     borderColor: BLACK,
     padding: 20,
     gap: 8,
-    ...SOLID_SHADOW,
+    ...cardShadow,
   },
   payCardLabel: {
     fontSize: fontSize.base,
-    fontFamily: interFamily.semibold,
+    fontFamily: obc.body,
     color: colors.muted,
     textAlign: 'center',
   },
   payAmount: {
-    fontSize: scale(42),
-    fontFamily: interFamily.semibold,
+    fontSize: scale(48),
+    fontFamily: obc.display,
     color: PURPLE,
     textAlign: 'center',
-    lineHeight: scale(50),
+    lineHeight: scale(54),
   },
 
   // Slider
   sliderTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.trackBg,
+    height: 12,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: BLACK,
+    backgroundColor: colors.white,
     marginTop: 12,
     marginBottom: 4,
     position: 'relative',
@@ -1343,8 +1447,8 @@ const s = StyleSheet.create({
     left: 0,
     top: 0,
     height: '100%',
-    borderRadius: 4,
-    backgroundColor: PURPLE,
+    borderRadius: 999,
+    backgroundColor: obc.lime,
   },
   sliderThumb: {
     position: 'absolute',
@@ -1384,20 +1488,21 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     backgroundColor: colors.white,
-    borderRadius: radii.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: 14,
+    borderRadius: obc.radius,
+    borderWidth: 3,
+    borderColor: BLACK,
+    padding: 13,
+    ...cardShadow,
   },
   exampleName: {
     flex: 1,
     fontSize: fontSize.lg,
-    fontFamily: interFamily.semibold,
+    fontFamily: obc.display,
     color: colors.black,
   },
   exampleAmt: {
-    fontSize: fontSize.lg,
-    fontFamily: interFamily.bold,
+    fontSize: scale(20),
+    fontFamily: obc.display,
     color: PURPLE,
   },
 
@@ -1411,11 +1516,11 @@ const s = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 14,
     backgroundColor: colors.white,
-    borderRadius: radii.xxl,
-    borderWidth: 2,
+    borderRadius: obc.radius,
+    borderWidth: 3,
     borderColor: BLACK,
     padding: 16,
-    ...SOLID_SHADOW,
+    ...cardShadow,
   },
   infoChipEmoji: {
     fontSize: scale(24),
@@ -1424,12 +1529,56 @@ const s = StyleSheet.create({
   infoChipText: {
     flex: 1,
     fontSize: fontSize.base,
-    fontFamily: interFamily.regular,
+    fontFamily: obc.bodySemi,
     color: colors.black,
     lineHeight: scale(21),
   },
   infoChipTextBold: {
-    fontFamily: interFamily.bold,
+    fontFamily: obc.bodyHeavy,
     color: BLACK,
+  },
+
+  // Pairing-code card (Step 5)
+  pairCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: obc.purpleSoft,
+    borderRadius: obc.radius,
+    borderWidth: 3,
+    borderColor: BLACK,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    ...cardShadow,
+  },
+  pairKidName: {
+    fontSize: fontSize.xl,
+    fontFamily: obc.display,
+    color: colors.black,
+  },
+  pairHint: {
+    fontSize: fontSize.sm,
+    fontFamily: obc.bodySemi,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  pairCode: {
+    fontSize: scale(24),
+    fontFamily: obc.display,
+    letterSpacing: 3,
+    color: PURPLE,
+  },
+  pairExpires: {
+    fontFamily: obc.mono,
+    fontSize: scale(13),
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  pairLink: {
+    fontFamily: obc.display,
+    fontSize: scale(16),
+    color: PURPLE,
+    textDecorationLine: 'underline',
   },
 });

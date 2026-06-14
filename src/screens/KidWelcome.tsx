@@ -19,11 +19,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts, FredokaOne_400Regular } from '@expo-google-fonts/fredoka-one';
-import { ScreenHeading } from '../design-system/components/ScreenHeading';
-import { Button } from '../design-system/components/Button';
 import { scale, fontSize as fs, fontWeight as fw, colors, textStyles } from '../design-system/tokens';
 import { ArrowButton } from '../design-system/components/ArrowButton';
 import { useScaleAnimation } from '../design-system/hooks';
+import { obc, obText, cardShadow, DotGridBg, ObButton as Button } from './onboarding/obkit';
 
 // Disable system font scaling in this screen too
 // @ts-ignore
@@ -176,7 +175,11 @@ export const KW_DEBUG_DEFAULTS: KwDebugValues = {
 };
 
 // ─── Entry ────────────────────────────────────────────────────────────────────
-type Step = 'welcome' | 'howItWorks' | 'pick' | 'nameMonster' | 'ready';
+// MON-85: trimmed to the fastest path to the hook — monster carousel → name →
+// straight into the app. The intro (welcome / how-it-works) and outro ("You're
+// Ready") screens were cut; if week-one retention sags, relocate the how-it-works
+// explainer to an in-app first-session coachmark rather than an onboarding wall.
+type Step = 'pick' | 'nameMonster';
 
 interface Props {
   childName:  string;
@@ -186,26 +189,21 @@ interface Props {
 
 export function KidWelcome({ childName, onComplete, dbg }: Props) {
   const [fontsLoaded] = useFonts({ FredokaOne_400Regular });
-  const [step,        setStep]        = useState<Step>('welcome');
+  const [step,        setStep]        = useState<Step>('pick');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [monsterName, setMonsterName] = useState('');
 
   if (!fontsLoaded) {
-    return <View style={{ flex: 1, backgroundColor: GREEN }} />;
+    return <View style={{ flex: 1, backgroundColor: obc.lavender }} />;
   }
 
   const selected = MONSTERS[selectedIdx];
 
   switch (step) {
-    case 'welcome':
-      return <WelcomeScreen name={childName} onNext={() => setStep('howItWorks')} dbg={dbg} />;
-
-    case 'howItWorks':
-      return <HowItWorksScreen onNext={() => setStep('pick')} dbg={dbg} />;
-
     case 'pick':
       return (
         <PickMonsterScreen
+          name={childName}
           selectedIdx={selectedIdx}
           setSelectedIdx={setSelectedIdx}
           onSelect={() => setStep('nameMonster')}
@@ -219,18 +217,9 @@ export function KidWelcome({ childName, onComplete, dbg }: Props) {
           monster={selected}
           monsterName={monsterName}
           setMonsterName={setMonsterName}
-          onDone={() => setStep('ready')}
+          onDone={() => onComplete(selected.id, monsterName.trim() || selected.name)}
+          onBack={() => setStep('pick')}
           dbg={dbg}
-        />
-      );
-
-    case 'ready':
-      return (
-        <ReadyScreen
-          childName={childName}
-          monster={selected}
-          monsterName={monsterName.trim() || selected.name}
-          onStart={() => onComplete(selected.id, monsterName.trim() || selected.name)}
         />
       );
   }
@@ -250,63 +239,12 @@ function Bg() {
 }
 
 
-// ─── Screen 1 — Hey [Name]! ───────────────────────────────────────────────────
-
-function WelcomeScreen({ name, onNext, dbg }: {
-  name: string; onNext: () => void; dbg: KwDebugValues;
-}) {
-  return (
-    <View style={s.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
-      <Bg />
-      <SafeAreaView style={s.safe}>
-        <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }}>
-          {'Hey\n'}{name}{'!'}
-        </ScreenHeading>
-        <Text style={[s.subtitle, { marginTop: dbg.subtitleTop }]}>Your very own world is waiting.</Text>
-
-        {/* Slimey hero */}
-        <View style={s.monsterFlex}>
-          <Image
-            source={require('../../assets/SlashSlime.png')}
-            style={{ width: W * 0.82, height: W * 0.82 }}
-            resizeMode="contain"
-          />
-        </View>
-
-        {/* Bottom card */}
-        <View style={s.card}>
-          <View style={s.stepsRow}>
-            <StepPill image={require('../../assets/icons/IconSlime.png')}   label={'Pick your\nMonstir'} />
-            <StepPill image={require('../../assets/icons/IconStar.png')}    label={'Complete\nchores'} />
-            <StepPill image={require('../../assets/icons/IconDiamond.png')} label={'Earn\nrewards'} />
-          </View>
-          <Button label="Let's go!" onPress={onNext} />
-        </View>
-      </SafeAreaView>
-
-    </View>
-  );
-}
-
-function StepPill({
-  image, label,
-}: { image: ImageSourcePropType; label: string }) {
-  return (
-    <View style={s.stepPill}>
-      <View style={s.stepCircle}>
-        <Image source={image} style={s.stepImg} resizeMode="contain" />
-      </View>
-      <Text style={s.stepLabel}>{label}</Text>
-    </View>
-  );
-}
-
 // ─── Screen 2 — Pick your Monstir ─────────────────────────────────────────────
 
 function PickMonsterScreen({
-  selectedIdx, setSelectedIdx, onSelect, dbg,
+  name, selectedIdx, setSelectedIdx, onSelect, dbg,
 }: {
+  name:           string;
   selectedIdx:    number;
   setSelectedIdx: (i: number) => void;
   onSelect:       () => void;
@@ -360,13 +298,12 @@ function PickMonsterScreen({
   const next = () => setSelectedIdx((selectedIdx + 1) % MONSTERS.length);
 
   return (
-    <View style={s.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
-      <Bg />
+    <DotGridBg>
+      <StatusBar barStyle="dark-content" backgroundColor={obc.lavender} />
       <SafeAreaView style={s.safe}>
-        <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }} numberOfLines={2}>
-          {'Pick your Monstir'}
-        </ScreenHeading>
+        <Text style={[s.heading, { marginTop: dbg.headingTop }]} numberOfLines={2}>
+          {`Hey ${name},\npick your Monstir`}
+        </Text>
         <Text style={[s.subtitle, { marginTop: dbg.subtitleTop }]}>Choose your buddy!</Text>
 
         {/* ── Hero scene with arrows — negative margin breaks out of safe-area padding ── */}
@@ -452,353 +389,72 @@ function PickMonsterScreen({
           )}
         />
 
-        <Button label={`Select ${selected.name}`} onPress={onSelect} />
+        <Button label={`Select ${selected.name}`} onPress={onSelect} variant="lime" />
       </SafeAreaView>
-
-    </View>
-  );
-}
-
-// ─── Screen 3 — How Monstir works ─────────────────────────────────────────────
-
-function HowItWorksScreen({ onNext, dbg }: {
-  onNext: () => void; dbg: KwDebugValues;
-}) {
-  return (
-    <View style={s.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
-      <Bg />
-      <SafeAreaView style={s.safe}>
-        <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }} numberOfLines={2}>{'How Monstir works'}</ScreenHeading>
-        <Text style={[s.subtitle, { marginTop: dbg.subtitleTop }]}>Three things. That's it.</Text>
-
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: scale(8) }}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={[s.card, s.howCard]}>
-            <HowRow
-              icon={require('../../assets/icons/IconClipboard.png')}
-              title="Do chores"
-              desc="Your parents set them up. Check them off when you're done."
-            />
-            <Text style={s.howArrow}>↓</Text>
-            <HowRow
-              icon={require('../../assets/icons/IconStar.png')}
-              title="Earn XP and evolve"
-              desc="Complete chores to power up your Monstir and unlock new forms."
-            />
-            <Text style={s.howArrow}>↓</Text>
-            <HowRow
-              icon={require('../../assets/icons/IconTreasure.png')}
-              title="Unlock rewards"
-              desc="Hit your goals and cash in on the rewards your parents set up."
-            />
-          </View>
-        </ScrollView>
-
-        <Button label="Got it!" onPress={onNext} />
-      </SafeAreaView>
-
-    </View>
-  );
-}
-
-function HowRow({
-  icon, title, desc,
-}: { icon: ImageSourcePropType; title: string; desc: string }) {
-  return (
-    <View style={s.howRow}>
-      <View style={s.howCircle}>
-        <Image source={icon} style={s.howIcon} resizeMode="contain" />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={s.howTitle}>{title}</Text>
-        <Text style={s.howDesc}>{desc}</Text>
-      </View>
-    </View>
+    </DotGridBg>
   );
 }
 
 // ─── Screen 4 — Name your Monstir ─────────────────────────────────────────────
 
 function NameMonsterScreen({
-  monster, monsterName, setMonsterName, onDone, dbg,
+  monster, monsterName, setMonsterName, onDone, onBack, dbg,
 }: {
   monster:        MonsterDef;
   monsterName:    string;
   setMonsterName: (s: string) => void;
   onDone:         () => void;
+  onBack:         () => void;
   dbg:            KwDebugValues;
 }) {
   const IMG_W = dbg.splashImgW > 0 ? dbg.splashImgW : W - 40;
   const IMG_H = IMG_W * (dbg.splashImgRatio / 100);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={s.root}>
-        <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
-        <Bg />
+    <DotGridBg>
+      <StatusBar barStyle="dark-content" backgroundColor={obc.lavender} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <SafeAreaView style={s.safe}>
-          <ScreenHeading style={[s.heading, { marginTop: dbg.headingTop }]} dropShadow={{ x: dbg.shadowX, y: dbg.shadowY }} numberOfLines={2}>{'Great choice!'}</ScreenHeading>
-          <Text style={[s.subtitle, { marginTop: dbg.subtitleTop }]}>One last question...</Text>
+          {/* Whole group centered vertically in the safe area. */}
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <Text style={[s.heading, { marginTop: 0 }]} numberOfLines={2}>Great choice!</Text>
+            <Text style={[s.subtitle, { marginTop: scale(4) }]}>One last question...</Text>
 
-          {/*
-           * The success image floats down to sit flush on top of the card —
-           * no gap between image bottom and card top.
-           */}
-          <View style={{ flex: 1, justifyContent: 'flex-end', zIndex: 2, overflow: 'visible' }}>
-            <Image
-              key={monster.id}
-              source={monster.splash}
-              style={{
-                width: IMG_W,
-                height: IMG_H,
-                alignSelf: 'center',
-                transform: [{ translateX: dbg.splashImgX }, { translateY: dbg.splashImgY }],
-              }}
-              resizeMode="contain"
-            />
-          </View>
+            {/* The success image floats down to sit flush on top of the card. */}
+            <View style={{ alignItems: 'center', marginTop: scale(8), zIndex: 2, overflow: 'visible' }}>
+              <Image
+                key={monster.id}
+                source={monster.splash}
+                style={{
+                  width: IMG_W,
+                  height: IMG_H,
+                  transform: [{ translateX: dbg.splashImgX }, { translateY: dbg.splashImgY }],
+                }}
+                resizeMode="contain"
+              />
+            </View>
 
-          <View style={[s.card, { zIndex: 1 }]}>
-            <Text style={s.nameQ}>What should we call your new buddy?</Text>
-            <Text style={s.nameHint}>Give your Monstir a name.</Text>
-            <TextInput
-              style={s.nameInput}
-              value={monsterName}
-              onChangeText={setMonsterName}
-              placeholder={monster.namePlaceholder ?? monster.name}
-              placeholderTextColor="#b4b4b4"
-              autoCapitalize="words"
-              maxLength={20}
-            />
-            <Button label="That's their name!" onPress={onDone} />
+            <View style={[s.card, { zIndex: 1 }]}>
+              <Text style={s.nameQ}>What should we call your new buddy?</Text>
+              <Text style={s.nameHint}>Give your Monstir a name.</Text>
+              <TextInput
+                style={s.nameInput}
+                value={monsterName}
+                onChangeText={setMonsterName}
+                placeholder={monster.namePlaceholder ?? monster.name}
+                placeholderTextColor="#b4b4b4"
+                autoCapitalize="words"
+                maxLength={20}
+              />
+              <Button label="That's their name!" onPress={onDone} />
+              <Button label="Pick a different Monstir" onPress={onBack} variant="secondary" />
+            </View>
           </View>
         </SafeAreaView>
-  
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </DotGridBg>
   );
 }
-
-// ─── Screen 5 — You're ready! ────────────────────────────────────────────────
-
-function ReadyScreen({
-  childName, monster, monsterName, onStart,
-}: {
-  childName:   string;
-  monster:     MonsterDef;
-  monsterName: string;
-  onStart:     () => void;
-}) {
-  const [activeIdx, setActiveIdx] = useState(0);
-  const flatRef = useRef<FlatList<{ key: string }>>(null);
-  // Full width minus: outer padding (24) + arrow btn (52) + gap (8) on each side
-  const CARD_W = Dimensions.get('window').width - scale(24 + 52 + 8) * 2;
-  const CARD_STEP = CARD_W + scale(16);
-
-  const cards = [
-    { key: 'monster' },
-    { key: 'chores'  },
-    { key: 'battle'  },
-    { key: 'reward'  },
-  ];
-
-  const goTo = (idx: number) => {
-    const clamped = Math.max(0, Math.min(cards.length - 1, idx));
-    setActiveIdx(clamped);
-    flatRef.current?.scrollToOffset({ offset: clamped * CARD_STEP, animated: true });
-  };
-
-  return (
-    <View style={s.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={GREEN} />
-      <Bg />
-      <SafeAreaView style={s.safe}>
-        <ScreenHeading style={s.heading}>
-          {"You're Ready"}
-        </ScreenHeading>
-        <Text style={s.subtitle}>
-          <Text style={{ color: PURPLE }}>Welcome to Monstir</Text>
-          {`, ${childName}`}
-        </Text>
-
-        {/* ── Carousel + arrows ── */}
-        <View style={rs.carouselRow}>
-          <ArrowButton direction="left" onPress={() => goTo(activeIdx - 1)} disabled={activeIdx === 0} />
-
-          <FlatList
-            ref={flatRef}
-            data={cards}
-            keyExtractor={c => c.key}
-            horizontal
-            pagingEnabled={false}
-            snapToInterval={CARD_STEP}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            showsHorizontalScrollIndicator={false}
-            scrollEnabled={false}
-            contentContainerStyle={{ gap: scale(16), paddingVertical: scale(12) }}
-            style={{ flex: 1 }}
-            onMomentumScrollEnd={e => {
-              const idx = Math.round(e.nativeEvent.contentOffset.x / CARD_STEP);
-              setActiveIdx(idx);
-            }}
-          renderItem={({ item }) => {
-            if (item.key === 'monster') return (
-              <View style={[rs.card, { width: CARD_W }]}>
-                <View style={rs.cardImgWrap}>
-                  {monster.scene
-                    ? <Image source={monster.scene} style={rs.cardMonsterImg} resizeMode="contain" />
-                    : <Text style={{ fontSize: scale(64) }}>🐾</Text>
-                  }
-                </View>
-                <Text style={rs.cardTitle}>{monsterName}</Text>
-                <Text style={rs.cardDesc}>Level 1 · 0 XP to start</Text>
-                <View style={rs.xpTrack}><View style={rs.xpFill} /></View>
-              </View>
-            );
-            if (item.key === 'chores') return (
-              <View style={[rs.card, { width: CARD_W }]}>
-                <Text style={rs.cardEmoji}>📋</Text>
-                <Text style={rs.cardTitle}>Chores</Text>
-                <Text style={rs.cardDesc}>Complete chores to earn XP and power up for battle</Text>
-              </View>
-            );
-            if (item.key === 'battle') return (
-              <View style={[rs.card, { width: CARD_W }]}>
-                <Text style={rs.cardEmoji}>⚔️</Text>
-                <Text style={rs.cardTitle}>Boss Battles</Text>
-                <Text style={rs.cardDesc}>Every Sunday your monster fights a boss. The more chores you do, the stronger you hit</Text>
-              </View>
-            );
-            // reward
-            return (
-              <View style={[rs.card, { width: CARD_W }]}>
-                <Text style={rs.cardEmoji}>🎁</Text>
-                <Text style={rs.cardTitle}>Rewards</Text>
-                <Text style={rs.cardDesc}>Win battles to unlock collectibles and earn rewards your parents set</Text>
-              </View>
-            );
-          }}
-          />
-
-          <ArrowButton direction="right" onPress={() => goTo(activeIdx + 1)} disabled={activeIdx === cards.length - 1} />
-        </View>
-
-        {/* ── Dot indicators ── */}
-        <View style={rs.dots}>
-          {cards.map((c, i) => (
-            <View key={c.key} style={[rs.dot, i === activeIdx && rs.dotActive]} />
-          ))}
-        </View>
-
-        {/* ── CTA ── */}
-        <View style={rs.footer}>
-          <Button label="Start Adventure! 🚀" onPress={onStart} />
-        </View>
-      </SafeAreaView>
-    </View>
-  );
-}
-
-
-const rs = StyleSheet.create({
-  // Carousel wrapper
-  carouselRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: scale(12),
-    gap: scale(8),
-  },
-  arrowDisabled: {
-    opacity: 0.3,
-  },
-
-  // Carousel card
-  card: {
-    backgroundColor: CREAM,
-    borderRadius: scale(20),
-    borderWidth: 2.5,
-    borderColor: BLACK,
-    padding: scale(24),
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: scale(10),
-    minHeight: scale(280),
-    ...CARD_SHADOW,
-  },
-  cardImgWrap: {
-    width: scale(140),
-    height: scale(140),
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: scale(4),
-  },
-  cardMonsterImg: {
-    width: scale(140),
-    height: scale(140),
-  },
-  cardEmoji: {
-    fontSize: scale(72),
-    marginBottom: scale(4),
-  },
-  cardTitle: {
-    fontFamily: FONT,
-    fontSize: scale(26),
-    color: BLACK,
-    textAlign: 'center',
-  },
-  cardDesc: {
-    ...textStyles.secondaryText,
-    color: colors.muted,
-    fontSize: scale(16),
-    lineHeight: scale(22),
-  },
-
-  // XP bar (monster card)
-  xpTrack: {
-    width: '100%',
-    height: scale(6),
-    backgroundColor: '#ECEAE4',
-    borderRadius: scale(3),
-    overflow: 'hidden',
-    marginTop: scale(2),
-  },
-  xpFill: {
-    width: '0%',
-    height: '100%',
-    backgroundColor: PURPLE,
-    borderRadius: scale(3),
-  },
-
-  // Dot indicators
-  dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: scale(6),
-    paddingVertical: scale(8),
-  },
-  dot: {
-    width: scale(7),
-    height: scale(7),
-    borderRadius: scale(4),
-    backgroundColor: 'rgba(0,0,0,0.18)',
-  },
-  dotActive: {
-    backgroundColor: BLACK,
-    width: scale(18),
-  },
-
-  // Footer
-  footer: {
-    paddingHorizontal: scale(24),
-    paddingBottom: scale(12),
-    paddingTop: scale(4),
-  },
-});
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -816,11 +472,19 @@ const s = StyleSheet.create({
   // ── Typography
   heading: {
     width: '100%',
+    fontFamily: obc.display,
+    fontSize: scale(26),
+    lineHeight: scale(29),
+    color: obc.ink,
+    textAlign: 'center',
     marginTop: scale(28),
     marginBottom: scale(4),
   },
   subtitle: {
-    ...textStyles.secondaryText,
+    fontFamily: obc.body,
+    fontSize: scale(15),
+    color: obc.muted,
+    textAlign: 'center',
     marginTop: scale(10),
     marginBottom: scale(6),
   },
@@ -834,13 +498,13 @@ const s = StyleSheet.create({
 
   // ── Card shell
   card: {
-    backgroundColor: CREAM,
-    borderRadius: scale(14),
-    borderWidth: 2,
-    borderColor: BLACK,
+    backgroundColor: '#FFFFFF',
+    borderRadius: obc.radius,
+    borderWidth: 3,
+    borderColor: obc.ink,
     padding: scale(20),
     gap: scale(14),
-    ...CARD_SHADOW,
+    ...cardShadow,
   },
 
   // ── Step pills (welcome card)
@@ -962,20 +626,19 @@ const s = StyleSheet.create({
   // ── Monster cards
   monsterCard: {
     width: CARD_W,
-    backgroundColor: CREAM,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: BLACK,
+    backgroundColor: '#FFFFFF',
+    borderRadius: obc.radius,
+    borderWidth: 3,
+    borderColor: obc.ink,
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
     gap: 2,
-    ...CARD_SHADOW,
+    ...cardShadow,
   },
   monsterCardActive: {
-    backgroundColor: PURPLE_LIGHT,
-    borderColor: PURPLE,
-    shadowColor: PURPLE,
+    backgroundColor: obc.purpleSoft,
+    borderColor: obc.purple,
   },
   monsterCardImg: {
     width: CARD_W - 24,
@@ -988,18 +651,21 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   monsterCardName: {
-    fontFamily: FONT,
-    fontSize: scale(16),
-    color: BLACK,
+    fontFamily: obc.display,
+    fontSize: scale(15),
+    color: obc.ink,
     textAlign: 'center',
+    marginTop: 4,
   },
   monsterCardNameActive: {
-    color: PURPLE,
+    color: obc.purple,
   },
   monsterCardTrait: {
-    fontSize: scale(12),
-    color: '#888',
+    fontFamily: obc.mono,
+    fontSize: scale(11),
+    color: obc.muted,
     textAlign: 'center',
+    marginTop: 2,
   },
 
   // ── How it works
@@ -1044,27 +710,29 @@ const s = StyleSheet.create({
 
   // ── Name monster
   nameQ: {
-    fontFamily: FONT,
-    fontSize: scale(22),
-    color: BLACK,
+    fontFamily: obc.display,
+    fontSize: scale(20),
+    color: obc.ink,
     textAlign: 'center',
   },
   nameHint: {
-    fontSize: scale(14),
-    color: '#888',
+    fontFamily: obc.body,
+    fontSize: scale(13),
+    color: obc.muted,
     textAlign: 'center',
     marginTop: scale(-6),
   },
   nameInput: {
-    borderWidth: 2,
-    borderColor: BLACK,
-    borderRadius: scale(12),
-    paddingVertical: scale(12),
+    borderWidth: 3,
+    borderColor: obc.ink,
+    borderRadius: scale(14),
+    paddingVertical: scale(13),
     paddingHorizontal: scale(16),
     fontSize: scale(18),
-    fontFamily: 'Inter_600SemiBold',
-    color: BLACK,
+    fontFamily: obc.body,
+    color: obc.ink,
     textAlign: 'center',
     backgroundColor: '#FFFFFF',
+    ...cardShadow,
   },
 });

@@ -29,6 +29,7 @@ import {
 } from './src/lib/socialAuth';
 import { ParentOnboarding } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
+import { obc, obText, cardShadow, DotGridBg, ObButton, StepDots as ObStepDots, Tag, InfoDot, CodeCells, Keypad, ScreenEnter, Rise } from './src/screens/onboarding/obkit';
 import { TrophyRoom } from './src/screens/TrophyRoom';
 import { ParentMilestoneDetail } from './src/screens/ParentMilestoneDetail';
 import { saveBossCapture, getBossCaptures, mergeBossCaptures, type BossCaptureEntry } from './src/storage/bossCaptures';
@@ -75,7 +76,7 @@ import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreComp
 // Our scale() utility handles all proportional sizing; allowing the OS to also
 // scale fonts causes double-scaling on accessibility text-size settings.
 // @ts-ignore
-Text.defaultProps = { ...(Text.defaultProps ?? {}), allowFontScaling: false, adjustsFontSizeToFit: true, minimumFontScale: 0.7 };
+Text.defaultProps = { ...(Text.defaultProps ?? {}), allowFontScaling: false };
 // @ts-ignore
 TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), allowFontScaling: false };
 
@@ -8643,152 +8644,220 @@ interface OnboardingFlowProps {
   onReady: () => void;
 }
 
-function OnboardingFlow({ onReady }: OnboardingFlowProps) {
-  const [step, setStep] = useState<number>(0);
+// MON-85 re-skin: children-first carousel matching the HTML prototype. Welcome
+// intro → 3 story slides (chores → allowance+XP → Sunday boss). Mock cards +
+// dot-grid bg + staggered entrance. Sign-in untouched downstream (MON-54).
+const OB_SLIDES = [
+  {
+    title: 'Chores are\nthe whole game',
+    sub: "Set up real chores and what they're worth. Every one a kid finishes is a step toward Sunday's boss battle. Chores are the only way there.",
+  },
+  {
+    title: 'Earn real\nallowance + XP',
+    sub: "Approved chores add real money to a kid's ledger and XP to their Monstir. Monstir tracks every cent, and you just pay out what the app says.",
+  },
+  {
+    title: 'The Sunday\nboss battle',
+    sub: 'A week of chores powers up the family for one shared Sunday showdown. Co-op, never kid-vs-kid. Everybody fights the boss together.',
+  },
+] as const;
 
-  const PaginationDots = ({ current }: { current: number }) => (
-    <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center', marginBottom: 24 }}>
-      {[0, 1, 2].map(i => (
-        <View
-          key={i}
-          style={{
-            width: 8, height: 8, borderRadius: 4,
-            backgroundColor: current === i ? '#6B35F0' : '#D0CEC8',
-          }}
-        />
-      ))}
-    </View>
-  );
-
-  // Slide 0 — Complete chores
-  if (step === 0) {
+function ObSlideCard({ index }: { index: number }) {
+  if (index === 0) {
     return (
-      <CreamBg>
-        <TouchableOpacity
-          style={ob.skipBtn}
-          onPress={onReady}
-          activeOpacity={0.7}
-        >
-          <Text style={ob.skipText}>Skip</Text>
-        </TouchableOpacity>
-
-        {/* Top half */}
-        <View style={ob.topHalf}>
-          <View style={ob.robotCircle}>
-            <Image
-              source={require('./assets/monstirs/robot monstir/robot_1.png')}
-              style={{ width: 200, height: 200 }}
-              resizeMode="contain"
-            />
-            {/* XP badge */}
-            <View style={ob.xpBadge}>
-              <Text style={{ fontSize: scale(14) }}>⭐</Text>
-              <Text style={ob.xpBadgeText}>+50 XP</Text>
-            </View>
-          </View>
+      <View style={obf.pillCard}>
+        <Text style={{ fontSize: scale(34) }}>🧹</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={obf.pillTtl}>Vacuum</Text>
+          <Text style={obf.pillMeta}>+15 XP · 💰 $1.50</Text>
         </View>
-
-        {/* Bottom white card */}
-        <View style={ob.bottomCard}>
-          <PaginationDots current={0} />
-          <Text style={ob.slideTitle}>
-            Complete{' '}
-            <Text style={ob.slideTitleWord}>chores</Text>
-          </Text>
-          <View style={ob.yellowUnderline} />
-          <Text style={ob.slideSubtitle}>
-            Finish tasks around the house to earn XP and coins.
-          </Text>
-          <Button label="Next →" onPress={() => setStep(1)} />
-        </View>
-      </CreamBg>
+        <Tag label="Done!" />
+      </View>
     );
   }
-
-  // Slide 1 — Level up & evolve
-  if (step === 1) {
+  if (index === 1) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#EAE4FF' }}>
-        <TouchableOpacity style={ob.skipBtn} onPress={onReady} activeOpacity={0.7}>
-          <Text style={ob.skipText}>Skip</Text>
-        </TouchableOpacity>
-
-        {/* Top half */}
-        <View style={ob.topHalf}>
-          <View style={[ob.robotCircle, { backgroundColor: '#D4CAFF' }]}>
-            <Image
-              source={require('./assets/monstirs/robot monstir/robot_7.png')}
-              style={{ width: 220, height: 220 }}
-              resizeMode="contain"
-            />
-            {/* Level up badge */}
-            <View style={[ob.xpBadge, { borderColor: '#6B35F0' }]}>
-              <Text style={{ fontSize: scale(14) }}>👑</Text>
-              <Text style={[ob.xpBadgeText, { color: '#6B35F0', fontFamily: 'Inter_800ExtraBold' }]}>LEVEL UP!</Text>
-            </View>
+      <View style={obf.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View>
+            <Text style={obf.metaMono}>EMMA'S WALLET</Text>
+            <Text style={[obf.bigNum, { color: obc.purple }]}>$8.50</Text>
           </View>
-        </View>
-
-        {/* Bottom white card */}
-        <View style={ob.bottomCard}>
-          <PaginationDots current={1} />
-          <Text style={ob.slideTitle}>
-            Level up &{' '}
-            <Text style={ob.slideTitleWord}>evolve</Text>
-          </Text>
-          <View style={ob.yellowUnderline} />
-          <Text style={ob.slideSubtitle}>
-            The more you do, the stronger your Monstir becomes!
-          </Text>
-          <Button label="Next →" onPress={() => setStep(2)} />
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={obf.metaMono}>MONSTIR XP</Text>
+            <Text style={obf.bigNum}>Lvl 3 · 245</Text>
+          </View>
         </View>
       </View>
     );
   }
+  return (
+    <View style={[obf.card, { backgroundColor: obc.purple, alignItems: 'center', borderColor: obc.ink }]}>
+      <Text style={{ fontSize: scale(44) }}>👾</Text>
+      <Text style={{ fontFamily: obc.display, fontSize: scale(20), color: '#fff', marginTop: 4 }}>Sunday: Dishocalypse</Text>
+      <Text style={{ fontFamily: obc.mono, fontSize: scale(12), color: 'rgba(255,255,255,0.85)', marginTop: 2 }}>Family vs. Boss · 4 fighters ready</Text>
+    </View>
+  );
+}
 
-  // Slide 2 — Earn rewards
-  if (step === 2) {
+function OnboardingFlow({ onReady }: OnboardingFlowProps) {
+  const [step, setStep] = useState<number>(0);
+
+  // Step 0 — Welcome intro
+  if (step === 0) {
     return (
-      <CreamBg>
-        <TouchableOpacity style={ob.skipBtn} onPress={onReady} activeOpacity={0.7}>
-          <Text style={ob.skipText}>Skip</Text>
-        </TouchableOpacity>
-
-        {/* Top half */}
-        <View style={ob.topHalf}>
-          <View style={{ alignItems: 'center', gap: 12 }}>
-            {/* 2x2 grid of reward icons */}
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              {(['⭐', '📖', '👟', '🧢'] as string[]).map((emoji, i) => (
-                <View key={i} style={ob.rewardIcon}>
-                  <Text style={{ fontSize: scale(32) }}>{emoji}</Text>
-                </View>
-              ))}
+      <DotGridBg>
+        <SafeAreaView style={obf.safe}>
+          <ScreenEnter>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Rise pop>
+                <Image source={require('./assets/monstirLogo.png')} style={{ width: 220, height: 82 }} resizeMode="contain" />
+              </Rise>
+              <Rise delay={120}>
+                <Text style={[obText.title, { textAlign: 'center', marginTop: scale(20) }]}>Chores worth{'\n'}showing up for.</Text>
+              </Rise>
+              <Rise delay={220}>
+                <Text style={[obText.sub, { textAlign: 'center', marginTop: scale(10) }]}>Real allowance, Monstirs that grow, and a Sunday boss battle the whole family fights together.</Text>
+              </Rise>
             </View>
-            {/* Treasure chest */}
-            <View style={ob.chestBox}>
-              <Text style={{ fontSize: scale(80) }}>🎁</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Bottom white card */}
-        <View style={ob.bottomCard}>
-          <PaginationDots current={2} />
-          <Text style={ob.slideTitle}>
-            Earn{' '}
-            <Text style={ob.slideTitleWord}>rewards</Text>
-          </Text>
-          <View style={ob.yellowUnderline} />
-          <Text style={ob.slideSubtitle}>
-            Unlock cool items, accessories, and new evolutions!
-          </Text>
-          <Button label="Next →" onPress={onReady} />
-        </View>
-      </CreamBg>
+            <ObButton label="Get started" onPress={() => setStep(1)} />
+          </ScreenEnter>
+        </SafeAreaView>
+      </DotGridBg>
     );
   }
+
+  // Steps 1–3 — story carousel
+  const idx = step - 1;
+  const slide = OB_SLIDES[idx];
+  const last = step === 3;
+  return (
+    <DotGridBg>
+      <SafeAreaView style={obf.safe}>
+        <ScreenEnter key={step}>
+          <View style={obf.topRow}>
+            <View />
+            <TouchableOpacity onPress={onReady} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={obf.skip}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Rise pop>
+            <ObSlideCard index={idx} />
+          </Rise>
+
+          <View style={{ flex: 1 }} />
+
+          <Rise delay={150}><Text style={obText.title}>{slide.title}</Text></Rise>
+          <Rise delay={250}><Text style={[obText.sub, { marginTop: 10 }]}>{slide.sub}</Text></Rise>
+          <Rise delay={330}><ObStepDots step={step} total={3} style={{ marginTop: 16 }} /></Rise>
+          <ObButton label={last ? "Let's set it up" : 'Next'} onPress={() => (last ? onReady() : setStep(step + 1))} />
+        </ScreenEnter>
+      </SafeAreaView>
+    </DotGridBg>
+  );
 }
+
+const obf = StyleSheet.create({
+  safe:    { flex: 1, paddingHorizontal: 22, paddingTop: 8, paddingBottom: 8 },
+  topRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 30, marginBottom: 6 },
+  skip:    { fontFamily: obc.display, fontSize: scale(17), color: '#9A93AC' },
+  card:    { backgroundColor: '#fff', borderWidth: 3, borderColor: obc.ink, borderRadius: obc.radius, padding: 16, ...cardShadow },
+  pillCard:{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fff', borderWidth: 3, borderColor: obc.ink, borderRadius: obc.radius, padding: 16, ...cardShadow },
+  pillTtl: { fontFamily: obc.display, fontSize: scale(19), color: obc.ink },
+  pillMeta:{ fontFamily: obc.mono, fontSize: scale(13), color: obc.muted, marginTop: 2 },
+  metaMono:{ fontFamily: obc.mono, fontSize: scale(12), color: obc.muted },
+  bigNum:  { fontFamily: obc.display, fontSize: scale(22), color: obc.ink, marginTop: 2 },
+});
+
+// ─── Role selector (MON-85) ─────────────────────────────────────────────────
+// Pre-auth "Who's using Monstir?" gate. Parent → existing sign-in (MON-54).
+// Kid → device pairing. NOTE: this revives a pre-auth user-type selector that
+// MON-54 deliberately omitted; it's part of the two-device direction and pairs
+// with the Phase-2 kid-device auth work (see MON-54 / MON-63).
+function RoleSelectScreen({ onParent, onKid }: { onParent: () => void; onKid: () => void }) {
+  return (
+    <DotGridBg>
+      <SafeAreaView style={obf.safe}>
+        <ScreenEnter>
+          <View style={{ flex: 1 }} />
+          <View style={{ alignItems: 'center' }}>
+            <Image source={require('./assets/monstirLogo.png')} style={{ width: 200, height: 74 }} resizeMode="contain" />
+            <Text style={[obText.title, { textAlign: 'center', marginTop: scale(14) }]}>Welcome to Monstir!</Text>
+            <Text style={[obText.sub, { textAlign: 'center', marginTop: scale(4) }]}>Who's setting up?</Text>
+          </View>
+          <View style={{ height: 28 }} />
+          <Rise delay={80}>
+            <TouchableOpacity style={rs.role} activeOpacity={0.85} onPress={onParent}>
+              <View style={[rs.roleIc, { backgroundColor: obc.purple }]}><Text style={{ fontSize: scale(30) }}>🧑</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={rs.roleTitle}>I'm a parent</Text>
+                <Text style={rs.roleDesc}>Create chores & run the ledger</Text>
+              </View>
+            </TouchableOpacity>
+          </Rise>
+          <Rise delay={160}>
+            <TouchableOpacity style={rs.role} activeOpacity={0.85} onPress={onKid}>
+              <View style={[rs.roleIc, { backgroundColor: obc.lime }]}><Text style={{ fontSize: scale(30) }}>🙂</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={rs.roleTitle}>I'm a kid</Text>
+                <Text style={rs.roleDesc}>Do chores & grow my Monstir</Text>
+              </View>
+            </TouchableOpacity>
+          </Rise>
+          <View style={{ flex: 1 }} />
+        </ScreenEnter>
+      </SafeAreaView>
+    </DotGridBg>
+  );
+}
+
+// ─── Kid device pairing (MON-85) ─────────────────────────────────────────────
+// PHASE 1 SCAFFOLD ONLY: code entry is not validated against any backend (kid
+// devices aren't authenticated clients yet). Submitting previews the kid setup
+// (monster carousel → name). Real code minting/validation + kid-device auth +
+// RLS is the Phase-2 backend ticket.
+function KidPairingScreen({ onSubmit, onBack }: { onSubmit: (code: string) => void; onBack: () => void }) {
+  const [code, setCode] = useState('');
+  const press = (d: string) => {
+    if (code.length >= 6) return;
+    const next = code + d;
+    setCode(next);
+    // Auto-advance into the preview once 6 digits are in (prototype behavior).
+    if (next.length === 6) setTimeout(() => onSubmit(next), 260);
+  };
+  const del = () => setCode(c => c.slice(0, -1));
+  return (
+    <DotGridBg>
+      <SafeAreaView style={obf.safe}>
+        <ScreenEnter>
+          <View style={obf.topRow}>
+            <TouchableOpacity onPress={onBack} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={rs.back}>‹</Text>
+            </TouchableOpacity>
+            <InfoDot />
+          </View>
+          <Text style={{ textAlign: 'center', fontSize: scale(42), marginTop: 6 }}>🔗</Text>
+          <Text style={[obText.titleSm, { textAlign: 'center', marginTop: 4 }]}>Enter your{'\n'}pairing code</Text>
+          <Text style={[obText.sub, { textAlign: 'center', marginTop: 6 }]}>Ask a parent for the 6-digit code from their app.</Text>
+          <CodeCells code={code} />
+          <Keypad onKey={press} onDelete={del} />
+          <Text style={rs.note}>Pairing isn't connected yet. This previews your Monstir setup.</Text>
+          <View style={{ flex: 1 }} />
+        </ScreenEnter>
+      </SafeAreaView>
+    </DotGridBg>
+  );
+}
+
+const rs = StyleSheet.create({
+  role:      { flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: '#fff', borderWidth: 3, borderColor: obc.ink, borderRadius: obc.radius, padding: 16, marginBottom: 16, ...cardShadow },
+  roleIc:    { width: 60, height: 60, borderWidth: 2, borderColor: obc.ink, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  roleTitle: { fontFamily: obc.display, fontSize: scale(22), color: obc.ink },
+  roleDesc:  { fontFamily: obc.body, fontSize: scale(14), color: obc.muted, marginTop: 2 },
+  back:      { fontFamily: obc.display, fontSize: scale(30), color: obc.ink, lineHeight: scale(32), paddingHorizontal: 4 },
+  note:      { fontFamily: obc.bodySemi, fontSize: scale(12), color: obc.muted, textAlign: 'center', marginTop: 14 },
+});
 
 // ─── Landing Screen ───────────────────────────────────────────────────────────
 
@@ -9479,7 +9548,7 @@ function ForgotPasswordScreen({ onBack, onSent }: { onBack: () => void; onSent: 
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
-type AppMode = 'splash' | 'onboarding' | 'landing' | 'login' | 'signup' | 'checkEmail' | 'forgotPassword' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
+type AppMode = 'splash' | 'onboarding' | 'roleSelect' | 'kidPairing' | 'landing' | 'login' | 'signup' | 'checkEmail' | 'forgotPassword' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
 
 // Marketing-site page that receives the Supabase recovery token (MON-54).
 const RESET_PASSWORD_REDIRECT = 'https://monstirapp.com/reset-password';
@@ -9592,6 +9661,11 @@ function AppInner() {
   const [pendingAuthName, setPendingAuthName]   = useState('');
   const [checkEmailMode, setCheckEmailMode]     = useState<'confirm' | 'reset'>('confirm');
   const [kidWelcomeName, setKidWelcomeName] = useState('there');
+  // MON-85 Phase 1: when KidWelcome is reached via the (stubbed) device-pairing
+  // flow rather than the on-device profile switcher, it's a preview — completing
+  // it returns to the role selector instead of writing a kid profile / entering
+  // the app (no authenticated kid device exists yet).
+  const [kidWelcomePreview, setKidWelcomePreview] = useState(false);
   const [kidMonsterState, setKidMonsterState] = useState<Record<string, KidMonsterState>>({});
   const getKidMonster = (name: string): KidMonsterState => kidMonsterState[name] ?? { ...DEFAULT_KID_MONSTER_STATE };
   const setKidMonster = (name: string, updater: (prev: KidMonsterState) => KidMonsterState) =>
@@ -11223,9 +11297,38 @@ function AppInner() {
         <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
           <StatusBar barStyle="dark-content" />
           <OnboardingFlow
-            onReady={() => setAppMode('landing')}
+            onReady={() => setAppMode('roleSelect')}
           />
         </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'roleSelect') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" />
+        <RoleSelectScreen
+          onParent={() => setAppMode('landing')}
+          onKid={() => setAppMode('kidPairing')}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'kidPairing') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" />
+        <KidPairingScreen
+          onBack={() => setAppMode('roleSelect')}
+          onSubmit={() => {
+            // Phase 1 scaffold: no backend validation — preview the kid setup.
+            setKidWelcomeName('there');
+            setKidWelcomePreview(true);
+            setAppMode('kidWelcome');
+          }}
+        />
       </SafeAreaProvider>
     );
   }
@@ -11328,31 +11431,25 @@ function AppInner() {
             if (names.length > 0) setCurrentKidName(names[0]);
             if (setup.parentRole) setParentRole(setup.parentRole);
 
-            // Build ManagedChore[] from selected chores — one row per unique choreId,
-            // with assignedTo listing every kid who selected it.
-            const choreKids: Record<string, { entry: import('./src/screens/ParentOnboarding').ChoreMapEntry; kidNames: string[] }> = {};
-            for (const child of setup.children) {
-              const name = child.name.trim();
-              if (!name) continue;
-              for (const choreId of child.selectedChoreIds) {
-                const entry = setup.choreMap[choreId];
-                if (!entry) continue;
-                if (!choreKids[choreId]) choreKids[choreId] = { entry, kidNames: [] };
-                if (!choreKids[choreId].kidNames.includes(name)) choreKids[choreId].kidNames.push(name);
-              }
-            }
-            const newChores: ManagedChore[] = Object.entries(choreKids).map(([, { entry, kidNames }]) => ({
-              id: '_' + randomUUID(),
-              name: entry.name,
-              description: '',
-              frequency: 'Every day',
-              icon: entry.icon,
-              bg: entry.iconBg,
-              status: 'active' as const,
-              difficulty: (entry.difficulty === 'Hard' ? 3 : entry.difficulty === 'Medium' ? 2 : 1) as 1 | 2 | 3,
-              assignedTo: kidNames,
-              weeklyCompletions: 0,
-            }));
+            // MON-85: one shared chore set for the whole family. Each selected
+            // chore becomes a single row assigned to everyone (assignedTo: []),
+            // so kids added later inherit it too; parents reassign to specific
+            // kids afterward.
+            const newChores: ManagedChore[] = setup.sharedChoreIds
+              .map(choreId => setup.choreMap[choreId])
+              .filter((entry): entry is import('./src/screens/ParentOnboarding').ChoreMapEntry => !!entry)
+              .map(entry => ({
+                id: '_' + randomUUID(),
+                name: entry.name,
+                description: '',
+                frequency: 'Every day',
+                icon: entry.icon,
+                bg: entry.iconBg,
+                status: 'active' as const,
+                difficulty: (entry.difficulty === 'Hard' ? 3 : entry.difficulty === 'Medium' ? 2 : 1) as 1 | 2 | 3,
+                assignedTo: [],
+                weeklyCompletions: 0,
+              }));
             setManagedChores(newChores.length > 0 ? newChores : DEFAULT_MANAGED_CHORES);
             // Clear any stale chore data from a previous session
             AsyncStorage.removeItem('monstir:managedChores').catch(() => {});
@@ -11392,6 +11489,13 @@ function AppInner() {
             dbg={kwDbg}
             childName={kidWelcomeName}
             onComplete={(monsterId, monsterName) => {
+              // Phase 1: reached via the stubbed pairing flow → preview only, no
+              // profile write / app entry (no authenticated kid device yet).
+              if (kidWelcomePreview) {
+                setKidWelcomePreview(false);
+                setAppMode('roleSelect');
+                return;
+              }
               const validId: MonsterId = (monsterId === 'slime' || monsterId === 'robot' || monsterId === 'flamer') ? monsterId : 'slime';
               setKidMonster(currentKidName, s => ({
                 ...s,
@@ -11810,6 +11914,8 @@ function AppInner() {
                   <Text style={s.debugSectionLabel}>GO TO SCREEN</Text>
                   {([
                     { label: '👋  Onboarding',       mode: 'onboarding'       },
+                    { label: '🙋  Role Select',       mode: 'roleSelect'       },
+                    { label: '🔢  Kid Pairing',       mode: 'kidPairing'       },
                     { label: '🔑  Login',             mode: 'login'            },
                     { label: '📝  Sign Up',           mode: 'signup'           },
                     { label: '👨‍👩‍👧  Parent Setup',      mode: 'parentOnboarding' },
@@ -12536,29 +12642,6 @@ const ps = StyleSheet.create({
 
 // ─── Onboarding Styles (ob prefix) ───────────────────────────────────────────
 
-const ob = StyleSheet.create({
-  skipBtn:           { position: 'absolute', top: 16, right: 20, zIndex: 10, padding: 8 },
-  skipText:          { fontSize: scale(15), fontFamily: 'Inter_600SemiBold', color: '#6B35F0' },
-  topHalf:           { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
-  robotCircle:       { width: 260, height: 260, borderRadius: 130, backgroundColor: '#EDE8D8', alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  xpBadge:           { position: 'absolute', top: 16, left: 0, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#6B35F0', borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5 },
-  xpBadgeText:       { fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#6B35F0' },
-  bottomCard:        { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 28, paddingTop: 28, paddingBottom: 32 },
-  slideTitle:        { fontSize: scale(28), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginBottom: 2 },
-  slideTitleWord:    { color: '#1A1A1A' },
-  yellowUnderline:   { height: 3, width: 80, backgroundColor: '#F5C842', borderRadius: 2, marginBottom: 12 },
-  slideSubtitle:     { fontSize: scale(15), color: '#777', lineHeight: scale(22), marginBottom: 24 },
-  rewardIcon:        { width: 80, height: 80, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
-  chestBox:          { alignItems: 'center', justifyContent: 'center' },
-  featuresCard:      { backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, ...SOLID_SHADOW },
-  featureRow:        { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 },
-  featureDivider:    { height: 1, backgroundColor: '#ECEAE4' },
-  featureLabel:      { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
-  createAccountBtn:  { backgroundColor: '#C5F215', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  createAccountBtnText: { fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
-  haveAccountBtn:    { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' },
-  haveAccountBtnText: { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
-});
 
 // ─── Auth Styles (auth prefix) ────────────────────────────────────────────────
 
