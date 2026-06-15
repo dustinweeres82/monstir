@@ -27,6 +27,7 @@ import {
   socialAuthEnabled, googleEnabled, isAppleSignInAvailable,
   signInWithGoogle, signInWithApple, type SocialUser,
 } from './src/lib/socialAuth';
+import { canonicalizeEmail } from './src/lib/email';
 import { ParentOnboarding } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
 import { obc, obText, cardShadow, DotGridBg, ObButton, StepDots as ObStepDots, Tag, InfoDot, CodeCells, Keypad, ScreenEnter, Rise } from './src/screens/onboarding/obkit';
@@ -9106,7 +9107,7 @@ function LoginScreen({ onBack, onSuccess, onSignUp, onForgotPassword, onUnconfir
     if (!email.trim() || !password) { setError('Please enter your email and password.'); return; }
     setError('');
     setLoading(true);
-    const trimmed = email.trim().toLowerCase();
+    const trimmed = canonicalizeEmail(email);
     const { error: authError } = await supabase.auth.signInWithPassword({ email: trimmed, password });
     setLoading(false);
     if (authError) {
@@ -9265,7 +9266,7 @@ function SignupScreen({ onBack, onSuccess, onLogin, onConfirmPending, initialNam
     }
     setError('');
     setLoading(true);
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = canonicalizeEmail(email);
     const cleanName  = name.trim();
     const { data, error: authError } = await supabase.auth.signUp({
       email: cleanEmail,
@@ -9515,7 +9516,7 @@ function ForgotPasswordScreen({ onBack, onSent }: { onBack: () => void; onSent: 
     if (!email.trim()) { setError('Please enter your email.'); return; }
     setError('');
     setLoading(true);
-    const trimmed = email.trim().toLowerCase();
+    const trimmed = canonicalizeEmail(email);
     // Neutral outcome regardless of whether an account/password identity exists —
     // don't reveal which providers an email uses (MON-54 edge cases).
     const { error: authError } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo: RESET_PASSWORD_REDIRECT });
@@ -9926,6 +9927,27 @@ function AppInner() {
         if (!session) return false;
 
         setSessionUser({ name: session.user.user_metadata?.name ?? '', email: session.user.email ?? '' });
+
+        // ── Per-account cache guard ───────────────────────────────────────────
+        // The `monstir:*` AsyncStorage keys are device-global, but the DB rows
+        // they mirror are scoped per user.id (parent_id / RLS). If a different
+        // account signs in on this device than the one we last cached for, the
+        // merge below would fold the previous family's kids/chores into the new
+        // account ("adds the kids altogether"). Drop the stale cache first so
+        // the DB stays the single source of truth for the signed-in user.
+        // (Sign-out already sweeps these; this also covers session restores and
+        // first-login-after-pre-auth-play where sign-out never ran.) The session
+        // token lives under Supabase's own `sb-*` key, so this never logs out.
+        try {
+          const prevUserId = await AsyncStorage.getItem('monstir:lastUserId');
+          if (prevUserId && prevUserId !== session.user.id) {
+            const allKeys = await AsyncStorage.getAllKeys();
+            const toRemove = allKeys.filter(k => k.startsWith('monstir:') && k !== 'monstir:lastUserId');
+            if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove);
+            console.log('[bootstrap] account switched — cleared', toRemove.length, 'stale cache keys');
+          }
+          await AsyncStorage.setItem('monstir:lastUserId', session.user.id);
+        } catch {}
 
         const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset, savedHouseholdBoss] = await Promise.all([
           loadProfile(),
