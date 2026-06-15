@@ -1,0 +1,40 @@
+# .easignore controls what's uploaded to EAS Build. NOTE: when present it
+# REPLACES .gitignore for the build archive (it does not inherit it), so this
+# must list every build-irrelevant path — including the usual .gitignore ones.
+
+# Dependencies + native projects (EAS prebuilds ios/android from app.json/CNG)
+node_modules/
+/ios
+/android
+.kotlin/
+
+# Expo / build output
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.tsbuildinfo
+.metro-health-check*
+
+# Boss intro videos + Cloudflare R2 (Wrangler) local state — these are served
+# remotely from R2 at runtime, never bundled into the app. ~130 MB of archive.
+*.mp4
+.wrangler/
+
+# Tooling / local state not needed for a build
+.claude/
+.git/
+docs/
+supabase/.temp/
+
+# Secrets / local env (build env comes from eas.json profile + EAS dashboard)
+.env*
+*.pem
+*.p8
+*.p12
+*.key
+*.jks
+*.mobileprovision
+
+# macOS
+.DS_Store
