@@ -46,10 +46,19 @@ export interface BossDetailProps {
   onBack:        () => void;
 }
 
+// Canonical collectible-rarity colors (mirrors TrophyRoom). The boss-jar palette
+// in RewardCard is threat-based, so relics carry their own rarity color here.
+const RELIC_RARITY_COLOR: Record<string, string> = {
+  Common:    '#666666',
+  Rare:      '#1A6BB5',
+  Epic:      '#7B3FF2',
+  Legendary: '#7A5300',
+};
+
 function relicForCapture(capture: BossCaptureEntry, relics: CollectibleEntry[]) {
   const match = relics.find(r => r.weekLabel === capture.weekLabel);
   const def   = match ? COLLECTIBLES.find(c => c.key === match.itemKey) : undefined;
-  return { relicName: match?.itemName, relicImage: def?.image };
+  return { relicName: match?.itemName, relicImage: def?.image, relicRarity: match?.rarity };
 }
 
 export function BossDetail({ captures, initialIndex, relics, onBack }: BossDetailProps) {
@@ -67,7 +76,7 @@ export function BossDetail({ captures, initialIndex, relics, onBack }: BossDetai
   const jarRarity   = THREAT_TO_RARITY[threat] ?? 'common';
   const artSrc      = boss?.jar ?? boss?.image;
   const footerText  = boss?.tagline ?? `Captured on ${dayStr}.`;
-  const { relicName, relicImage } = relicForCapture(capture, relics);
+  const { relicName, relicImage, relicRarity } = relicForCapture(capture, relics);
 
   const heroItems = captures.map(c => {
     const b        = getBossDisplay(c.bossName);
@@ -137,13 +146,39 @@ export function BossDetail({ captures, initialIndex, relics, onBack }: BossDetai
               name={`${capture.bossName} Jar`}
             />
           )}
-          <RewardCard
-            rarity="common"
-            imageSrc={relicImage}
-            name={relicName ?? 'Relic'}
-          />
-          <RewardCard rarity="milestone" icon="⭐" name={`+${capture.xpEarned ?? 50} XP`} />
-          <RewardCard rarity="milestone" icon="🟡" name={`+${capture.coinsEarned ?? 0} coins`} />
+          {/* Only render the relic when a collectible actually matched this
+              capture's week — otherwise the card was an empty "Relic ✦" placeholder. */}
+          {relicName && (
+            <RewardCard
+              rarity="common"
+              badgeLabel={relicRarity}
+              badgeColor={relicRarity ? RELIC_RARITY_COLOR[relicRarity] : undefined}
+              badgeTextColor="#FFFFFF"
+              imageSrc={relicImage}
+              name={relicName}
+            />
+          )}
+          {/* XP and coins are battle rewards, not milestones — label them "Reward"
+              and use the app's real coin/star assets instead of emoji. Show the
+              real earned XP; hide the card if none (never fabricate a fallback). */}
+          {(capture.xpEarned ?? 0) > 0 && (
+            <RewardCard
+              rarity="milestone"
+              badgeLabel="Reward"
+              imageSrc={require('../../assets/icons/icon-star.png')}
+              name={`+${capture.xpEarned} XP`}
+            />
+          )}
+          {/* Coins only when a cash bonus was actually paid (battle-money setting on
+              at capture time → coinsEarned > 0); hidden otherwise. */}
+          {(capture.coinsEarned ?? 0) > 0 && (
+            <RewardCard
+              rarity="milestone"
+              badgeLabel="Reward"
+              imageSrc={require('../../assets/icons/icon-coin.png')}
+              name={`+${capture.coinsEarned} coins`}
+            />
+          )}
         </View>
 
         {/* CTA */}

@@ -1,10 +1,10 @@
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, Fragment } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, Platform, Image, TextInput, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
-  ActivityIndicator, LogBox, type LayoutChangeEvent,
+  ActivityIndicator, LogBox, AccessibilityInfo, type LayoutChangeEvent,
 } from 'react-native';
 
 // Suppress spurious dev-mode RN warning — not a real bug in this codebase
@@ -37,7 +37,7 @@ import { getBossDisplay } from './src/data/bossLookup';
 import { getCollectibles, mergeCollectibles, type CollectibleEntry } from './src/storage/collectibles';
 import { earnMilestone, getEarnedMilestones, mergeMilestones, PARENT_OWNER, type EarnedMilestone } from './src/storage/milestones';
 import { evalKidMilestones, evalParentMilestones } from './src/lib/milestoneEval';
-import { getMilestone, MILESTONES, type MilestoneDef } from './src/data/milestones';
+import { getMilestone, MILESTONES, KID_MILESTONES, type MilestoneDef } from './src/data/milestones';
 import { MilestoneToast } from './src/components/MilestoneToast';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { ScreenHeading } from './src/design-system/components/ScreenHeading';
@@ -307,8 +307,14 @@ const getChoreRejectionNote = (chore: ManagedChore, kidName: string): string | u
   return chore.rejectionNote;
 };
 
+// Per-chore micro-reward formatter: ¢ under a dollar, $ at/above. Reserved for
+// individual chore reward values in the Activity feed (MON-75 Rev 6) — NOT totals.
 const fmtCoins = (cents: number): string =>
   cents >= 100 ? `$${(cents / 100).toFixed(2)}` : `${cents}¢`;
+
+// Totals / balances always render in dollars ($0.50, $15.75, $0.00) — MON-75
+// Rev 6 convention. Use this for every owed/paid/earned total and pay CTA.
+const fmtDollars = (cents: number): string => `$${(cents / 100).toFixed(2)}`;
 
 const MONSTER_FALLBACK_NAMES = [
   'Zorp','Gloop','Fizzle','Blorp','Snuggz','Wumbo','Glitch','Zappy',
@@ -720,34 +726,6 @@ function computeFamilyLedger(
   };
 }
 
-// Payday is a WINDOW, not an instant (MON-75): the payout nudge appears FROM
-// payday until the balance is settled, and reads as past-due afterward
-// ("payday was Sunday · $X still owed"). Paying is ALWAYS allowed (capability);
-// this only governs the encouragement. Default payday is Sunday (dow 0); a
-// Settings config can drive `paydayDow` later. This helper is purely calendar —
-// "is there past-due money?" comes from the ledger's `pastDueCents`.
-type PaydayState = {
-  isPayday:        boolean;   // today is the payday weekday
-  daysUntilPayday: number;    // 0 on payday, else 1–6 until the next one
-  nextLabel:       string;    // upcoming payday, e.g. "Sunday, Jun 14"
-  weekdayName:     string;    // e.g. "Sunday"
-};
-
-function getPaydayState(debugDayOffset = 0, paydayDow = 0): PaydayState {
-  const now  = new Date(Date.now() + debugDayOffset * 86_400_000);
-  const dow  = now.getDay();
-  const daysUntilPayday = (paydayDow - dow + 7) % 7;
-  const next = new Date(now);
-  next.setDate(now.getDate() + daysUntilPayday);
-  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  return {
-    isPayday:        dow === paydayDow,
-    daysUntilPayday,
-    nextLabel:       next.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
-    weekdayName:     WEEKDAYS[paydayDow],
-  };
-}
-
 /** Ms remaining until next Sunday midnight. */
 function msUntilSunday(): number {
   const now = new Date();
@@ -1000,11 +978,14 @@ function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 // ─── Win odds: weekly XP vs level threshold ───────────────────────────────────
 // ≥70% of level XP → likely win (70–90%), <40% → likely loss (10–40%)
 
-function calcWinOdds(weeklyXp: number, levelNeeded: number): number {
-  const ratio = levelNeeded > 0 ? Math.min(1, weeklyXp / levelNeeded) : 0;
-  if (ratio >= 0.7) return Math.round(lerp(70, 90, (ratio - 0.7) / 0.3));
-  if (ratio < 0.4)  return Math.round(lerp(10, 40, ratio / 0.4));
-  return Math.round(lerp(40, 70, (ratio - 0.4) / 0.3));
+// Win-odds forecast for the Sunday boss. The arena's player damage, damage
+// reduction, and the guaranteed-win threshold all scale off CHORE COMPLETION %
+// (see `powerMult` / `guaranteedWin` in BattleArenaScreen) — NOT weekly battle
+// power — so the estimate must track completion to be honest. A kid at 17%
+// completion deals tiny hits and should read ~20%, not 90%.
+function calcWinOdds(completionPct: number): number {
+  if (completionPct >= 100) return 99;  // arena makes 100% completion a guaranteed win
+  return Math.max(5, Math.min(95, Math.round(completionPct * 0.9 + 5)));
 }
 
 // ─── Battle narration ─────────────────────────────────────────────────────────
@@ -1208,7 +1189,7 @@ function ViewSwitcher({ selected, options, onSelect, dark = false }: {
               const active = opt.label === selected;
               return (
                 <TouchableOpacity
-                  key={opt.label}
+                  key={`${opt.label}-${i}`}
                   style={[sw.option, i < options.length - 1 && sw.optionBorder]}
                   activeOpacity={0.7}
                   onPress={() => closeSheet(() => onSelect(opt))}
@@ -1274,6 +1255,19 @@ function useSheet(initialY = 300) {
   };
 
   return { open, openSheet, closeSheet, scrimOpacity, sheetY };
+}
+
+/** Tracks the OS "Reduce Motion" accessibility setting so animations can skip to
+ *  their end state (MON-25 Rev 2: reduced motion renders the result directly). */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(v => { if (mounted) setReduced(v); });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced);
+    return () => { mounted = false; sub.remove(); };
+  }, []);
+  return reduced;
 }
 
 function AvatarPickerSheet({ selected, onSelect }: {
@@ -1652,11 +1646,13 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
   const status = getChoreStatus(chore, kidName);
   const rejectionNote = getChoreRejectionNote(chore, kidName);
 
-  const checkScale   = useRef(new Animated.Value(status === 'approved' ? 1 : 0)).current;
-  const sweepOpacity = useRef(new Animated.Value(status === 'approved' ? 1 : 0)).current;
-  const pendingPulse = useRef(new Animated.Value(1)).current;
-  const shakeX       = useRef(new Animated.Value(0)).current;
-  const prevStatus   = useRef(status);
+  const reducedMotion = useReducedMotion();
+  const checkScale     = useRef(new Animated.Value(status === 'approved' ? 1 : 0)).current;
+  const sweepOpacity   = useRef(new Animated.Value(status === 'approved' ? 1 : 0)).current;
+  // Done-badge pop on submit (MON-25 Rev 2). Starts at end state if already pending.
+  const doneBadgeScale = useRef(new Animated.Value(status === 'pending' ? 1 : 0)).current;
+  const shakeX         = useRef(new Animated.Value(0)).current;
+  const prevStatus     = useRef(status);
 
   useEffect(() => {
     const prev = prevStatus.current;
@@ -1672,6 +1668,22 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
       sweepOpacity.setValue(0);
     }
 
+    // Pending: the done badge pops in (0 → 1.15 → 1, ≤250ms). Reduced motion
+    // renders the end state directly.
+    if (next === 'pending' && prev !== 'pending') {
+      if (reducedMotion) {
+        doneBadgeScale.setValue(1);
+      } else {
+        doneBadgeScale.setValue(0);
+        Animated.sequence([
+          Animated.timing(doneBadgeScale, { toValue: 1.15, duration: 150, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(doneBadgeScale, { toValue: 1,    duration: 90,  easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        ]).start();
+      }
+    } else if (next !== 'pending' && prev === 'pending') {
+      doneBadgeScale.setValue(0);
+    }
+
     if (next === 'rejected' && prev !== 'rejected') {
       Animated.sequence([
         Animated.timing(shakeX, { toValue: 10,  duration: 55, useNativeDriver: true }),
@@ -1685,21 +1697,6 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
     prevStatus.current = next;
   }, [status]);
 
-  useEffect(() => {
-    if (status === 'pending') {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pendingPulse, { toValue: 0.4, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pendingPulse, { toValue: 1,   duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ])
-      );
-      loop.start();
-      return () => loop.stop();
-    } else {
-      pendingPulse.setValue(1);
-    }
-  }, [status]);
-
   const coinsAmt = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
   const isPending  = status === 'pending';
   const isApproved = status === 'approved';
@@ -1708,8 +1705,15 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
   // Rejected without note → show as standard active (tap to resubmit, no red styling)
   const isTappable = status === 'active' || status === 'rejected';
 
+  // MON-25 Rev 2: "SENT TO {Dad/Mom/Name} ✓"; fallback when no role is set.
+  const sentLabel = parentRole
+    ? `SENT TO ${parentRole.charAt(0).toUpperCase() + parentRole.slice(1)} ✓`
+    : 'SENT FOR APPROVAL ✓';
+
+  // Reward chips stay visible on pending (MON-25 Rev 2: "locked in"), dimmed to
+  // 85% with a trailing mono tag; per-chore reward stays in ¢ (MON-75 Rev 6).
   const rewardsRow = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, opacity: isPending ? 0.85 : 1 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
         <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
         <Text style={s.homeQuestReward}>{fmtCoins(coinsAmt)}</Text>
@@ -1718,15 +1722,19 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
         <Image source={require('./assets/icons/icon-star.png')} style={{ width: scale(13), height: scale(13) }} resizeMode="contain" />
         <Text style={[s.homeQuestReward, { color: '#C47F00' }]}>{XP_BY_DIFFICULTY[chore.difficulty]} XP</Text>
       </View>
+      {isPending && <Text style={s.lockedInTag}>· locked in</Text>}
     </View>
   );
 
   return (
     <Animated.View style={{ transform: [{ translateX: shakeX }] }}>
+      {/* MON-25 Rev 2 (Option A "Sent It"): pending keeps FULL parity with the
+          active card — no fade, no tint, same border/shadow. The "done" signal is
+          additive (lime done-badge + SENT pill + purple submitted-check), so a
+          submitted chore reads as a banked win, not a disabled row. */}
       <View
         style={[
           s.homeQuestCard,
-          isPending  && s.homeQuestCardPending,
           hasNote    && s.homeQuestCardRejected,
           { flexDirection: 'column', overflow: 'hidden' },
         ]}
@@ -1737,10 +1745,14 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
           activeOpacity={isTappable ? 0.7 : 1}
         >
           {isApproved && <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />}
-          {isPending  && <View style={s.homeQuestSweepPending} />}
 
-          <View style={[s.homeQuestIcon, { backgroundColor: chore.bg, opacity: isPending ? 0.6 : 1 }]}>
+          <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
             <ChoreIcon icon={chore.icon} size={45} />
+            {isPending && (
+              <Animated.View style={[s.doneBadge, { transform: [{ scale: doneBadgeScale }] }]}>
+                <Text style={s.doneBadgeMark}>✓</Text>
+              </Animated.View>
+            )}
           </View>
 
           <View style={[s.homeQuestInfo, { flex: 1 }]}>
@@ -1753,17 +1765,18 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
                 </View>
               )}
             </View>
-            {isPending ? (
-              <Animated.Text style={[s.pendingLabel, { opacity: pendingPulse }]}>⏳ Waiting for approval...</Animated.Text>
-            ) : (
-              rewardsRow
+            {isPending && (
+              <View style={s.sentPill} accessibilityRole="text" accessibilityLabel={`Sent to ${parentRole || 'parent'}, awaiting approval`}>
+                <Text style={s.sentPillText}>{sentLabel}</Text>
+              </View>
             )}
+            {rewardsRow}
           </View>
 
           {isPending ? (
-            <Animated.View style={[s.pendingBadge, { opacity: pendingPulse }]}>
-              <Text style={{ fontSize: scale(16) }}>⏳</Text>
-            </Animated.View>
+            <View style={s.submittedCheck}>
+              <Text style={s.submittedCheckMark}>✓</Text>
+            </View>
           ) : (
             <Animated.View style={[s.homeQuestCheck, isApproved && s.homeQuestCheckDone, isApproved && { transform: [{ scale: checkScale }] }]}>
               {isApproved && <View style={s.homeQuestCheckDot} />}
@@ -2257,7 +2270,7 @@ function countdownParts(ms: number): [string, string, string, string] {
   return [pad(d), pad(h), pad(m), pad(s)];
 }
 
-function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays, parentRole = '', battleCoinBonusEnabled, captureCoins, fightsLeft = 1, totalFighters = 1, hasFelled = false, battledThisWeek = false }: {
+function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays, parentRole = '', battleCoinBonusEnabled, captureCoins, bossHpPct = 1, totalFighters = 1, battledThisWeek = false }: {
   monsterIdx: MonsterIdx; coins: number; xp: number; weeklyXp: number;
   done: Partial<Record<ChoreId, boolean>>; managedChores: ManagedChore[];
   onStartBattle: () => void;
@@ -2274,12 +2287,10 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   weekApprovalDays: string[];
   battleCoinBonusEnabled: boolean;
   captureCoins: number;
-  // Cooperative capture meter (MON-84): how many family fights remain before the
-  // shared boss is captured, the household size, and whether THIS kid already
-  // felled their instance this cycle (gates re-entry + shows the waiting state).
-  fightsLeft?: number;
+  // Cooperative shared HP (MON-84): the family's one boss bar (0–1) and the
+  // household size, so the meter can show how worn down he is.
+  bossHpPct?: number;
   totalFighters?: number;
-  hasFelled?: boolean;
   // True once this kid has used their single battle this week (won OR escaped) —
   // prevents same-day re-fighting, incl. farming a freshly-rotated boss after a
   // family capture on Sunday.
@@ -2297,7 +2308,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   const totalWeeklyDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
   const doneCount   = totalWeeklyDone;   // this kid's completions this week (accounts for recurring chores)
   const chorePct    = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
-  const winOdds     = calcWinOdds(weeklyXp, monster.needed);
+  const winOdds     = calcWinOdds(chorePct);
   const power       = weeklyXp;
   const bossVideoPlayer = useVideoPlayer(boss.video, p => { p.loop = true; p.muted = true; p.play(); });
   const countdownMs = useCountdown();
@@ -2375,8 +2386,10 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
             <VideoView player={bossVideoPlayer} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
             {/* Gradient for readability */}
             <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.65)']} style={StyleSheet.absoluteFill} />
-            {/* Boss image fades in as reveal level increases */}
-            {boss.bossImage && silhouetteOpacity < 1 && (
+            {/* Static boss art is only a faint teaser while the boss is still
+                hidden (Mon–Fri). On the Saturday reveal + Sunday battle day the
+                looping video IS the boss, so we don't cover it with the still. */}
+            {boss.bossImage && silhouetteOpacity > 0 && (
               <Image
                 source={boss.bossImage}
                 style={[StyleSheet.absoluteFill, { opacity: 1 - silhouetteOpacity }]}
@@ -2465,7 +2478,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
         <View style={w.sectionCard}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Image source={require('./assets/icons/icon-trophy.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
-            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>WHAT YOU'LL GET</Text>
+            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>POSSIBLE REWARDS</Text>
           </View>
           <View style={w.stakeRow}>
             {/* Boss jar — always */}
@@ -2546,29 +2559,24 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
           })}
         </View>
 
-        {/* Cooperative capture meter (MON-84) — "wearing him down" framing.
-            Only meaningful in a multi-kid household once someone has landed a hit. */}
-        {totalFighters > 1 && (hasFelled || fightsLeft < totalFighters) && (
+        {/* Cooperative shared-HP meter (MON-84) — "wear him down together."
+            Only meaningful in a multi-kid household once he's been chipped. */}
+        {totalFighters > 1 && bossHpPct < 1 && (
           <View style={{ marginBottom: 10, backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 12, padding: 12 }}>
             <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(13), color: '#C5F215', textAlign: 'center' }}>
-              {hasFelled
-                ? `You took the fight out of ${boss.name} 💪`
-                : fightsLeft <= 1
-                  ? `${boss.name} is on his last legs — one fight left!`
-                  : `${boss.name} is staggering — ${fightsLeft} fights left`}
+              {bossHpPct <= 0.2
+                ? `${boss.name} is on his last legs — finish him together!`
+                : `${boss.name} is at ${Math.round(bossHpPct * 100)}% — keep wearing him down`}
             </Text>
-            {hasFelled && (
-              <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: 'rgba(255,255,255,0.7)', textAlign: 'center', marginTop: 2 }}>
-                {fightsLeft > 0 ? `Waiting on the family to finish him — ${fightsLeft} to go` : 'The family wore him down!'}
-              </Text>
-            )}
+            {/* Shared HP bar */}
+            <View style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.18)', marginTop: 8, overflow: 'hidden' }}>
+              <View style={{ width: `${Math.max(0, Math.min(100, Math.round(bossHpPct * 100)))}%`, height: '100%', borderRadius: 4, backgroundColor: '#C5F215' }} />
+            </View>
           </View>
         )}
 
-        {/* Battle Button — one battle per kid per week; gated once felled this cycle */}
-        {hasFelled ? (
-          <Button label="✓  You've worn him down" onPress={() => {}} disabled />
-        ) : battledThisWeek ? (
+        {/* Battle Button — one battle per kid per week */}
+        {battledThisWeek ? (
           <Button label="⚔️  Battle used — back next week" onPress={() => {}} disabled />
         ) : (
           <Button
@@ -2620,10 +2628,11 @@ function useAura() {
 
 // ── 3. Boss Intro Screen ──────────────────────────────────────────────────────
 
-function BossIntroScreen({ monsterIdx, onReady, bossOverride }: {
+function BossIntroScreen({ monsterIdx, onReady, bossOverride, battleCoinBonusEnabled = false }: {
   monsterIdx: MonsterIdx;
   onReady: () => void;
   bossOverride?: Boss;
+  battleCoinBonusEnabled?: boolean;
 }) {
   const { top: safeTop } = useSafeAreaInsets();
   const boss = bossOverride ?? getWeeklyBoss(monsterIdx);
@@ -2690,10 +2699,16 @@ function BossIntroScreen({ monsterIdx, onReady, bossOverride }: {
     );
   };
 
+  // Same reward logic as the World screen "Possible Rewards" card: the boss jar
+  // and a relic are always earned on capture; coins only when the parent has the
+  // capture bonus on. Uses the boss's own jar art, falling back to the trophy.
+  const bossJar = getBossDisplay(boss.name)?.jar;
   const rewards = [
-    { icon: require('./assets/icons/icon-coin.png'),   label: `${boss.captureCoins} coins` },
-    { icon: require('./assets/icons/icon-star.png'), label: '50 xp'          },
-    { icon: require('./assets/icons/icon-gem.png'),  label: '1 shard'        },
+    { icon: bossJar ?? require('./assets/icons/icon-trophy.png'), value: '1', label: 'boss jar' },
+    { icon: require('./assets/icons/IconChest.png'),              value: '1', label: 'relic'    },
+    ...(battleCoinBonusEnabled
+      ? [{ icon: require('./assets/icons/icon-coin.png'), value: `${boss.captureCoins}`, label: 'coins' }]
+      : []),
   ];
 
   return (
@@ -2754,9 +2769,10 @@ function BossIntroScreen({ monsterIdx, onReady, bossOverride }: {
           </View>
           <View style={bi.rewardsCard}>
             {rewards.map((r, i) => (
-              <View key={i} style={{ alignItems: 'center', gap: 6 }}>
+              <View key={i} style={{ alignItems: 'center', gap: 4 }}>
                 <Image source={r.icon} style={{ width: scale(60), height: scale(60) }} resizeMode="contain" />
-                <Text style={{ fontSize: scale(14), fontWeight: '800', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular' }}>{r.label}</Text>
+                <Text style={{ fontSize: scale(16), fontWeight: '800', color: '#1A1A1A', fontFamily: 'FredokaOne_400Regular' }}>{r.value}</Text>
+                <Text style={{ fontSize: scale(13), color: '#888780', fontFamily: 'Nunito_700Bold' }}>{r.label}</Text>
               </View>
             ))}
           </View>
@@ -4677,16 +4693,6 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
   // Always format as $X.XX — never mix cents and dollars on this screen
   const fmtD = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-  // Next payday day name (defaults to next Friday; will be driven by a setting later)
-  const nextPayDay = (() => {
-    const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    const today = new Date();
-    const daysUntil = ((5 - today.getDay() + 7) % 7) || 7; // next Friday
-    const next = new Date(today);
-    next.setDate(today.getDate() + daysUntil);
-    return DAYS[next.getDay()];
-  })();
-
   // ── Stage label ────────────────────────────────────────────────────────────
   const stageLabel =
     pct >= 1    ? 'Goal reached!'
@@ -4756,7 +4762,7 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
           <StatCard key="b" icon={coinIcon}   value={fmtD(leftCents)}       label="Almost there!"   variant="purple" />,
         ],
         [
-          <StatCard key="c" icon={calIcon}    value={nextPayDay}            label="Could be the day!" variant="green" />,
+          <StatCard key="c" icon={calIcon}    value={`~${weeksToGo}w`}      label="Weeks to go"      variant="green" />,
           <StatCard key="d" icon={starIcon}   value={`${Math.round(pct * 100)}%`} label="% of the way there" variant="default" />,
         ],
       ];
@@ -4790,8 +4796,8 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
     // 0–24% — just getting started: 2 cards only, no weeks-to-go
     return [
       [
-        <StatCard key="a" icon={calIcon}  value={nextPayDay}        label="Next allowance" variant="purple" />,
-        <StatCard key="b" icon={coinIcon} value={fmtD(targetCents)} label="Goal target"    variant="default" />,
+        <StatCard key="a" icon={coinIcon} value={fmtD(goal.savedCents)} label="Saved so far"  variant="purple" />,
+        <StatCard key="b" icon={coinIcon} value={fmtD(targetCents)}     label="Goal target"   variant="default" />,
       ],
     ];
   })();
@@ -5316,10 +5322,10 @@ function ParentPayoutScreen({ kidCoins, kidProfiles, payoutLog, onConfirm, onBac
           </View>
         )}
 
-        {kidProfiles.map(kid => {
+        {kidProfiles.map((kid, i) => {
           const balance = kidCoins[kid.name] ?? 0;
           return (
-            <View key={kid.name} style={[p.sectionCard, { gap: 12 }]}>
+            <View key={`${kid.name}-${i}`} style={[p.sectionCard, { gap: 12 }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: kid.avatarColor, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' }}>
                   <Image source={getAvatarImage(kid.avatarIdx)} style={{ width: 38, height: 38, borderRadius: 19 }} resizeMode="cover" />
@@ -5327,16 +5333,16 @@ function ParentPayoutScreen({ kidCoins, kidProfiles, payoutLog, onConfirm, onBac
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{kid.name}</Text>
                   <Text style={{ fontSize: scale(13), fontFamily: 'Inter_500Medium', color: balance > 0 ? '#3B8A3A' : '#ABABAB', marginTop: 2 }}>
-                    {balance > 0 ? `Earned this week: ${fmtCoins(balance)}` : 'Nothing owed right now'}
+                    {balance > 0 ? `Earned this week: ${fmtDollars(balance)}` : 'Nothing owed right now'}
                   </Text>
                 </View>
                 {balance > 0 ? (
                   <TouchableOpacity
-                    style={{ backgroundColor: '#3B8A3A', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 2, borderColor: '#1A1A1A' }}
+                    style={{ backgroundColor: '#C5F215', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 2, borderColor: '#1A1A1A' }}
                     onPress={() => onConfirm(kid.name)}
                     activeOpacity={0.75}
                   >
-                    <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#FFFFFF' }}>Mark as paid</Text>
+                    <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>Mark as paid</Text>
                   </TouchableOpacity>
                 ) : (
                   <View style={{ backgroundColor: '#F0F0F0', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 }}>
@@ -5359,7 +5365,7 @@ function ParentPayoutScreen({ kidCoins, kidProfiles, payoutLog, onConfirm, onBac
                     {new Date(entry.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                 </View>
-                <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#3B8A3A' }}>{fmtCoins(entry.amount)}</Text>
+                <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#3B8A3A' }}>{fmtDollars(entry.amount)}</Text>
               </View>
             ))}
           </View>
@@ -5392,7 +5398,6 @@ function MoneyScreen({
   payoutLog,
   baseRate,
   onConfirm,
-  onConfirmAll,
   debugDayOffset = 0,
 }: {
   kidCoins: Record<string, number>;
@@ -5401,7 +5406,6 @@ function MoneyScreen({
   payoutLog: { kidName: string; amount: number; paidAt: string }[];
   baseRate: string;
   onConfirm: (kidName: string) => void;
-  onConfirmAll: () => void;
   debugDayOffset?: number;
 }) {
   const insets = useSafeAreaInsets();
@@ -5414,26 +5418,8 @@ function MoneyScreen({
     () => computeFamilyLedger(kidNames, kidCoins, choreHistory, payoutLog, debugDayOffset),
     [kidNames.join('|'), kidCoins, choreHistory, payoutLog, debugDayOffset],
   );
-  const payday = getPaydayState(debugDayOffset);
-
   const owedCents     = ledger.owedCents;
   const settled       = owedCents === 0;
-  const pastDueCents  = ledger.perKid.reduce((s, k) => s + k.pastDueCents, 0);
-
-  // Paid THIS week (payouts dated in the current week) — a hero chip, distinct
-  // from lifetime paid.
-  const weekStart = new Date(getWeekMondayKey(debugDayOffset));
-  const paidThisWeekCents = payoutLog
-    .filter(p => new Date(p.paidAt) >= weekStart)
-    .reduce((s, p) => s + p.amount, 0);
-
-  // ── Selected kid (auto-select first with a balance owed) ──────────────────
-  const firstOwedKid = ledger.perKid.find(k => k.owedCents > 0)?.kidName ?? null;
-  const [selectedKid, setSelectedKid] = useState<string | null>(firstOwedKid);
-  useEffect(() => {
-    const still = selectedKid && (kidCoins[selectedKid] ?? 0) > 0;
-    if (!still) setSelectedKid(kidProfiles.find(k => (kidCoins[k.name] ?? 0) > 0)?.name ?? null);
-  }, [kidCoins, kidProfiles]);
 
   // ── Activity filter ───────────────────────────────────────────────────────
   const [activityFilter, setActivityFilter] = useState<string>('all');
@@ -5485,10 +5471,43 @@ function MoneyScreen({
   const hiddenCount = Math.max(0, filteredHistory.length - visibleCount);
 
   // ── Derived for selected kid ──────────────────────────────────────────────
-  const selectedBalance = selectedKid ? (kidCoins[selectedKid] ?? 0) : 0;
-  // The hero "Mark all paid" only when 2+ kids are owed — with a single owed kid
-  // it would duplicate the per-kid CTA at the bottom.
-  const showMarkAll = ledger.kidsOwedCount > 1;
+
+  // MON-83: per-child "Mark paid" breakdown sheet. Opening it on a kid shows a
+  // per-week breakdown (one row per unpaid week) before confirming the payout.
+  const [payoutSheetKid, setPayoutSheetKid] = useState<string | null>(null);
+  const payoutSheetLedger = payoutSheetKid
+    ? ledger.perKid.find(k => k.kidName === payoutSheetKid) ?? null
+    : null;
+  const payoutSheetProfile = payoutSheetKid
+    ? kidProfiles.find(k => k.name === payoutSheetKid) ?? null
+    : null;
+  // Slide-up sheet chrome: the scrim appears instantly (opacity set, not animated)
+  // while only the sheet itself slides up — see useSheet. Driven by payoutSheetKid.
+  const { open: payoutSheetOpen, openSheet: openPayoutSheet, closeSheet: closePayoutSheet, scrimOpacity: payoutScrimOpacity, sheetY: payoutSheetY } = useSheet(600);
+  const closePayoutSheet_ = () => closePayoutSheet(() => setPayoutSheetKid(null));
+  useEffect(() => {
+    if (payoutSheetKid) openPayoutSheet();
+  }, [payoutSheetKid]);
+  // Reconcile the per-week rows to the live owed balance (the source of truth)
+  // so the breakdown can never out-total what's actually owed, even if
+  // choreHistory and the live balance drift apart (the "two witnesses" risk).
+  // Payments settle oldest-first, so the owed remainder maps to the NEWEST
+  // weeks: walk newest→oldest taking each week up to the remaining owed amount
+  // (clamping the last partial week), then any leftover is non-chore credit
+  // (battle bonus). Rows + bonus therefore always sum to exactly `owedCents`.
+  const payoutSheetRows: UnpaidWeek[] = [];
+  let payoutSheetBonus = 0;
+  if (payoutSheetLedger) {
+    let remaining = payoutSheetLedger.owedCents;
+    for (const w of [...payoutSheetLedger.unpaidWeeks].reverse()) {
+      if (remaining <= 0) break;
+      const amt = Math.min(w.earnedCents, remaining);
+      payoutSheetRows.push({ ...w, earnedCents: amt });
+      remaining -= amt;
+    }
+    payoutSheetRows.reverse();
+    payoutSheetBonus = remaining;
+  }
 
   // ── Avatar initial color ──────────────────────────────────────────────────
   const AVATAR_COLORS = ['#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444'];
@@ -5532,7 +5551,7 @@ function MoneyScreen({
               color: '#FFFFFF',
               lineHeight: scale(50),
             }}>
-              {fmtCoins(owedCents)}
+              {fmtDollars(owedCents)}
             </Text>
 
             {/* Secondary — the action / settled state */}
@@ -5543,79 +5562,73 @@ function MoneyScreen({
               marginTop: 2,
               marginBottom: 16,
             }}>
-              {settled
-                ? `All paid up 🎉  ·  next payday ${payday.nextLabel}`
-                : pastDueCents > 0
-                  ? `to pay ${payday.isPayday ? 'today' : payday.weekdayName}  ·  ${fmtCoins(pastDueCents)} past due`
-                  : `to pay ${payday.isPayday ? 'today' : payday.weekdayName}`}
+              {/* MON-75 Rev 5: no scheduled payday — the owed total persists until
+                  the parent settles it, never tied to a date and never scolding. */}
+              {settled ? 'All paid up 🎉' : 'Pay whenever you’re ready'}
             </Text>
 
-            {/* Stat chips — earned this week / paid this week / lifetime earned */}
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-              {[
-                { label: 'THIS WEEK', value: ledger.earnedThisWeekCents, color: '#1A1A1A' },
-                { label: '✓ PAID WK', value: paidThisWeekCents,         color: '#3B8A3A' },
-                { label: 'LIFETIME',  value: ledger.earnedLifetimeCents, color: '#6B35F0' },
-              ].map(chip => (
-                <View key={chip.label} style={{
-                  flex: 1,
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 12,
-                  borderWidth: 2,
-                  borderColor: '#1A1A1A',
-                  paddingVertical: 12,
-                  paddingHorizontal: 6,
-                  alignItems: 'center',
-                  gap: 4,
-                }}>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: chip.color }}>
-                    {fmtCoins(chip.value)}
-                  </Text>
-                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(10), color: '#1A1A1A', letterSpacing: 0.8, textTransform: 'uppercase' }}>
-                    {chip.label}
-                  </Text>
+            {/* Stat chips — the weekly ledger as a visible equation that adds up:
+                EARNED = PAID + OWED (MON-75 Rev 6, Option B). Uses the lifetime-
+                consistent triple (earnedLifetime = paidLifetime + owed, guaranteed
+                by the ledger) so the relationship always balances and the OWED chip
+                equals the hero number — killing the "broken math / two witnesses"
+                read. OWED is highlighted (lime ring) as the actionable figure. */}
+            {(() => {
+              const EQ_LIME = '#D8F52F';
+              const eqChips = [
+                { label: 'EARNED', value: ledger.earnedLifetimeCents, owed: false },
+                { label: 'PAID',   value: ledger.paidLifetimeCents,   owed: false },
+                { label: 'OWED',   value: owedCents,                  owed: true  },
+              ];
+              const glyphs = ['=', '+'];
+              return (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  {eqChips.map((chip, i) => {
+                    // White card with a 2.5px black border. The OWED chip is the
+                    // actionable figure: black-bordered card + an outer Slime Lime
+                    // ring (purple value), so it reads as the highlighted total.
+                    const card = (
+                      <View style={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 11,
+                        borderWidth: 2.5,
+                        borderColor: '#1A1A1A',
+                        paddingVertical: 12,
+                        paddingHorizontal: 4,
+                        alignItems: 'center',
+                        gap: 4,
+                        ...(chip.owed ? null : { flex: 1 }),
+                      }}>
+                        <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: chip.owed ? '#7B3FF2' : '#1A1A1A' }}>
+                          {fmtDollars(chip.value)}
+                        </Text>
+                        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(10), color: '#1A1A1A', letterSpacing: 0.8 }}>
+                          {chip.label}
+                        </Text>
+                      </View>
+                    );
+                    return (
+                      <Fragment key={chip.label}>
+                        {chip.owed ? (
+                          <View style={{ flex: 1, backgroundColor: EQ_LIME, borderRadius: 15, padding: 3 }}>
+                            {card}
+                          </View>
+                        ) : card}
+                        {i < glyphs.length && (
+                          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#FFFFFF', paddingHorizontal: 6 }}>
+                            {glyphs[i]}
+                          </Text>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </View>
-              ))}
-            </View>
+              );
+            })()}
 
-            {/* Mark all paid — only when 2+ kids are owed */}
-            {showMarkAll && (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={onConfirmAll}
-                style={{
-                  backgroundColor: '#C5F215',
-                  borderRadius: 12,
-                  borderWidth: 2,
-                  borderColor: '#1A1A1A',
-                  paddingVertical: 13,
-                  alignItems: 'center',
-                  marginBottom: 14,
-                  ...shadows.soft,
-                }}
-              >
-                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(15), color: '#1A1A1A' }}>
-                  Mark all paid  ·  {fmtCoins(owedCents)}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Payday row */}
-            <View style={{
-              borderTopWidth: 1,
-              borderTopColor: 'rgba(255,255,255,0.2)',
-              paddingTop: 12,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(15), color: 'rgba(255,255,255,0.85)' }}>
-                📅  Next payday: {payday.nextLabel}
-              </Text>
-              <TouchableOpacity activeOpacity={0.7}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(15), color: '#C5F215' }}>Edit</Text>
-              </TouchableOpacity>
-            </View>
+            {/* MON-75 Rev 5: no global "Mark all paid" (payout is strictly
+                per-child via the per-kid sheet) and no "Next payday" row /
+                payday-settings Edit link — there is no scheduled payday. */}
           </View>
         </View>
 
@@ -5634,19 +5647,16 @@ function MoneyScreen({
             {ledger.perKid.map((slice, i) => {
               const kid = kidProfiles[i];
               const balance = slice.owedCents;
-              const isSelected = selectedKid === kid.name;
               const isPaid = balance === 0;
               return (
-                <TouchableOpacity
-                  key={kid.name}
-                  activeOpacity={0.8}
-                  onPress={() => setSelectedKid(kid.name)}
+                <View
+                  key={`${kid.name}-${i}`}
                   style={{
                     width: 120,
                     borderRadius: 14,
-                    backgroundColor: isSelected ? '#EAE4FF' : '#FFFFFF',
+                    backgroundColor: '#FFFFFF',
                     borderWidth: 2,
-                    borderColor: isSelected ? '#6B35F0' : '#1A1A1A',
+                    borderColor: '#1A1A1A',
                     padding: 12,
                     alignItems: 'center',
                     ...shadows.soft,
@@ -5676,22 +5686,44 @@ function MoneyScreen({
                   <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(15), color: '#ABABAB', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>
                     This Week
                   </Text>
-                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#3B8A3A', marginBottom: 6 }}>
-                    {fmtCoins(slice.earnedThisWeekCents)}
+                  {/* Earned is neutral ink — green is reserved for the settled/paid
+                      state only (MON-75 Rev 6), so the row doesn't scan "all done". */}
+                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 6 }}>
+                    {fmtDollars(slice.earnedThisWeekCents)}
                   </Text>
-                  <View style={{
-                    borderRadius: 6,
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    backgroundColor: isPaid ? '#F0F7F0' : '#FFFBF0',
-                    borderWidth: 1,
-                    borderColor: isPaid ? '#27AE60' : '#E6A817',
-                  }}>
-                    <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: isPaid ? '#27AE60' : '#E6A817' }}>
-                      {isPaid ? 'Paid ✓' : `${fmtCoins(balance)} owed`}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                  {isPaid ? (
+                    <View style={{
+                      borderRadius: 6,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      backgroundColor: '#F0F7F0',
+                      borderWidth: 1,
+                      borderColor: '#27AE60',
+                    }}>
+                      <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#27AE60' }}>Paid ✓</Text>
+                    </View>
+                  ) : (
+                    /* Pay action lives in the card itself when money is owed
+                       (opens the per-child breakdown sheet). */
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => setPayoutSheetKid(kid.name)}
+                      style={{
+                        alignSelf: 'stretch',
+                        borderRadius: 8,
+                        paddingVertical: 7,
+                        alignItems: 'center',
+                        backgroundColor: '#C5F215',
+                        borderWidth: 2,
+                        borderColor: '#1A1A1A',
+                      }}
+                    >
+                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(14), color: '#1A1A1A' }}>
+                        Pay {fmtDollars(balance)}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })}
           </ScrollView>
@@ -5709,11 +5741,11 @@ function MoneyScreen({
 
           {/* Filter chips */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
-            {(['all', ...kidProfiles.map(k => k.name)] as string[]).map(f => {
+            {(['all', ...kidProfiles.map(k => k.name)] as string[]).map((f, i) => {
               const isActive = activityFilter === f;
               return (
                 <TouchableOpacity
-                  key={f}
+                  key={`${f}-${i}`}
                   onPress={() => { setActivityFilter(f); setVisibleCount(ACTIVITY_CHUNK); }}
                   activeOpacity={0.75}
                   style={{
@@ -5843,44 +5875,63 @@ function MoneyScreen({
         </View>
       </ScrollView>
 
-      {/* ── Mark as Paid CTA ──────────────────────────────────────────────── */}
-      {selectedKid && selectedBalance > 0 && (
-        <View style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          paddingHorizontal: 16,
-          paddingBottom: insets.bottom + 12,
-          paddingTop: 10,
-          backgroundColor: 'rgba(247,246,242,0.95)',
-          borderTopWidth: 1,
-          borderTopColor: '#ECEAE4',
-        }}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => onConfirm(selectedKid)}
-            style={{
-              backgroundColor: '#3B8A3A',
-              borderRadius: 14,
-              borderWidth: 2.5,
-              borderColor: '#1A1A1A',
-              paddingVertical: 16,
-              alignItems: 'center',
-              ...shadows.solid,
-            }}
-          >
-            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#FFFFFF' }}>
-              💸  Mark {fmtCoins(selectedBalance)} as Paid — {selectedKid}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* ── Per-child "Mark paid" breakdown sheet (MON-83) ─────────────────────
+          Per-week breakdown for one child before confirming the payout. Payout
+          is strictly per-child — there is no bulk "settle all". */}
+      <Modal visible={payoutSheetOpen} transparent animationType="none" onRequestClose={closePayoutSheet_}>
+        <Animated.View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)', opacity: payoutScrimOpacity }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closePayoutSheet_} />
+          {payoutSheetLedger && payoutSheetProfile && (
+            <Animated.View style={{ backgroundColor: '#FFFDF7', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2.5, borderColor: '#1A1A1A', paddingHorizontal: 20, paddingTop: 14, paddingBottom: insets.bottom + 24, transform: [{ translateY: payoutSheetY }] }}>
+              {/* The transparent Modal's content frame stops at the bottom safe-area
+                  line, so the sheet's own padding can't reach the home-indicator zone.
+                  This filler overflows below the frame to bleed the cream into the safe
+                  area (overflow isn't clipped), eliminating the grey band underneath. */}
+              <View style={{ position: 'absolute', left: 0, right: 0, top: '100%', height: 120, backgroundColor: '#FFFDF7' }} pointerEvents="none" />
+              <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9D5CC', marginBottom: 16 }} />
+              {/* Header — child avatar + name */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: payoutSheetProfile.avatarColor, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
+                  <Image source={getAvatarImage(payoutSheetProfile.avatarIdx)} style={{ width: 36, height: 36, borderRadius: 18 }} resizeMode="cover" />
+                </View>
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(20), color: '#1A1A1A' }}>Pay {payoutSheetProfile.name}</Text>
+              </View>
+              {/* One row per unpaid week, reconciled to the owed total (zero-chore
+                  weeks are already excluded). */}
+              {payoutSheetRows.map(w => (
+                <View key={w.weekKey} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(15), color: '#1A1A1A' }}>{w.label}</Text>
+                    <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(13), color: '#888780', marginTop: 2 }}>{w.choreCount} chore{w.choreCount === 1 ? '' : 's'} completed</Text>
+                  </View>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(w.earnedCents)}</Text>
+                </View>
+              ))}
+              {/* Owed credit not tied to a chore week (battle bonus etc.) */}
+              {payoutSheetBonus > 0 && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 }}>
+                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(15), color: '#1A1A1A' }}>Boss Battle bonus 🏆</Text>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(payoutSheetBonus)}</Text>
+                </View>
+              )}
+              <View style={{ height: 1, backgroundColor: '#1A1A1A', opacity: 0.12, marginVertical: 8 }} />
+              {/* Total owed */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>Total owed</Text>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(22), color: '#1A1A1A' }}>{fmtDollars(payoutSheetLedger.owedCents)}</Text>
+              </View>
+              <Button label="Mark as paid" onPress={() => { const k = payoutSheetKid; closePayoutSheet(() => { setPayoutSheetKid(null); if (k) onConfirm(k); }); }} />
+              <View style={{ height: 10 }} />
+              <Button label="Cancel" variant="secondary" onPress={closePayoutSheet_} />
+            </Animated.View>
+          )}
+        </Animated.View>
+      </Modal>
     </View>
   );
 }
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays, debugDayOffset = 0, currentBossName = '', householdFightsLeft = 0, householdTotalFighters = 0 }: {
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays, debugDayOffset = 0, currentBossName = '', householdBossHpPct = 1, householdTotalFighters = 0 }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: (name: string) => void;
   onAddKid: () => void;
@@ -5901,8 +5952,8 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   weekApprovalDays: string[];
   debugDayOffset?: number;
   currentBossName?: string;
-  // Cooperative capture meter (MON-84): family fights remaining + household size.
-  householdFightsLeft?: number;
+  // Cooperative shared HP (MON-84): the family's one boss bar (0–1) + household size.
+  householdBossHpPct?: number;
   householdTotalFighters?: number;
 }) {
   const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
@@ -5963,9 +6014,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   // never disagree (the "two witnesses" bug). `owedCents` is the action number
   // the hero footer and the adaptive bar both surface.
   const ledger    = computeFamilyLedger(allKidNames, kidCoins, choreHistory, payoutLog, debugDayOffset);
-  const payday    = getPaydayState(debugDayOffset);
   const owedCents  = ledger.owedCents;
-  const pastDueCents = ledger.perKid.reduce((s, k) => s + k.pastDueCents, 0);
 
   // Pending review count — MUST equal the Chores tab "Pending" tile (single
   // source of truth). Computed with the exact same formula it uses: the sum of
@@ -5976,25 +6025,21 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
       .reduce((s, c) => s + getPendingCount(c, k.name), 0), 0);
 
   // Adaptive next-action bar — one fixed-height slot, highest applicable wins:
-  //   1. reviews pending          → route to Chores
-  //   2. owed + payday window      → route to Money (active "pay out" nudge)
-  //   3. owed + before payday      → calm "paying [payday]" + quiet "pay early"
-  //   4. nothing pending or owed   → calm "all settled"
-  // The payday window is payday onward OR any past-due week (so a skipped Sunday
-  // keeps nudging). Paying is always allowed; this only governs the nudge.
-  const inPaydayWindow = payday.isPayday || pastDueCents > 0;
-  type ActionBar = { kind: 'review' | 'payNow' | 'payCalm' | 'settled'; label: string; sub?: string; target?: ParentScreen; tone: 'amber' | 'lime' | 'calm' };
+  //   1. reviews pending → route to Chores
+  //   2. owed > 0        → route to Money ("Pay out $X")
+  //   3. nothing pending or owed → calm "all settled"
+  // MON-77 Rev 5: there is no scheduled payday. The owed total persists until the
+  // parent settles it, so the payout nudge shows every day a balance exists —
+  // never gated on a date (no Sunday "it's payday" treatment), never scolding, and
+  // reviews still outrank payout.
+  type ActionBar = { kind: 'review' | 'payNow' | 'settled'; label: string; sub?: string; target?: ParentScreen; tone: 'amber' | 'lime' | 'calm' };
   const actionBar: ActionBar = pendingReviewCount > 0
     ? { kind: 'review', tone: 'amber', target: 'chores',
         label: `${pendingReviewCount} chore${pendingReviewCount === 1 ? '' : 's'} to review` }
-    : owedCents > 0 && inPaydayWindow
+    : owedCents > 0
       ? { kind: 'payNow', tone: 'lime', target: 'moneyLedger',
-          label: payday.isPayday ? `It's payday — pay out ${fmtCoins(owedCents)}` : `${fmtCoins(owedCents)} owed — pay out`,
-          sub: pastDueCents > 0 ? `${fmtCoins(pastDueCents)} past due` : undefined }
-      : owedCents > 0
-        ? { kind: 'payCalm', tone: 'calm', target: 'moneyLedger',
-            label: 'All reviewed', sub: `Paying ${payday.weekdayName} · ${fmtCoins(owedCents)}` }
-        : { kind: 'settled', tone: 'calm', label: 'All settled this week' };
+          label: `Pay out ${fmtDollars(owedCents)}` }
+      : { kind: 'settled', tone: 'calm', label: 'All settled this week' };
 
   return (
     <CreamBg>
@@ -6034,10 +6079,10 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                       {currentBossName || 'Boss'}
                     </Text>
                     <Text style={{ fontSize: scale(14), fontFamily: 'Nunito_700Bold', color: MUTE, marginTop: 2 }}>
-                      {householdTotalFighters > 1 && householdFightsLeft > 0 && householdFightsLeft < householdTotalFighters
-                        ? householdFightsLeft <= 1
-                          ? 'on his last legs · 1 fight left'
-                          : `wearing down · ${householdFightsLeft} fights left`
+                      {householdTotalFighters > 1 && householdBossHpPct < 1
+                        ? householdBossHpPct <= 0.2
+                          ? 'on his last legs · finish him together'
+                          : `wearing down · ${Math.round(householdBossHpPct * 100)}% left`
                         : 'arrives Sunday'}
                     </Text>
                   </View>
@@ -6092,11 +6137,14 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
               >
                 <Text style={{ fontSize: scale(13.5), fontFamily: 'Nunito_700Bold', color: '#E7DEFC' }}>
                   {owedCents > 0
-                    ? <>💰  <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(17), color: LIME }}>{fmtCoins(owedCents)}</Text> to pay {payday.isPayday ? 'today' : payday.weekdayName}</>
-                    : <>✓  All paid up · next payday {payday.weekdayName}</>}
+                    ? <>💰  <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(17), color: LIME }}>{fmtDollars(owedCents)}</Text> to pay</>
+                    : <>✓  All paid up</>}
                 </Text>
+                {/* MON-77 Rev 5: no scheduled payday → no date, and the Edit link
+                    (it opened payday settings, now gone) is removed. The owed
+                    footer still taps through to the Money ledger. */}
                 {owedCents > 0 && (
-                  <Text style={{ fontFamily: 'SpaceMono_700Bold', fontSize: scale(11), letterSpacing: 0.5, textTransform: 'uppercase', color: LIME }}>Edit</Text>
+                  <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: LIME }}>›</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -6125,7 +6173,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
           }}
         >
           <Text style={{ fontSize: scale(20) }}>
-            {actionBar.kind === 'review' ? '⏱' : actionBar.kind === 'payNow' ? '💸' : actionBar.kind === 'payCalm' ? '✓' : '🎉'}
+            {actionBar.kind === 'review' ? '⏱' : actionBar.kind === 'payNow' ? '💸' : '🎉'}
           </Text>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{actionBar.label}</Text>
@@ -6168,8 +6216,8 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                   {/* Middle: name + progress */}
                   <View style={{ flex: 1, gap: 4 }}>
                     <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{ks.profile.name}</Text>
-                    <View style={{ height: 6, borderRadius: 3, backgroundColor: '#ECEAE4', overflow: 'hidden' }}>
-                      <View style={{ width: `${progress * 100}%`, height: '100%', backgroundColor: ks.profile.avatarColor, borderRadius: 3 }} />
+                    <View style={{ height: 8, borderRadius: 4, borderWidth: 1, borderColor: '#111111', backgroundColor: '#FFFFFF', overflow: 'hidden' }}>
+                      <View style={{ width: `${progress * 100}%`, height: '100%', backgroundColor: '#6B35F0' }} />
                     </View>
                     <Text style={{ fontSize: scale(11), fontFamily: 'Inter_500Medium', color: '#ABABAB' }}>
                       {ks.completed} of {ks.target} chores
@@ -6180,7 +6228,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                   <View style={{ alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
                     {(ledger.perKid[i]?.owedCents ?? 0) > 0 ? (
                       <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>
-                        {fmtCoins(ledger.perKid[i].owedCents)} owed
+                        {fmtDollars(ledger.perKid[i].owedCents)} owed
                       </Text>
                     ) : (
                       <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#3B8A3A' }}>
@@ -6479,7 +6527,7 @@ function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
                       {w.choreCount} chore{w.choreCount !== 1 ? 's' : ''} completed
                     </Text>
                   </View>
-                  <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>{fmtCoins(w.earnedCents)}</Text>
+                  <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>{fmtDollars(w.earnedCents)}</Text>
                 </View>
               ))}
               {/* Coins beyond the chore-history weeks (boss-capture bonuses) — shown
@@ -6493,7 +6541,7 @@ function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>Boss Battle bonus 🏆</Text>
                     </View>
-                    <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>{fmtCoins(bonus)}</Text>
+                    <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>{fmtDollars(bonus)}</Text>
                   </View>
                 );
               })()}
@@ -6505,7 +6553,7 @@ function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
             {/* Total owed */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
               <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Total owed</Text>
-              <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{fmtCoins(totalCents)}</Text>
+              <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{fmtDollars(totalCents)}</Text>
             </View>
 
             {/* CTA */}
@@ -6617,38 +6665,59 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
     <CreamBg>
       {/* Header — purple bg, Fredoka title, date pill */}
 
-      {/* Stat bar */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 14, gap: 10 }}>
-        {([
-          { label: 'APPROVED', count: approvedCount, color: '#27AE60' },
-          { label: 'PENDING',  count: pendingCount,  color: '#E6A817' },
-          { label: 'TO DO',    count: todoCount,     color: '#ABABAB' },
-        ] as const).map(stat => (
-          <View key={stat.label} style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', gap: 4 }}>
-            <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: stat.color }}>{stat.count}</Text>
-            <Text style={{ fontSize: scale(10), fontFamily: 'Inter_700Bold', color: stat.color, letterSpacing: 0.6 }}>{stat.label}</Text>
+      {/* Funnel + tabs card (MON-64 Rev 2): all chore instances as a funnel of
+          tall segments (To do → To review → Approved, width = count, count inside),
+          a swatch legend, and the Today/History tabs — all in one bordered card.
+          Approved is gray at 0 (green = done only, MON-75 Rev 6): its segment
+          collapses to no width but it stays in the legend. */}
+      {(() => {
+        const approvedOn = approvedCount > 0;
+        const segs = [
+          { key: 'todo',     label: 'To do',     count: todoCount,    segBg: '#ECEAE4', numColor: '#8A8780', swatch: '#ECEAE4' },
+          { key: 'review',   label: 'To review', count: pendingCount, segBg: '#FBF1DC', numColor: '#C8860A', swatch: '#E6A817' },
+          { key: 'approved', label: 'Approved',  count: approvedCount, segBg: '#E6F5EC', numColor: approvedOn ? '#27AE60' : '#8A8780', swatch: approvedOn ? '#27AE60' : '#ECEAE4' },
+        ];
+        const visible = segs.filter(s => s.count > 0);
+        return (
+          <View style={{ marginHorizontal: 16, marginTop: 14, marginBottom: 10, backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 3, borderColor: '#111111', ...SOLID_SHADOW }}>
+            {/* Funnel segments */}
+            <View style={{ flexDirection: 'row', margin: 14, marginBottom: 12, borderRadius: 14, borderWidth: 2.5, borderColor: '#111111', overflow: 'hidden' }}>
+              {visible.map((seg, i) => (
+                <View key={seg.key} style={{ flex: seg.count, minWidth: 76, backgroundColor: seg.segBg, paddingVertical: 14, paddingHorizontal: 6, alignItems: 'center', ...(i < visible.length - 1 ? { borderRightWidth: 2.5, borderRightColor: '#111111' } : null) }}>
+                  <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(26), color: seg.numColor }}>{seg.count}</Text>
+                  <Text numberOfLines={1} style={{ fontFamily: 'SpaceMono_700Bold', fontSize: scale(10), color: seg.numColor, letterSpacing: 0.5, marginTop: 2 }}>{seg.label.toUpperCase()}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Legend — swatch + "N label" per state (Approved stays even at 0) */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, marginBottom: 12 }}>
+              {segs.map(seg => (
+                <View key={seg.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ width: 16, height: 16, borderRadius: 5, borderWidth: 2, borderColor: '#111111', backgroundColor: seg.swatch }} />
+                  <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#111111' }}>{seg.count} {seg.label.toLowerCase()}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Tabs — Today | History */}
+            <View style={{ flexDirection: 'row', paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: '#ECEAE4', alignItems: 'center' }}>
+              <TouchableOpacity
+                style={{ paddingVertical: 11, paddingHorizontal: 4, marginRight: 24, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'today' ? '#6B35F0' : 'transparent' }}
+                onPress={() => setActiveTab('today')}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: activeTab === 'today' ? '#6B35F0' : '#ABABAB' }}>Today</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ paddingVertical: 11, paddingHorizontal: 4, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'history' ? '#6B35F0' : 'transparent' }}
+                onPress={() => setActiveTab('history')}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: activeTab === 'history' ? '#6B35F0' : '#ABABAB' }}>History</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        ))}
-      </View>
-
-      {/* Tab bar — underline style + add button */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#ECEAE4', alignItems: 'center' }}>
-        <TouchableOpacity
-          style={{ paddingVertical: 10, paddingHorizontal: 4, marginRight: 24, borderBottomWidth: 2, borderBottomColor: activeTab === 'today' ? '#6B35F0' : 'transparent' }}
-          onPress={() => setActiveTab('today')}
-          activeOpacity={0.7}
-        >
-          <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: activeTab === 'today' ? '#6B35F0' : '#ABABAB' }}>Today</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={{ paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 2, borderBottomColor: activeTab === 'history' ? '#6B35F0' : 'transparent' }}
-          onPress={() => setActiveTab('history')}
-          activeOpacity={0.7}
-        >
-          <Text style={{ fontSize: scale(15), fontFamily: 'Inter_700Bold', color: activeTab === 'history' ? '#6B35F0' : '#ABABAB' }}>History</Text>
-        </TouchableOpacity>
-        <View style={{ flex: 1 }} />
-      </View>
+        );
+      })()}
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 }}>
         {activeTab === 'today' ? (
@@ -6659,10 +6728,11 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
               <Text style={{ fontSize: scale(14), color: C.muted, textAlign: 'center' }}>Go to Settings → Chore Library to add chores.</Text>
             </View>
           ) : (
-            [...choresByKid, ...unassignedGroup].map(group => {
-              const doneCount = group.chores.filter(c => getChoreStatus(c, group.name) === 'approved').length;
+            [...choresByKid, ...unassignedGroup].map((group, gi) => {
+              const groupApproved = group.chores.filter(c => getChoreStatus(c, group.name) === 'approved').length;
+              const groupToReview = group.chores.reduce((s, c) => s + getPendingCount(c, group.name), 0);
               return (
-                <View key={group.name} style={{ marginBottom: 20 }}>
+                <View key={`${group.name}-${gi}`} style={{ marginBottom: 20 }}>
                   {/* Child section header */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                     {group.profile ? (
@@ -6675,7 +6745,11 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                       </View>
                     )}
                     <Text style={{ flex: 1, fontSize: scale(18), fontFamily: 'FredokaOne_400Regular', color: C.text }}>{group.name}</Text>
-                    <Text style={{ fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: C.muted }}>{doneCount} / {group.chores.length} done</Text>
+                    {/* State-explicit counts, not "done" (kid-completed vs parent-approved
+                        are distinct axes — MON-64 Rev 2 / MON-75 chore state model). */}
+                    <Text style={{ fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: C.muted }}>
+                      {groupApproved} approved · {groupToReview} to review
+                    </Text>
                   </View>
 
                   {/* Chore cards */}
@@ -6690,26 +6764,36 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                       const hasNote    = isRejected && !!rejNote;
                       const earnAmt    = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty] / 100).toFixed(2);
                       return (
-                        <View key={chore.id} style={[s.homeQuestCard, reviewable && s.homeQuestCardPending, { flexDirection: 'column', overflow: 'hidden' }]}>
+                        <View key={chore.id} style={[s.homeQuestCard, reviewable && s.homeQuestCardPending, reviewable && { borderWidth: 2.5, borderColor: '#E6A817', backgroundColor: '#FBF1DC' }, { flexDirection: 'column', overflow: 'hidden' }]}>
                           {isApproved && <View style={s.homeQuestSweep} />}
-                          {reviewable && <View style={s.homeQuestSweepPending} />}
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                             <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
                               <ChoreIcon icon={chore.icon} size={45} />
                             </View>
                             <View style={{ flex: 1 }}>
                               <Text style={[s.homeQuestTitle, isApproved && s.homeQuestTitleDone]}>{chore.name}</Text>
-                              <Text style={{ fontSize: scale(13), fontFamily: 'Inter_500Medium', color: '#ABABAB', marginTop: 2 }}>{chore.frequency} · ${earnAmt}</Text>
+                              {/* Adjudication facts, not the schedule (MON-64 Rev 2): who marked
+                                  it done + when (amber recency line), then the earn amount. */}
+                              {reviewable ? (
+                                <>
+                                  <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#C8860A', marginTop: 2 }}>
+                                    {group.name} marked done{(() => { const t = chore.childSubmittedAt?.[group.name]; return t ? ` · ${choreAgo(t)}` : ''; })()}
+                                  </Text>
+                                  <Text style={{ fontSize: scale(14), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginTop: 2 }}>${earnAmt}</Text>
+                                </>
+                              ) : (
+                                <Text style={{ fontSize: scale(13), fontFamily: 'Inter_500Medium', color: '#ABABAB', marginTop: 2 }}>${earnAmt}</Text>
+                              )}
                             </View>
                             {reviewable ? (
                               <TouchableOpacity
-                                style={{ borderRadius: 100, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1.5, borderColor: '#E6A817', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 5 }}
+                                style={{ borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, borderWidth: 2.5, borderColor: '#111111', backgroundColor: '#7B3FF2', flexDirection: 'row', alignItems: 'center', gap: 6, ...SOLID_SHADOW_SM }}
                                 onPress={() => setReviewingChore({ chore, kidName: group.name })}
-                                activeOpacity={0.7}
+                                activeOpacity={0.85}
                               >
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>⏱ Review</Text>
+                                <Text style={{ fontSize: scale(14), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>Review</Text>
                                 {pending > 1 && (
-                                  <View style={{ minWidth: scale(18), height: scale(18), borderRadius: scale(9), backgroundColor: '#E6A817', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
+                                  <View style={{ minWidth: scale(18), height: scale(18), borderRadius: scale(9), backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
                                     <Text style={{ fontSize: scale(11), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>{pending}</Text>
                                   </View>
                                 )}
@@ -7498,6 +7582,19 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** Fine-grained "marked done · 2h ago" recency for the approval triage card
+ *  (MON-64 Rev 2) — finer than timeAgo, which collapses everything today to "Today". */
+function choreAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = 60_000, h = 3_600_000, d = 86_400_000;
+  if (diff < m)     return 'just now';
+  if (diff < h)     return `${Math.floor(diff / m)}m ago`;
+  if (diff < d)     return `${Math.floor(diff / h)}h ago`;
+  if (diff < 2 * d) return 'yesterday';
+  if (diff < 7 * d) return `${Math.floor(diff / d)}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
   kidProfiles: { name: string; avatarIdx: number }[];
   onBack: () => void;
@@ -7526,6 +7623,11 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
 
   const shown = filter === 'All' ? events : events.filter(e => e.kidName === filter);
 
+  // Earned-of-total stat. Each kid can earn every kid milestone once, so the
+  // ceiling is the catalog size per kid (× the number of kids under "All").
+  const totalMilestones = filter === 'All' ? KID_MILESTONES.length * kidProfiles.length : KID_MILESTONES.length;
+  const earnedCount = shown.length;
+
   return (
     <CreamBg>
       <View style={p.screenHeader}>
@@ -7538,10 +7640,10 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
 
       {/* Filter chips: All + each kid */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 4 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-        {['All', ...kidProfiles.map(k => k.name)].map(name => {
+        {['All', ...kidProfiles.map(k => k.name)].map((name, i) => {
           const active = filter === name;
           return (
-            <TouchableOpacity key={name} onPress={() => setFilter(name)} activeOpacity={0.8} style={{
+            <TouchableOpacity key={`${name}-${i}`} onPress={() => setFilter(name)} activeOpacity={0.8} style={{
               backgroundColor: active ? PURPLE : '#FFFFFF',
               borderRadius: 999, borderWidth: 2, borderColor: '#1A1A1A',
               paddingHorizontal: 16, paddingVertical: 8,
@@ -7553,6 +7655,11 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
       </ScrollView>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120 }}>
+        {/* Earned-of-total stat — updates with the active kid filter */}
+        <View style={{ backgroundColor: PURPLE, borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 24, alignItems: 'center', marginBottom: 16, ...shadows.solid }}>
+          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(44), lineHeight: scale(48), color: '#FFFFFF' }}>{earnedCount}</Text>
+          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(15), color: 'rgba(255,255,255,0.8)', marginTop: 2 }}>of {totalMilestones} milestones earned</Text>
+        </View>
         {shown.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 60 }}>
             <Text style={{ fontSize: scale(40), marginBottom: 12 }}>🏅</Text>
@@ -9611,6 +9718,19 @@ const splashStyles = StyleSheet.create({
   },
 });
 
+/** A co-op chest owed to a kid because the family finished off a boss this kid
+ *  had already worn down (escaped) earlier in the cycle. Carries everything the
+ *  reveal + trophy need so it can be shown the next time they open their profile
+ *  (the other kids aren't at the device when the bar empties). */
+interface PendingCoopChest {
+  bossName:      string;
+  weakness:      string;
+  threat:        string;
+  completionPct: number;
+  xpEarned:      number;
+  coinsEarned:   number;
+}
+
 interface KidMonsterState {
   monsterIdx: MonsterIdx;
   selectedMonsterId: MonsterId;
@@ -9627,8 +9747,9 @@ interface KidMonsterState {
   shards: number;
   /** True once this week's shard grant was claimed (first battle entry); reset Monday. */
   weeklyShardsClaimed: boolean;
-  /** Remaining HP of bosses that escaped this kid wounded, keyed by boss name. */
-  woundedBossHp: Record<string, number>;
+  /** A co-op chest owed because the family finished a boss this kid had already
+   *  worn down; null when nothing is pending. Shown on next profile open. */
+  pendingCoopChest: PendingCoopChest | null;
   /** Consecutive boss wins with no escape in between — drives the Undefeated milestone. */
   battleWinStreak: number;
 }
@@ -9647,7 +9768,7 @@ const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
   pendingEvolution: false,
   shards: 0,
   weeklyShardsClaimed: false,
-  woundedBossHp: {},
+  pendingCoopChest: null,
   battleWinStreak: 0,
 };
 
@@ -9671,12 +9792,19 @@ function AppInner() {
   const setKidMonster = (name: string, updater: (prev: KidMonsterState) => KidMonsterState) =>
     setKidMonsterState(prev => ({ ...prev, [name]: updater(prev[name] ?? { ...DEFAULT_KID_MONSTER_STATE }) }));
   // ── Cooperative household boss (MON-84) ──────────────────────────────────
-  // The family shares ONE boss identity; `felledBy` is the capture meter — the
-  // kids who have already worn down (felled) their instance this cycle. When
-  // every kid is in `felledBy` the boss is captured and rotates. Persisted to
-  // AsyncStorage only for now (Supabase sync is a follow-up; multi-device is
-  // out of scope per MON-84).
-  const [householdBoss, setHouseholdBoss] = useState<{ bossName: string; felledBy: string[] }>({ bossName: '', felledBy: [] });
+  // The family shares ONE boss identity AND one HP bar (`hpPct`, 0–1). Every
+  // kid fights a tier-scaled instance seeded at `hpPct` of their own max HP;
+  // damage carries between siblings. `participants` records who has chipped in
+  // this cycle (with the completion % at the time they fought) so that when the
+  // bar finally empties EVERY participant — not just the kid who landed the
+  // finishing blow — is owed a chest. When the bar hits 0 the boss is captured
+  // and rotates to a fresh identity with a full bar. Persisted to AsyncStorage
+  // only for now (Supabase sync is a follow-up; multi-device is out of scope).
+  const [householdBoss, setHouseholdBoss] = useState<{
+    bossName: string;
+    hpPct: number;
+    participants: { name: string; completionPct: number; xpSnapshot: number }[];
+  }>({ bossName: '', hpPct: 1, participants: [] });
   const [screen, setScreen]             = useState<Screen>('home');
   const [tab, setTab]                   = useState<Tab>('home');
   const [trophyOrigin, setTrophyOrigin]       = useState<Tab>('home');
@@ -9817,7 +9945,7 @@ function AppInner() {
   const pendingEvolution    = _km.pendingEvolution;
   const shards              = _km.shards;
   const weeklyShardsClaimed = _km.weeklyShardsClaimed;
-  const woundedBossHp       = _km.woundedBossHp;
+  const pendingCoopChest    = _km.pendingCoopChest;
   const effectiveMonsterName = selectedMonsterName || fallbackNameForKid(currentKidName);
 
   const [kidPayoutPending, setKidPayoutPending] = useState<Record<string, boolean>>({});
@@ -9853,7 +9981,16 @@ function AppInner() {
         if (savedHouseholdBoss) {
           try {
             const hb = JSON.parse(savedHouseholdBoss);
-            if (hb && typeof hb.bossName === 'string' && Array.isArray(hb.felledBy)) setHouseholdBoss(hb);
+            if (hb && typeof hb.bossName === 'string') {
+              // Migrate the legacy { bossName, felledBy } shape: a partially
+              // felled boss starts the new shared bar at full and lets the
+              // family re-wear it down (no clean HP to recover from felledBy).
+              setHouseholdBoss({
+                bossName:     hb.bossName,
+                hpPct:        typeof hb.hpPct === 'number' ? hb.hpPct : 1,
+                participants: Array.isArray(hb.participants) ? hb.participants : [],
+              });
+            }
           } catch {}
         }
         console.log('[bootstrap] profile:', JSON.stringify(profile));
@@ -10277,20 +10414,18 @@ function AppInner() {
     ? BOSSES.find(b => b.name === householdBoss.bossName)
     : null) ?? pickHouseholdBoss(householdTier, debugDayOffset);
   const activeKidBoss: Boss = bossForKid(householdIdentity, monsterIdx);
-  // Capture-meter progress for the current household boss.
+  // Shared-bar progress for the current household boss.
   const householdKidNames = setupChildren.map(c => c.name);
-  const felledCount = householdKidNames.filter(n => householdBoss.felledBy.includes(n)).length;
-  const fightsLeft = Math.max(0, householdKidNames.length - felledCount);
-  const activeKidHasFelled = householdBoss.felledBy.includes(currentKidName);
+  const householdHpPct = householdBoss.hpPct;
 
   // Seed the household boss once the family is loaded and none is set, and prune
-  // `felledBy` to current kids (a removed kid shouldn't keep the meter stuck).
+  // `participants` to current kids (a removed kid shouldn't stay owed a chest).
   useEffect(() => {
     if (!appDataLoaded || householdKidNames.length === 0) return;
     setHouseholdBoss(prev => {
-      const felledBy = prev.felledBy.filter(n => householdKidNames.includes(n));
+      const participants = prev.participants.filter(p => householdKidNames.includes(p.name));
       const bossName = prev.bossName || pickHouseholdBoss(householdTier, debugDayOffset).name;
-      return (bossName === prev.bossName && felledBy.length === prev.felledBy.length) ? prev : { bossName, felledBy };
+      return (bossName === prev.bossName && participants.length === prev.participants.length) ? prev : { ...prev, bossName, participants };
     });
   }, [appDataLoaded, householdKidNames.join('|'), householdTier]);
 
@@ -10583,9 +10718,10 @@ function AppInner() {
           battleResult: null,
           weeklyShardsClaimed: false,
           // MON-84: the household boss now CARRIES OVER until the family captures
-          // it, so a kid's wounded instance (`woundedBossHp`) and the capture
-          // meter (`householdBoss.felledBy`) persist across the week boundary.
-          // Only the weekly power/chore bookkeeping resets here.
+          // it, so the shared HP bar and participant ledger (`householdBoss.hpPct`
+          // / `participants`) persist across the week boundary — only the weekly
+          // power/chore bookkeeping resets here. A kid's `pendingCoopChest` (owed
+          // from a family capture) also persists until they open it.
         };
       }
       return next;
@@ -10972,7 +11108,7 @@ function AppInner() {
     resetKidCoins(kidName);
     setPayoutLog(prev => [{ kidName, amount, paidAt: new Date().toISOString() }, ...prev]);
     setKidPayoutPending(prev => ({ ...prev, [kidName]: true }));
-    showParentToast(`Paid ${kidName} ${fmtCoins(amount)} ✓`);
+    showParentToast(`Paid ${kidName} ${fmtDollars(amount)} ✓`);
 
     // Milestones: first payout, and Clean Slate when no kid has an unpaid balance
     // left after this payout. (parent-triple-digits / running-tab are lifetime
@@ -11025,18 +11161,13 @@ function AppInner() {
       // this week's grant (if not yet claimed), so persist what's left after
       // spending — and mark the grant claimed so a re-entry can't re-farm it.
       const entryShards = Math.min(SHARD_CAP, s.shards + (s.weeklyShardsClaimed ? 0 : calcWeeklyShards(pct)));
-      // Track wounded boss HP per kid, and lock the boss until captured.
-      const woundedNext = { ...s.woundedBossHp };
-      if (result === 'got-away' && remainingBossHp != null && remainingBossHp > 0) woundedNext[boss.name] = remainingBossHp;
-      else if (result === 'captured') delete woundedNext[boss.name];
       return {
         ...s,
         battleResult: result,
-        lockedBossName: result === 'got-away' ? boss.name : null,
+        lockedBossName: null,       // the shared bar now lives on the household, not the kid
         weeklyXp: 0,
         shards: Math.max(0, entryShards - shardsUsed),
         weeklyShardsClaimed: true,
-        woundedBossHp: woundedNext,
         // Consecutive-win counter for the Undefeated milestone: bump on capture,
         // reset on escape.
         battleWinStreak: result === 'captured' ? (s.battleWinStreak ?? 0) + 1 : 0,
@@ -11047,76 +11178,116 @@ function AppInner() {
     // chores completed that day stay done. The chore board rolls over only at the
     // real week boundary, handled by the weekly reset effect.
 
-    if (result === 'captured') {
-      // Co-op outcome for the reveal screen: compute the post-win meter so we can
-      // tell "you wore him down, N left" from "the family captured him."
-      const felledAfter = householdBoss.felledBy.includes(currentKidName)
-        ? householdBoss.felledBy
-        : [...householdBoss.felledBy, currentKidName];
-      const eligibleFelled = felledAfter.filter(n => householdKidNames.includes(n)).length;
-      const familyCaptured = householdKidNames.length > 0 && eligibleFelled >= householdKidNames.length;
-      setCoopWin({
-        familyCaptured,
-        fightsLeft: Math.max(0, householdKidNames.length - eligibleFelled),
-        totalFighters: householdKidNames.length,
-        bossName: boss.name,
-      });
+    const now = new Date();
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
+    const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+    const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const weekLabel = `${fmt(weekStart)} – ${fmt(weekEnd)}`;
 
-      // Cooperative capture meter (MON-84): this kid felled their instance —
-      // drain a notch. When every household kid has felled it, the family
-      // captures the boss and it rotates to a fresh identity; until then the
-      // same wounded boss carries over.
+    if (result === 'got-away') {
+      // This kid chipped the SHARED bar but didn't empty it. Lower the family's
+      // HP and record them as a participant (with the completion % they fought
+      // at) so they're owed a chest when the bar finally drops to zero. No chest
+      // yet — they ran. `remainingBossHp` is on the kid's own tier-scaled bar, so
+      // store it as a tier-independent fraction.
+      const newHpPct = boss.hp > 0
+        ? Math.max(0, Math.min(1, (remainingBossHp ?? boss.hp) / boss.hp))
+        : 0;
       setHouseholdBoss(prev => {
-        if (prev.felledBy.includes(currentKidName)) return prev;
-        const felledBy = [...prev.felledBy, currentKidName];
-        const allFelled = householdKidNames.length > 0 && householdKidNames.every(n => felledBy.includes(n));
-        if (allFelled) {
-          const next = pickHouseholdBoss(householdTier, debugDayOffset, prev.bossName || boss.name);
-          return { bossName: next.name, felledBy: [] };
-        }
-        return { ...prev, felledBy };
+        const others = prev.participants.filter(p => p.name !== currentKidName);
+        return { ...prev, hpPct: newHpPct, participants: [...others, { name: currentKidName, completionPct: pct, xpSnapshot }] };
       });
+      setScreen('result');
+      return;
+    }
 
-      setChorePctAtBattle(pct);
-      const t = tierFromPct(pct);
-      setChestTier(t);
-      setChestCollectible(pickForTier(t));
+    // result === 'captured' → this kid emptied the SHARED bar, so the FAMILY
+    // captures the boss. The finisher gets their chest now; every OTHER kid who
+    // wore him down this cycle is owed a co-op chest (sized to their own
+    // completion %), shown the next time they open their profile.
+    setCoopWin({ familyCaptured: true, fightsLeft: 0, totalFighters: householdKidNames.length, bossName: boss.name });
 
-      const now = new Date();
-      const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
-      const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
-      const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      checkMilestone('boss-slayer', currentKidName);
-      // Undefeated — 4 captures in a row with no escape. Compute the post-win
-      // streak from the pre-battle value (state update above hasn't committed yet).
-      const winStreak = ((kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).battleWinStreak ?? 0) + 1;
-      if (winStreak >= 4) checkMilestone('kid-undefeated', currentKidName);
-
-      saveBossCapture(currentKidName, {
-        id:            `${Date.now()}-${boss.name}`,
+    const owed = householdBoss.participants.filter(p => householdKidNames.includes(p.name) && p.name !== currentKidName);
+    for (const p of owed) {
+      const pBoss  = bossForKid(householdIdentity, (kidMonsterState[p.name] ?? DEFAULT_KID_MONSTER_STATE).monsterIdx);
+      const pCoins = battleCoinBonusEnabled ? Math.round(pBoss.captureCoins * battleCoinBonusMultiplier) : 0;
+      if (pCoins > 0) addKidCoins(p.name, pCoins);
+      checkMilestone('boss-slayer', p.name);
+      saveBossCapture(p.name, {
+        id:            `${Date.now()}-${boss.name}-${p.name}`,
         bossName:      boss.name,
         capturedAt:    now.toISOString(),
-        weekLabel:     `${fmt(weekStart)} – ${fmt(weekEnd)}`,
+        weekLabel,
         weakness:      boss.weakness,
         threat:        boss.threat,
-        completionPct: pct,
-        coinsEarned,
-        xpEarned:      xpSnapshot,
+        completionPct: p.completionPct,
+        coinsEarned:   pCoins,
+        xpEarned:      p.xpSnapshot,
       }).catch(() => {});
-
-      // Also save to Supabase — queued + retried if the kid row id isn't ready (Gap 6).
-      queueOrWriteTrophy({ kind: 'boss', kidName: currentKidName, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned, completionPct: pct });
-
-      setScreen('chestReveal');
-    } else {
-      setScreen('result');
+      queueOrWriteTrophy({ kind: 'boss', kidName: p.name, bossName: boss.name, xpEarned: p.xpSnapshot, coinsEarned: pCoins, completionPct: p.completionPct });
+      setKidMonster(p.name, s => ({
+        ...s,
+        pendingCoopChest: { bossName: boss.name, weakness: boss.weakness, threat: boss.threat, completionPct: p.completionPct, xpEarned: p.xpSnapshot, coinsEarned: pCoins },
+      }));
     }
-  }, [monsterIdx, activeKidBoss, householdBoss, householdKidNames, householdTier, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone]);
+
+    // Rotate the family to a fresh, full-HP boss and clear the participant ledger.
+    setHouseholdBoss(prev => {
+      const next = pickHouseholdBoss(householdTier, debugDayOffset, prev.bossName || boss.name);
+      return { bossName: next.name, hpPct: 1, participants: [] };
+    });
+
+    // The finisher's own chest (existing flow).
+    setChorePctAtBattle(pct);
+    const t = tierFromPct(pct);
+    setChestTier(t);
+    setChestCollectible(pickForTier(t));
+    checkMilestone('boss-slayer', currentKidName);
+    // Undefeated — 4 captures in a row with no escape. Compute the post-win
+    // streak from the pre-battle value (state update above hasn't committed yet).
+    const winStreak = ((kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).battleWinStreak ?? 0) + 1;
+    if (winStreak >= 4) checkMilestone('kid-undefeated', currentKidName);
+
+    saveBossCapture(currentKidName, {
+      id:            `${Date.now()}-${boss.name}`,
+      bossName:      boss.name,
+      capturedAt:    now.toISOString(),
+      weekLabel,
+      weakness:      boss.weakness,
+      threat:        boss.threat,
+      completionPct: pct,
+      coinsEarned,
+      xpEarned:      xpSnapshot,
+    }).catch(() => {});
+
+    // Also save to Supabase — queued + retried if the kid row id isn't ready (Gap 6).
+    queueOrWriteTrophy({ kind: 'boss', kidName: currentKidName, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned, completionPct: pct });
+
+    setScreen('chestReveal');
+  }, [monsterIdx, activeKidBoss, householdBoss, householdIdentity, householdKidNames, householdTier, battleCoinBonusEnabled, battleCoinBonusMultiplier, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone]);
 
   const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
 
   const navTab = useCallback((t: Tab) => { setTab(t); setScreen(t); }, []);
   const showTabBar = ['home', 'world', 'wallet', 'trophies'].includes(screen);
+
+  // Deliver a co-op chest the family earned while this kid was away: when the
+  // bar was emptied by a sibling, this kid was owed a chest (sized to the
+  // completion % they fought at). Fire it the next time they're back on a base
+  // tab — never mid-battle — then clear the pending flag so it shows once.
+  useEffect(() => {
+    if (viewMode !== 'kid' || !currentKidName || !pendingCoopChest) return;
+    if (!['home', 'world', 'wallet', 'trophies'].includes(screen)) return;
+    const p = pendingCoopChest;
+    const tier = tierFromPct(p.completionPct);
+    setChorePctAtBattle(p.completionPct);
+    setChestTier(tier);
+    setChestCollectible(pickForTier(tier));
+    setBonusCoins(p.coinsEarned);
+    setCoopWin({ familyCaptured: true, fightsLeft: 0, totalFighters: householdKidNames.length, bossName: p.bossName });
+    setKidMonster(currentKidName, s => ({ ...s, pendingCoopChest: null }));
+    setScreen('chestReveal');
+  }, [viewMode, currentKidName, pendingCoopChest, screen]);
 
   // MON-6 — commit the form advance. Called by HomeScreen once the in-place
   // moment's result modal is dismissed (we're already on the home screen, so no
@@ -11551,9 +11722,9 @@ function AppInner() {
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
                 }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
-            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} captureCoins={activeKidBoss.captureCoins} fightsLeft={fightsLeft} totalFighters={householdKidNames.length} hasFelled={activeKidHasFelled} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
+            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} captureCoins={activeKidBoss.captureCoins} bossHpPct={householdHpPct} totalFighters={householdKidNames.length} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
-              <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : activeKidBoss} /></ErrorBoundary>
+              <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : activeKidBoss} battleCoinBonusEnabled={battleCoinBonusEnabled} /></ErrorBoundary>
             </Modal>
             {screen === 'arena'      && <ErrorBoundary key="arena">{(() => {
               if (dbgBattleActive) {
@@ -11563,7 +11734,7 @@ function AppInner() {
                   totalPower={totalPower} completionPct={dbgCompletionPct} shards={dbgShards} weaknessUnlocked={dbgWeaknessUnlocked}
                   guaranteedWin={dbgCompletionPct >= 100} onBattleEnd={(r, u, remainingHp) => { setDbgBattleActive(false); handleBattleEnd(r, u, dbgCompletionPct, BOSSES[dbgBossIdx], remainingHp); }}
                   bossOverride={BOSSES[dbgBossIdx]}
-                  initialBossHp={woundedBossHp[BOSSES[dbgBossIdx].name]}
+                  initialBossHp={Math.round(householdHpPct * BOSSES[dbgBossIdx].hp)}
                 />;
               }
               const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
@@ -11582,7 +11753,7 @@ function AppInner() {
                 totalPower={totalPower} completionPct={completionPct} shards={battleShards} weaknessUnlocked={weaknessUnlocked}
                 guaranteedWin={guaranteedWin} onBattleEnd={(r, u, remainingHp) => handleBattleEnd(r, u, undefined, undefined, remainingHp)}
                 bossOverride={currentBoss}
-                initialBossHp={woundedBossHp[currentBoss.name]}
+                initialBossHp={Math.round(householdHpPct * currentBoss.hp)}
               />;
             })()}</ErrorBoundary>}
             {screen === 'result'   && <ErrorBoundary key="result"><ResultScreen monsterIdx={monsterIdx} captured={battleResult === 'captured'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} bossName={householdIdentity.name} /></ErrorBoundary>}
@@ -11673,14 +11844,14 @@ function AppInner() {
               </TouchableOpacity>
             </View>
 
-            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} householdFightsLeft={fightsLeft} householdTotalFighters={householdKidNames.length} /></ErrorBoundary>}
+            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} householdBossHpPct={householdHpPct} householdTotalFighters={householdKidNames.length} /></ErrorBoundary>}
             {parentScreen === 'parentPayout' && <ErrorBoundary key="parentPayout"><ParentPayoutScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} payoutLog={payoutLog} onConfirm={confirmPayout} onBack={goBack} /></ErrorBoundary>}
             {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
             {parentScreen === 'choreLibrary' && <ErrorBoundary key="choreLibrary"><ChoreLibraryScreen chores={managedChores} onBack={goBack} onAdd={() => { setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore'); }} onEdit={(c) => { setPrevParentScreen('choreLibrary'); openEditChore(c); }} onDelete={deleteChore} baseRate={baseRate} /></ErrorBoundary>}
             {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} /></ErrorBoundary>}
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} onConfirmAll={() => { const owed = setupChildren.map(c => c.name).filter(n => (kidCoins[n] ?? 0) > 0); owed.forEach(confirmPayout); showParentToast(`✓ Paid ${owed.length} kid${owed.length !== 1 ? 's' : ''}!`); }} /></ErrorBoundary>}
+            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
             {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'kidMilestones' && <ErrorBoundary key="kidMilestones"><ParentKidMilestonesScreen kidProfiles={setupChildren.map(c => ({ name: c.name, avatarIdx: c.avatarIdx }))} onBack={goBack} /></ErrorBoundary>}
@@ -12294,9 +12465,19 @@ const s = StyleSheet.create({
   homeQuestCheckDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: 'white' },
   homeQuestCardPending: { borderColor: '#E6A817', backgroundColor: '#FFFBF0' },
   homeQuestSweepPending: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFF3C4', borderRadius: 14 },
-  pendingLabel: { fontSize: scale(13), fontFamily: 'Inter_600SemiBold' as const, color: '#C47F00' },
-  pendingBadge: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FFF3C4', borderWidth: 2, borderColor: '#E6A817', alignItems: 'center' as const, justifyContent: 'center' as const },
   homeQuestCardRejected: { borderColor: '#E84040', backgroundColor: '#FFF5F5' },
+  // MON-25 Rev 2 (Option A "Sent It") — kid-facing pending chore card pieces.
+  // Lime done-badge pinned bottom-right of the icon tile (~7px outward overlap).
+  doneBadge:     { position: 'absolute' as const, bottom: -7, right: -7, width: 24, height: 24, borderRadius: 12, backgroundColor: '#D8F52F', borderWidth: 3, borderColor: '#111111', alignItems: 'center' as const, justifyContent: 'center' as const },
+  doneBadgeMark: { fontSize: scale(11), fontFamily: 'Inter_900Black' as const, color: '#111111', lineHeight: scale(13) },
+  // "SENT TO {parent} ✓" status pill under the title.
+  sentPill:      { alignSelf: 'flex-start' as const, backgroundColor: '#D8F52F', borderWidth: 2.5, borderColor: '#111111', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, marginTop: 1, marginBottom: 4 },
+  sentPillText:  { fontSize: scale(11), fontFamily: 'SpaceMono_700Bold' as const, color: '#111111', letterSpacing: 0.2 },
+  // Trailing "· locked in" mono tag on the pending reward row.
+  lockedInTag:   { fontSize: scale(12), fontFamily: 'SpaceMono_700Bold' as const, color: '#777777' },
+  // Right control on a submitted card: filled purple circle with a white check.
+  submittedCheck:     { width: 30, height: 30, borderRadius: 15, borderWidth: 3, borderColor: '#111111', backgroundColor: '#7B3FF2', alignItems: 'center' as const, justifyContent: 'center' as const },
+  submittedCheckMark: { fontSize: scale(15), fontFamily: 'Inter_900Black' as const, color: '#FFFFFF', lineHeight: scale(17) },
   rejectionBubble: { marginTop: 4, backgroundColor: '#FFE5E5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   rejectionNote: { fontSize: scale(12), color: '#C00', fontStyle: 'italic' as const },
   retryLabel: { fontSize: scale(12), fontFamily: 'Inter_700Bold' as const, color: '#E84040', marginTop: 2 },

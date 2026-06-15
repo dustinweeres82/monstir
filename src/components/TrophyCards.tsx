@@ -22,14 +22,18 @@ const RARITY_COLORS = {
 interface RarityBadgeProps {
   rarity: 'rare' | 'legendary' | 'common' | 'milestone';
   label?: string;
+  /** Override the rarity-derived colors (e.g. collectible rarities that don't map
+   *  to this component's threat-based palette). */
+  bg?: string;
+  textColor?: string;
 }
 
-export function RarityBadge({ rarity, label }: RarityBadgeProps) {
+export function RarityBadge({ rarity, label, bg, textColor }: RarityBadgeProps) {
   const colors = RARITY_COLORS[rarity];
   const displayLabel = label ?? rarity.charAt(0).toUpperCase() + rarity.slice(1);
   return (
-    <View style={[b.pill, { backgroundColor: colors.bg }]}>
-      <Text style={[b.pillText, { color: colors.text }]}>{displayLabel}</Text>
+    <View style={[b.pill, { backgroundColor: bg ?? colors.bg }]}>
+      <Text style={[b.pillText, { color: textColor ?? colors.text }]}>{displayLabel}</Text>
     </View>
   );
 }
@@ -174,13 +178,18 @@ const src = StyleSheet.create({
 
 interface RewardCardProps {
   rarity: 'rare' | 'legendary' | 'common' | 'milestone';
+  /** Overrides the pill text (e.g. "Reward" for XP/coins, which aren't milestones). */
+  badgeLabel?: string;
+  /** Overrides the pill colors (e.g. a relic's real collectible rarity). */
+  badgeColor?: string;
+  badgeTextColor?: string;
   icon?: string;
   imageSrc?: ImageSourcePropType;
   name: string;
   onPress?: () => void;
 }
 
-export function RewardCard({ rarity, icon, imageSrc, name, onPress }: RewardCardProps) {
+export function RewardCard({ rarity, badgeLabel, badgeColor, badgeTextColor, icon, imageSrc, name, onPress }: RewardCardProps) {
   return (
     <TouchableOpacity
       style={rc.card}
@@ -188,7 +197,7 @@ export function RewardCard({ rarity, icon, imageSrc, name, onPress }: RewardCard
       activeOpacity={onPress ? 0.75 : 1}
       disabled={!onPress}
     >
-      <RarityBadge rarity={rarity} />
+      <RarityBadge rarity={rarity} label={badgeLabel} bg={badgeColor} textColor={badgeTextColor} />
       {imageSrc
         ? <Image source={imageSrc} style={rc.image} resizeMode="contain" />
         : <Text style={rc.icon}>{icon ?? '✦'}</Text>}
