@@ -30,6 +30,7 @@ export interface ChoreMapEntry {
   iconBg: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
   frequency?: string;
+  completionMode?: 'shared' | 'independent';
 }
 
 export interface ParentSetupResult {
@@ -109,6 +110,9 @@ const AVATARS = [
   require('../../assets/icons/Avatars/kidProfile21.png'),
 ];
 
+// Avatar carousel cell pitch: cell width (72) + row gap (10).
+const AVATAR_CELL_STRIDE = 82;
+
 interface SuggestedChore {
   id: string;
   name: string;
@@ -116,6 +120,8 @@ interface SuggestedChore {
   difficulty: 'Easy' | 'Medium' | 'Hard';
   icon: ReturnType<typeof require>;
   iconBg: string;
+  frequency?: string;
+  completionMode?: 'shared' | 'independent';
 }
 
 const CHORES_BY_AGE: Record<OnboardingChild['ageRange'], SuggestedChore[]> = {
@@ -162,10 +168,10 @@ const CHORE_ICONS: { icon: ReturnType<typeof require>; bg: string }[] = [
 // MON-85: the onboarding chore picker offers exactly this fixed starter set
 // (not the age-derived union). Parents add more / reassign later.
 const STARTER_CHORES: SuggestedChore[] = [
-  { id: 'set_table',   name: 'Set the table', xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconDishes.png'), iconBg: colors.iconDishes },
-  { id: 'make_bed',    name: 'Make bed',       xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBed.png'),    iconBg: colors.iconBed },
-  { id: 'vacuum',      name: 'Vacuum',         xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconVacuum.png'), iconBg: colors.iconBlue },
-  { id: 'wash_dishes', name: 'Wash dishes',    xp: 25, difficulty: 'Hard',   icon: require('../../assets/icons/chores/chore=iconSoap.png'),   iconBg: colors.iconBlue },
+  { id: 'set_table',   name: 'Set the table', xp: 15, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconDishes.png'), iconBg: colors.iconDishes, frequency: 'Every day',        completionMode: 'shared' },
+  { id: 'make_bed',    name: 'Make bed',       xp: 10, difficulty: 'Easy',   icon: require('../../assets/icons/chores/chore=iconBed.png'),    iconBg: colors.iconBed,    frequency: 'Every day',        completionMode: 'independent' },
+  { id: 'vacuum',      name: 'Vacuum',         xp: 20, difficulty: 'Medium', icon: require('../../assets/icons/chores/chore=iconVacuum.png'), iconBg: colors.iconBlue,   frequency: '2 times per week', completionMode: 'shared' },
+  { id: 'wash_dishes', name: 'Wash dishes',    xp: 25, difficulty: 'Hard',   icon: require('../../assets/icons/chores/chore=iconSoap.png'),   iconBg: colors.iconBlue,   frequency: 'Every day',        completionMode: 'shared' },
 ];
 // Default-checked on entry (Wash dishes starts unchecked).
 const STARTER_DEFAULT_IDS = ['set_table', 'make_bed', 'vacuum'];
@@ -310,14 +316,29 @@ function AgeRangePicker({
 }
 
 function AvatarPicker({
-  avatarIdx, color, name, onChange,
-}: { avatarIdx: number; color: string; name: string; onChange: (idx: number) => void }) {
+  avatarIdx, onChange, size = 44,
+}: { avatarIdx: number; onChange: (idx: number) => void; size?: number }) {
   const { open, openSheet, closeSheet, sheetY, scrimOpacity } = useBottomSheet(400);
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Land the carousel on the current avatar each time it opens.
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollTo({ x: Math.max(0, avatarIdx * AVATAR_CELL_STRIDE - AVATAR_CELL_STRIDE), animated: false })
+      );
+    }
+  }, [open, avatarIdx]);
 
   return (
     <>
-      <TouchableOpacity onPress={openSheet} activeOpacity={0.8} style={[s.avatarCircle, { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' }]}>
-        <Image source={AVATARS[avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+      <TouchableOpacity onPress={openSheet} activeOpacity={0.8} style={{ width: size, height: size }}>
+        <View style={[s.avatarCircle, { width: size, height: size, borderRadius: size / 2, overflow: 'hidden', borderWidth: 3, borderColor: BLACK }]}>
+          <Image source={AVATARS[avatarIdx]} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+        </View>
+        <View style={[s.avatarEditBadge, { width: size * 0.34, height: size * 0.34, borderRadius: size * 0.17 }]}>
+          <Image source={require('../../assets/icons/icon-pencil.png')} style={{ width: size * 0.17, height: size * 0.17 }} resizeMode="contain" />
+        </View>
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet()}>
@@ -326,18 +347,18 @@ function AvatarPicker({
           <Animated.View style={[s.sheet, { transform: [{ translateY: sheetY }] }]} onStartShouldSetResponder={() => true}>
             <View style={s.sheetHandle} />
             <Text style={s.sheetHeading}>Choose avatar</Text>
-            <View style={s.avatarGrid}>
+            <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.avatarRow}>
               {AVATARS.map((src, i) => (
                 <TouchableOpacity
                   key={i}
-                  style={[s.avatarGridCell, avatarIdx === i && s.avatarGridCellActive]}
+                  style={[s.avatarCarouselCell, avatarIdx === i && s.avatarGridCellActive]}
                   onPress={() => { onChange(i); closeSheet(); }}
                   activeOpacity={0.8}
                 >
                   <Image source={src} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                 </TouchableOpacity>
               ))}
-            </View>
+            </ScrollView>
             <View style={{ height: Platform.OS === 'ios' ? 28 : 12 }} />
           </Animated.View>
         </Animated.View>
@@ -507,6 +528,11 @@ function AddKidScreen({
         <ObTopBar onBack={onBack} />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Helper text={isFirst ? 'Add your first kid. You can add the rest on the next step.' : 'Add another kid. They get their own Monstir too.'} />
+
+          <View style={{ alignItems: 'center', marginTop: 12, marginBottom: 8 }}>
+            <AvatarPicker avatarIdx={draft.avatarIdx} onChange={idx => patch({ avatarIdx: idx })} size={88} />
+            <Text style={s.avatarHint}>Tap to choose avatar</Text>
+          </View>
 
           <Text style={s.fieldLabel}>KID'S NAME</Text>
           <TextInput
@@ -1162,9 +1188,10 @@ export function ParentOnboarding({ onComplete }: Props) {
           }
         }
       }
-      // Starter chores win over any same-id age entry (e.g. set_table = Easy).
+      // Starter chores win over any same-id age entry (e.g. set_table = Easy),
+      // and carry their own frequency + completion mode.
       for (const c of STARTER_CHORES) {
-        choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty, frequency: 'Every day' };
+        choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty, frequency: c.frequency ?? 'Every day', completionMode: c.completionMode };
       }
       for (const c of customChores) {
         choreMap[c.id] = { name: c.name, icon: c.icon, iconBg: c.iconBg, difficulty: c.difficulty, frequency: 'Every day' };
@@ -1257,6 +1284,12 @@ const s = StyleSheet.create({
     color: BLACK,
     textTransform: 'uppercase',
     marginBottom: 8,
+  },
+  avatarHint: {
+    fontFamily: obc.body,
+    fontSize: scale(12),
+    color: colors.hint,
+    marginTop: 8,
   },
   fieldInput: {
     backgroundColor: colors.white,
@@ -1359,6 +1392,16 @@ const s = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(0,0,0,0.08)',
   },
+  avatarEditBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2.5,
+    borderColor: BLACK,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatarInitial: {
     fontFamily: interFamily.black,
     color: AVATAR_INITIAL_COLOR,
@@ -1423,6 +1466,8 @@ const s = StyleSheet.create({
   avatarGrid:         { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
   avatarGridCell:     { width: '22%', margin: '1.5%', aspectRatio: 1, borderRadius: radii.lg, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: colors.bg },
   avatarGridCellActive: { borderColor: PURPLE },
+  avatarRow:          { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingBottom: 4 },
+  avatarCarouselCell: { width: 72, height: 72, borderRadius: radii.lg, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: colors.bg },
 
   // Child card (Step 1)
   childCard: {
@@ -1738,7 +1783,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    backgroundColor: obc.purpleSoft,
+    backgroundColor: '#FFFFFF',
     borderRadius: obc.radius,
     borderWidth: 3,
     borderColor: BLACK,

@@ -135,6 +135,17 @@ export async function updateKid(kidId: string, fields: Record<string, unknown>) 
   console.log('[DB] updateKid data:', data, 'error:', error);
 }
 
+// Renaming a kid changes their display name, but chore_history and payouts are
+// keyed by kid_name (used to compute money owed). Re-key those rows so the
+// balance doesn't reset to zero after a rename.
+export async function renameKidInHistory(oldName: string, newName: string): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId || oldName === newName) return;
+  const { error: histErr } = await supabase.from('chore_history').update({ kid_name: newName }).eq('parent_id', userId).eq('kid_name', oldName);
+  const { error: payErr }  = await supabase.from('payouts').update({ kid_name: newName }).eq('parent_id', userId).eq('kid_name', oldName);
+  if (histErr || payErr) console.warn('[DB] renameKidInHistory error:', histErr, payErr);
+}
+
 // ─── Chores ────────────────────────────────────────────────────────────────
 
 export async function addChore(fields: { name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null }) {
@@ -182,7 +193,7 @@ export async function deleteChore(choreId: string) {
 
 export async function saveOnboardingSetup(
   setup: ParentSetupResult,
-  choreCatalogue: Record<string, { name: string; icon: string; difficulty: string; frequency?: string }>,
+  choreCatalogue: Record<string, { name: string; icon: string; difficulty: string; frequency?: string; completionMode?: 'shared' | 'independent' }>,
 ): Promise<{ kidIdMap: Record<string, string>; choreNameToId: Record<string, string> }> {
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Not logged in');
@@ -216,12 +227,13 @@ export async function saveOnboardingSetup(
   for (const choreId of setup.sharedChoreIds) {
     const catalogue = choreCatalogue[choreId];
     const { data, error } = await supabase.from('chores').insert({
-      parent_id:   userId,
-      name:        catalogue?.name ?? choreId,
-      icon:        catalogue?.icon ?? '✅',
-      frequency:   catalogue?.frequency ?? 'Every day',
-      difficulty:  catalogue?.difficulty === 'Hard' ? 3 : catalogue?.difficulty === 'Medium' ? 2 : 1,
-      assigned_to: [],
+      parent_id:       userId,
+      name:            catalogue?.name ?? choreId,
+      icon:            catalogue?.icon ?? '✅',
+      frequency:       catalogue?.frequency ?? 'Every day',
+      difficulty:      catalogue?.difficulty === 'Hard' ? 3 : catalogue?.difficulty === 'Medium' ? 2 : 1,
+      assigned_to:     [],
+      completion_mode: catalogue?.completionMode ?? null,
     }).select('id, name').single();
     console.log('[DB] saveOnboardingSetup insert shared chore', catalogue?.name ?? choreId, 'data:', data, 'error:', error);
     if (data?.id && data?.name) choreNameToId[data.name] = data.id;
