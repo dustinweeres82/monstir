@@ -11,11 +11,13 @@ interface ListCellProps {
   right?:    React.ReactNode;
   onPress?:  () => void;
   style?:    ViewStyle;
+  /** Flat variant — no shadow (neither the static row shadow nor the pressable one). */
+  flat?:     boolean;
 }
 
-export function ListCell({ icon, iconBg = colors.cream, title, subtitle, right, onPress, style }: ListCellProps) {
+export function ListCell({ icon, iconBg = colors.cream, title, subtitle, right, onPress, style, flat }: ListCellProps) {
   const inner = (
-    <View style={[s.row, style]}>
+    <View style={[s.row, flat && s.rowFlat, style]}>
       <View style={[s.iconWrap, { backgroundColor: iconBg }]}>{icon}</View>
       <View style={s.info}>
         <Text style={s.title} numberOfLines={1}>{title}</Text>
@@ -27,7 +29,7 @@ export function ListCell({ icon, iconBg = colors.cream, title, subtitle, right, 
 
   if (onPress) {
     return (
-      <PressableShadow onPress={onPress}>
+      <PressableShadow onPress={onPress} depth={flat ? 0 : 6}>
         {inner}
       </PressableShadow>
     );
@@ -47,6 +49,10 @@ const s = StyleSheet.create({
     padding: 12,
     gap: 12,
     ...shadows.solid,
+  },
+  rowFlat: {
+    shadowOpacity: 0,
+    elevation: 0,
   },
   iconWrap: {
     width: 58,

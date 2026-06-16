@@ -49,13 +49,9 @@ const RARITY_BG: Record<string, string> = {
   Legendary: '#FFF3C4',
 };
 
-const CARD_SHADOW = {
-  shadowColor: BORDER,
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 1,
-  shadowRadius: 0,
-  elevation: 5,
-};
+// Trophy cards are intentionally flat (no shadow). The shadowed card variant
+// lives app-wide as SOLID_SHADOW (App.tsx) / shadows.solid (design tokens) — use
+// that when a card should pop, rather than re-deriving a local shadow here.
 
 const THREAT_RARITY: Record<string, string> = {
   Easy: 'common', Medium: 'uncommon', Hard: 'rare', Extreme: 'legendary',
@@ -414,7 +410,7 @@ export function TrophyRoom({
                     <View style={s.bossJarWrap}>
                       <Image source={EMPTY_JAR} style={s.bossJarImg} resizeMode="contain" />
                     </View>
-                    <View style={s.bossCardFooter}>
+                    <View style={[s.bossCardFooter, { borderTopColor: '#CCC' }]}>
                       <Text style={[s.bossCardName, { color: '#BBB' }]} numberOfLines={1}>???</Text>
                       <Text style={[s.bossCardDate, { color: '#CCC' }]}>Locked</Text>
                     </View>
@@ -497,11 +493,11 @@ export function TrophyRoom({
             </View>
 
             <View style={s.foundRow}>
-              <View style={[s.foundCard, s.foundCardGreen, CARD_SHADOW]}>
+              <View style={[s.foundCard, s.foundCardGreen]}>
                 <Text style={s.foundNum}>{relics.length}</Text>
                 <Text style={s.foundLabel}>Found</Text>
               </View>
-              <View style={[s.foundCard, s.foundCardWhite, CARD_SHADOW]}>
+              <View style={[s.foundCard, s.foundCardWhite]}>
                 <Text style={s.foundNum}>{missingCount}</Text>
                 <Text style={s.foundLabel}>Missing</Text>
               </View>
@@ -548,7 +544,7 @@ export function TrophyRoom({
                     </View>
                     <View style={[s.relicBody, { backgroundColor: 'transparent' }]}>
                       <Text style={[s.relicName, { color: '#AAA' }]} numberOfLines={2}>???</Text>
-                      <View style={[s.rarityPill, { borderColor: col, borderStyle: 'dashed' }]}>
+                      <View style={[s.rarityPill, { borderColor: col }]}>
                         <Text style={[s.rarityPillText, { color: col }]}>{rarity}</Text>
                       </View>
                     </View>
@@ -592,7 +588,7 @@ export function TrophyRoom({
                     <View style={s.bossJarWrap}>
                       <Image source={EMPTY_JAR} style={s.bossJarImg} resizeMode="contain" />
                     </View>
-                    <View style={s.bossCardFooter}>
+                    <View style={[s.bossCardFooter, { borderTopColor: '#CCC' }]}>
                       <Text style={[s.bossCardName, { color: '#BBB' }]} numberOfLines={1}>???</Text>
                       <Text style={[s.bossCardDate, { color: '#CCC' }]}>Locked</Text>
                     </View>
@@ -624,7 +620,7 @@ export function TrophyRoom({
                 return (
                   <TouchableOpacity
                     key={def.id}
-                    style={[s.milestoneCard, earned ? CARD_SHADOW : s.milestoneCardLocked]}
+                    style={[s.milestoneCard, !earned && s.milestoneCardLocked]}
                     onPress={() => setDetailMs(def)}
                     activeOpacity={0.85}
                   >
@@ -689,7 +685,7 @@ const s = StyleSheet.create({
     width: 100, height: 100, backgroundColor: '#EDE9FC',
     borderRadius: 20, borderWidth: 3, borderColor: BORDER,
     alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0, overflow: 'hidden', ...CARD_SHADOW,
+    flexShrink: 0, overflow: 'hidden',
   },
   monsterAvatarImg: { width: 88, height: 88 },
   heroInfo: { flex: 1 },
@@ -721,7 +717,7 @@ const s = StyleSheet.create({
 
   relicCard: {
     borderRadius: 18, borderWidth: 3, borderColor: BORDER,
-    overflow: 'hidden', backgroundColor: colors.white, ...CARD_SHADOW,
+    overflow: 'hidden', backgroundColor: colors.white,
   },
   relicImgWrap: {
     width: '100%', aspectRatio: 1, backgroundColor: colors.white,
@@ -735,16 +731,16 @@ const s = StyleSheet.create({
   rarityPillText: { fontSize: fontSize.xs, fontFamily: interFamily.heavy },
 
   mysteryCard: {
-    backgroundColor: '#F5F5F5', borderStyle: 'dashed',
+    backgroundColor: '#F5F5F5', borderStyle: 'solid',
     borderColor: '#CCC', alignItems: 'center', justifyContent: 'center',
     shadowOpacity: 0, elevation: 0,
   } as any,
 
   bossCard: {
     backgroundColor: colors.white, borderWidth: 3, borderColor: BORDER,
-    borderRadius: 18, overflow: 'hidden', ...CARD_SHADOW,
+    borderRadius: 18, overflow: 'hidden',
   },
-  bossCardLocked: { opacity: 0.6, borderStyle: 'dashed', borderColor: '#CCC' } as any,
+  bossCardLocked: { opacity: 0.6, borderStyle: 'solid', borderColor: '#CCC' } as any,
   bossJarWrap: {
     width: '100%', aspectRatio: 1,
     alignItems: 'center', justifyContent: 'center',
@@ -767,7 +763,7 @@ const s = StyleSheet.create({
   milestoneCardLocked: {
     width: scale(100), backgroundColor: '#F5F5F5',
     borderRadius: radii.lg, borderWidth: 2, borderColor: '#DDD',
-    borderStyle: 'dashed', padding: spacing.sm, alignItems: 'center', gap: 4,
+    borderStyle: 'solid', padding: spacing.sm, alignItems: 'center', gap: 4,
   } as any,
   milestoneIcon: { fontSize: fontSize.xxxl },
   milestoneImg:  { width: scale(48), height: scale(48) },
