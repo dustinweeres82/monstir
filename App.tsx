@@ -6345,7 +6345,10 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
                 <Text style={{ flex: 1, fontSize: scale(24), fontFamily: 'FredokaOne_400Regular', color: '#1A1A1A' }}>{chore.name}</Text>
                 <TouchableOpacity onPress={() => closeSheet(() => onClose())} style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-                  <View style={{ width: 12, height: 12, backgroundColor: '#1A1A1A', borderRadius: 2 }} />
+                  <View style={{ width: 14, height: 14, alignItems: 'center', justifyContent: 'center' }}>
+                    <View style={{ position: 'absolute', width: 14, height: 2, backgroundColor: '#1A1A1A', borderRadius: 1, transform: [{ rotate: '45deg' }] }} />
+                    <View style={{ position: 'absolute', width: 14, height: 2, backgroundColor: '#1A1A1A', borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
+                  </View>
                 </TouchableOpacity>
               </View>
 
@@ -7685,7 +7688,15 @@ function AddEditKidModal({
                 contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 44 }}
               >
                 <View style={{ width: 40, height: 4, backgroundColor: '#D0CEC8', borderRadius: 2, alignSelf: 'center', marginBottom: 20 }} />
-                <Text style={{ fontSize: scale(20), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginBottom: 24, textAlign: 'center' }}>{isEdit ? 'Edit kid' : 'Add a kid'}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
+                  <Text style={{ flex: 1, fontSize: scale(20), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{isEdit ? 'Edit kid' : 'Add a kid'}</Text>
+                  <TouchableOpacity onPress={onClose} style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+                    <View style={{ width: 14, height: 14, alignItems: 'center', justifyContent: 'center' }}>
+                      <View style={{ position: 'absolute', width: 14, height: 2, backgroundColor: '#1A1A1A', borderRadius: 1, transform: [{ rotate: '45deg' }] }} />
+                      <View style={{ position: 'absolute', width: 14, height: 2, backgroundColor: '#1A1A1A', borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
+                    </View>
+                  </TouchableOpacity>
+                </View>
 
                 {/* Avatar picker */}
                 <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#ABABAB', marginBottom: 10, letterSpacing: 0.8 }}>CHOOSE AVATAR</Text>
@@ -9113,6 +9124,13 @@ function LoginScreen({ onBack, onSuccess, onSignUp, onForgotPassword, onUnconfir
     if (authError) {
       // Unconfirmed email → friendly check-your-email state, not a generic failure (MON-54).
       if (/email not confirmed/i.test(authError.message)) { onUnconfirmed(trimmed); return; }
+      // OAuth-only accounts have no password, so signInWithPassword returns this same
+      // generic "invalid credentials" error — steer the user to the social buttons
+      // instead of leaving them stuck retrying a password that was never set (MON-54).
+      if (/invalid login credentials/i.test(authError.message)) {
+        setError('Incorrect email or password. If you signed up with Google or Apple, go back and use that button.');
+        return;
+      }
       setError(authError.message);
       return;
     }
@@ -9275,6 +9293,14 @@ function SignupScreen({ onBack, onSuccess, onLogin, onConfirmPending, initialNam
     });
     setLoading(false);
     if (authError) { setError(authError.message); return; }
+    // Supabase enumeration protection: signing up with an already-registered email
+    // returns an obfuscated user with an EMPTY identities array and sends NO email.
+    // Detect it so returning Google/Apple users aren't stranded on "Check Your Email"
+    // waiting for a confirmation that never arrives (MON-54).
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      setError('This email already has an account. Go back and sign in with Google or Apple instead.');
+      return;
+    }
     // With email confirmation on, signUp returns a null session — never enter the
     // app shell pre-confirmation. Route to Check Your Email instead (MON-54).
     if (!data.session) { onConfirmPending({ name: cleanName, email: cleanEmail }); return; }
