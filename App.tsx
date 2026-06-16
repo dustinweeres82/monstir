@@ -8977,16 +8977,39 @@ function SocialAuthButton({ provider, disabled, loading, onPress }: {
   );
 }
 
+// Dev-only quick login: skips the OAuth dance (painful on the simulator) by
+// signing straight in with a dedicated email+password test account from env.
+// Both vars must be set AND __DEV__ true for the button to render — it never
+// ships in a release build. Point these at a real password account; an
+// OAuth-only address (no password) will just error.
+const DEV_LOGIN_EMAIL    = process.env.EXPO_PUBLIC_DEV_EMAIL ?? '';
+const DEV_LOGIN_PASSWORD = process.env.EXPO_PUBLIC_DEV_PASSWORD ?? '';
+
 // Screen 2 (MON-54): social-first sign-in/sign-up. Styling is final — Slime Lime
 // background + Monstir logo at top are kept; only contents/behavior change here.
-function LandingScreen({ onEmailPath, onSocialSuccess }: {
+function LandingScreen({ onEmailPath, onSocialSuccess, onDevSuccess }: {
   onEmailPath: () => void;
   onSocialSuccess: (user: SocialUser) => void;
+  onDevSuccess?: () => void;
 }) {
   // On iOS, Apple is listed first per platform convention; Google leads elsewhere.
   const appleFirst = Platform.OS === 'ios';
   const [busy, setBusy]   = useState<'apple' | 'google' | null>(null);
+  const [devBusy, setDevBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const handleDevLogin = async () => {
+    if (devBusy) return;
+    setError('');
+    setDevBusy(true);
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: canonicalizeEmail(DEV_LOGIN_EMAIL),
+      password: DEV_LOGIN_PASSWORD,
+    });
+    setDevBusy(false);
+    if (authError) { setError(`Dev login failed: ${authError.message}`); return; }
+    onDevSuccess?.();
+  };
   // Apple availability is re-checked at runtime (device/OS support); the button is
   // hidden if the SDK reports it unavailable so we never show a dead control.
   const [appleAvailable, setAppleAvailable] = useState(false);
@@ -9067,6 +9090,21 @@ function LandingScreen({ onEmailPath, onSocialSuccess }: {
             I don't have a Google or Apple account
           </Text>
         </TouchableOpacity>
+
+        {/* Dev-only: one-tap login with the env test account (never ships). */}
+        {__DEV__ && !!DEV_LOGIN_EMAIL && (
+          <TouchableOpacity
+            onPress={handleDevLogin}
+            disabled={devBusy}
+            activeOpacity={0.7}
+            style={{ marginTop: 24, backgroundColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 20, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 8, opacity: devBusy ? 0.6 : 1 }}
+          >
+            {devBusy && <ActivityIndicator size="small" color="#C5F215" />}
+            <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#C5F215' }}>
+              🛠 Dev login ({DEV_LOGIN_EMAIL})
+            </Text>
+          </TouchableOpacity>
+        )}
 
       </View>
     </View>
@@ -11545,6 +11583,8 @@ function AppInner() {
             // Social sign-in already established a Supabase session — hydrate from it
             // the same way email login does (loader routes into the app shell).
             onSocialSuccess={() => loadUserDataFromSupabase()}
+            // Dev quick-login establishes a session the same way; hydrate identically.
+            onDevSuccess={() => loadUserDataFromSupabase()}
           />
         </SafeAreaView>
       </SafeAreaProvider>
