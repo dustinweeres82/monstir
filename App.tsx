@@ -259,13 +259,27 @@ const getPendingCount = (chore: ManagedChore, kidName: string): number =>
   (chore.childPendingCount?.[kidName] ?? 0) + (getChoreStatus(chore, kidName) === 'pending' ? 1 : 0);
 
 /**
- * How many times a kid has "claimed" a chore this week across ALL states —
+ * How many times a chore has been "claimed" this week across ALL states —
  * approved completions plus everything awaiting approval (today's pending +
  * carried-over backlog). A chore must never be doable more than its weekly
  * target times, counting every state, so this is what the weekly cap checks.
+ *
+ * Independent chores are per-kid: only this kid's own completions + pending.
+ * Shared chores draw on a SINGLE household quota, so the cap must count EVERY
+ * kid's pending/backlog, not just this kid's — mirroring `applyDailyReset`'s
+ * `sharedPending`. Without this, a second kid (or the same kid in a new week,
+ * since backlog is preserved across the week boundary while `weeklyCompletions`
+ * resets to 0) sees their personal claimed count as 0 and can re-claim a shared
+ * chore that already met its weekly quota, pushing real completions past target.
  */
-const getClaimedCount = (chore: ManagedChore, kidName: string): number =>
-  getChoreCompletions(chore, kidName) + getPendingCount(chore, kidName);
+const getClaimedCount = (chore: ManagedChore, kidName: string): number => {
+  if (isIndependentChore(chore)) {
+    return getChoreCompletions(chore, kidName) + getPendingCount(chore, kidName);
+  }
+  const sharedPending = Object.values(chore.childPendingCount ?? {}).reduce((a, b) => a + b, 0)
+    + Object.values(chore.childStatus ?? {}).filter(s => s === 'pending').length;
+  return (chore.weeklyCompletions ?? 0) + sharedPending;
+};
 
 /** Bumps a kid's weekly completion count by one WITHOUT touching their status.
  *  Used when approving a backlog item (a prior day's submission) so today's
@@ -12190,7 +12204,7 @@ function AppInner() {
                 onPress={() => setDebugMinimized(m => !m)}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Text style={{ fontSize: scale(18), color: '#888' }}>
+                <Text style={{ fontSize: scale(20), color: '#BBBBBB' }}>
                   {debugMinimized ? '▴' : '▾'}
                 </Text>
               </TouchableOpacity>
@@ -12382,10 +12396,10 @@ function AppInner() {
 
                   {/* Computed preview */}
                   <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 12, gap: 4 }}>
-                    <Text style={{ color: '#C5F215', fontSize: scale(12), fontFamily: 'Inter_700Bold' }}>
+                    <Text style={{ color: '#C5F215', fontSize: scale(14), fontFamily: 'Inter_700Bold' }}>
                       Power: {calcPowerRating(dbgCompletionPct, monsterIdx, dbgWeaknessUnlocked ? 5 : 0)}  ·  Boss HP: {BOSSES[dbgBossIdx].hp}  ·  Monster HP: {Math.round(50 + calcPowerRating(dbgCompletionPct, monsterIdx, 0) * 0.5)}
                     </Text>
-                    <Text style={{ color: '#767676', fontSize: scale(12) }}>
+                    <Text style={{ color: '#B8B8B8', fontSize: scale(14) }}>
                       Guaranteed win: {dbgCompletionPct >= 100 ? 'YES ✅' : 'no'}
                     </Text>
                   </View>
@@ -12429,10 +12443,10 @@ function AppInner() {
                     <View style={{ gap: 12 }}>
                       {/* Current simulated date */}
                       <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 12, alignItems: 'center' }}>
-                        <Text style={{ color: '#767676', fontSize: scale(12), fontFamily: 'Inter_700Bold', letterSpacing: 1 }}>SIMULATED DATE</Text>
-                        <Text style={{ color: '#C5F215', fontSize: scale(18), fontFamily: 'Inter_900Black', marginTop: 4 }}>{dayName} · {simDay}</Text>
+                        <Text style={{ color: '#B8B8B8', fontSize: scale(14), fontFamily: 'Inter_700Bold', letterSpacing: 1 }}>SIMULATED DATE</Text>
+                        <Text style={{ color: '#C5F215', fontSize: scale(20), fontFamily: 'Inter_900Black', marginTop: 4 }}>{dayName} · {simDay}</Text>
                         {debugDayOffset !== 0 && (
-                          <Text style={{ color: '#767676', fontSize: scale(12), marginTop: 4 }}>
+                          <Text style={{ color: '#B8B8B8', fontSize: scale(14), marginTop: 4 }}>
                             {debugDayOffset > 0 ? `+${debugDayOffset}` : debugDayOffset} day{Math.abs(debugDayOffset) !== 1 ? 's' : ''} from today
                           </Text>
                         )}
@@ -12459,14 +12473,15 @@ function AppInner() {
                       {managedChores.map(c => {
                         const { target } = householdChoreTotals([c], setupChildren.map(k => k.name));
                         const done   = doneInSimWeek(c);
-                        const pct    = Math.min(100, Math.round((done / (target || 1)) * 100));
+                        const pct    = Math.round((done / (target || 1)) * 100);
+                        const over   = done > target;
                         return (
                           <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <View style={{ flex: 1 }}>
-                              <Text style={{ color: '#FFFFFF', fontSize: scale(12), fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>{c.name}</Text>
-                              <Text style={{ color: '#767676', fontSize: scale(12) }}>{c.frequency} · {done}/{target} · {c.status}</Text>
+                              <Text style={{ color: '#FFFFFF', fontSize: scale(14), fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>{c.name}</Text>
+                              <Text style={{ color: '#B8B8B8', fontSize: scale(14) }}>{c.frequency} · {done}/{target} · {c.status}</Text>
                             </View>
-                            <Text style={{ color: done >= target ? '#C5F215' : '#888', fontSize: scale(12), fontFamily: 'Inter_900Black', minWidth: 36, textAlign: 'right' }}>{pct}%</Text>
+                            <Text style={{ color: over ? '#FF5C5C' : done >= target ? '#C5F215' : '#AAAAAA', fontSize: scale(14), fontFamily: 'Inter_900Black', minWidth: 48, textAlign: 'right' }}>{over ? `⚠ ${pct}%` : `${pct}%`}</Text>
                           </View>
                         );
                       })}
@@ -12476,7 +12491,7 @@ function AppInner() {
                         <>
                           <Text style={s.debugSectionLabel}>RESETS NEXT DAY ADVANCE ({willReset.length})</Text>
                           {willReset.map(c => (
-                            <Text key={c.id} style={{ color: '#F59E0B', fontSize: scale(12) }}>↺  {c.name} ({c.status})</Text>
+                            <Text key={c.id} style={{ color: '#F59E0B', fontSize: scale(14) }}>↺  {c.name} ({c.status})</Text>
                           ))}
                         </>
                       )}
@@ -12807,28 +12822,28 @@ const s = StyleSheet.create({
   debugTabs:         { flexDirection: 'row', backgroundColor: '#2A2A2A', borderRadius: 10, padding: 4, gap: 4 },
   debugTab:          { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
   debugTabActive:    { backgroundColor: '#3A3A3A' },
-  debugTabText:      { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#666' },
+  debugTabText:      { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#AAAAAA' },
   debugTabTextActive:{ color: '#FFFFFF' },
   debugResetBtn:     { backgroundColor: '#2A2A2A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16 },
-  debugResetTxt:     { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#FFFFFF' },
-  debugTitle:        { fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#fff' },
-  debugSub:          { fontSize: scale(12), color: '#888', marginTop: -6 },
-  debugSectionLabel: { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#FFFFFF', letterSpacing: 1.5, marginTop: 4 },
+  debugResetTxt:     { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#FFFFFF' },
+  debugTitle:        { fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#fff' },
+  debugSub:          { fontSize: scale(14), color: '#B8B8B8', marginTop: -6 },
+  debugSectionLabel: { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#FFFFFF', letterSpacing: 1.5, marginTop: 4 },
   debugGrid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   debugChip:         { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#2E2E2E' },
   debugChipActive:   { backgroundColor: '#C5F215' },
-  debugChipText:     { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#aaa' },
+  debugChipText:     { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#CCCCCC' },
   debugChipTextActive: { color: '#1A1A1A' },
   debugRow:          { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   debugXpBtn:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10, backgroundColor: '#2E2E2E' },
   debugXpBtnGreen:   { backgroundColor: '#2A4A1A' },
-  debugXpBtnTxt:     { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#fff' },
+  debugXpBtnTxt:     { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#fff' },
   debugMaxBtn:       { backgroundColor: '#6B35F0', borderRadius: 12, padding: 16, alignItems: 'center' },
-  debugMaxTxt:       { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#fff' },
+  debugMaxTxt:       { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#fff' },
   debugCopyBtn:      { backgroundColor: '#6B35F0', borderRadius: 12, padding: 12, alignItems: 'center' },
-  debugCopyTxt:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#fff' },
+  debugCopyTxt:      { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#fff' },
   debugCloseBtn:     { backgroundColor: '#2E2E2E', borderRadius: 12, padding: 12, alignItems: 'center' },
-  debugCloseTxt:     { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#888' },
+  debugCloseTxt:     { fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#BBBBBB' },
 });
 
 // ─── Parent Styles ────────────────────────────────────────────────────────────
