@@ -106,7 +106,11 @@ interface Boss {
   power: number;
   bonus: number;
   captureCoins: number;       // coins awarded on capture (win)
-  weakness: string;           // what chore type counters this boss
+  counterChore: string;       // chore type that counters this boss (World "WEAKNESS" chip lore)
+  // MON-82: the boss's single battle weakness — discovered through chores, used
+  // once in the Sunday battle for a damage-multiplier hit. Icons are emoji
+  // placeholders (final art TBD).
+  weakness: { name: string; icon: string; damageMultiplier: number };
   video: ReturnType<typeof require> | { uri: string };
   bgImage?: ReturnType<typeof require>;   // static BG image (replaces video when set)
   bossImage?: ReturnType<typeof require>; // boss character overlay (with reveal/darkness logic)
@@ -118,6 +122,13 @@ interface Boss {
   attackMax: number;          // boss attack roll max
   zapZone: 'very-wide' | 'wide' | 'normal' | 'narrow' | 'very-narrow';
 }
+
+// MON-82: weakness discovery threshold + battle damage multiplier.
+// TODO(MON-81): read `boss_weakness_threshold` and the weakness multiplier from
+// the app_config table once it exists; hardcoded defaults until then.
+const WEAKNESS_THRESHOLD_PCT = 75;      // weekly chore completion % that reveals the weakness
+const WEAKNESS_DAMAGE_MULTIPLIER = 3.0; // fallback if a boss row omits damageMultiplier
+const WEAKNESS_BASE_DMG = 30;           // a representative normal hit; the multiplier scales this
 
 type ChoreStatus = 'active' | 'pending' | 'approved' | 'rejected';
 
@@ -396,7 +407,8 @@ const BOSSES: Boss[] = [
     tagline: "It hid under the couch. For years.",
     taglineHighlight: 'years',
     power: 28, bonus: 75, captureCoins: 75,
-    weakness: 'Sweeping',
+    counterChore: 'Sweeping',
+    weakness: { name: 'Static', icon: '⚡', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-lint_lurker.mp4' },
     bossImage: require('./assets/bosses/boss=lintlurker.png'),
     tiers: [0],
@@ -409,7 +421,8 @@ const BOSSES: Boss[] = [
     tagline: "It drips. It spreads. It never dries.",
     taglineHighlight: 'never dries',
     power: 34, bonus: 100, captureCoins: 100,
-    weakness: 'Wiping',
+    counterChore: 'Wiping',
+    weakness: { name: 'Mint', icon: '🌿', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-toothpaste.mp4' },
     bossImage: require('./assets/bosses/boss=toothpaste.png'),
     tiers: [0, 1],
@@ -422,7 +435,8 @@ const BOSSES: Boss[] = [
     tagline: "Every crumb is a throne. Every floor is its kingdom.",
     taglineHighlight: 'kingdom',
     power: 40, bonus: 125, captureCoins: 125,
-    weakness: 'Vacuuming',
+    counterChore: 'Vacuuming',
+    weakness: { name: 'Vacuum', icon: '🧹', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-cracklebug.mp4' },
     bossImage: require('./assets/bosses/boss=cracklebug.png'),
     tiers: [1, 2],
@@ -435,7 +449,8 @@ const BOSSES: Boss[] = [
     tagline: "You kept adding to it. Now it fights back.",
     taglineHighlight: 'fights back',
     power: 50, bonus: 150, captureCoins: 150,
-    weakness: 'Organizing',
+    counterChore: 'Organizing',
+    weakness: { name: 'Folding', icon: '👕', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-the_pile.mp4' },
     bossImage: require('./assets/bosses/boss=pile.png'),
     tiers: [2, 3],
@@ -448,7 +463,8 @@ const BOSSES: Boss[] = [
     tagline: "He Collects It All. You Clean It Up.",
     taglineHighlight: 'all',
     power: 62, bonus: 200, captureCoins: 200,
-    weakness: 'Organizing',
+    counterChore: 'Organizing',
+    weakness: { name: 'Water', icon: '💧', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-junk_giant.mp4' },
     bossImage: require('./assets/bosses/boss=junkgiant.png'),
     tiers: [3, 4],
@@ -461,7 +477,8 @@ const BOSSES: Boss[] = [
     tagline: "Everything you left out. Now it's angry.",
     taglineHighlight: 'angry',
     power: 76, bonus: 250, captureCoins: 250,
-    weakness: 'Folding',
+    counterChore: 'Folding',
+    weakness: { name: 'Sponge Slam', icon: '🧽', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-the_clatter.mp4' },
     bossImage: require('./assets/bosses/boss=clatter.png'),
     tiers: [4, 5],
@@ -474,7 +491,8 @@ const BOSSES: Boss[] = [
     tagline: "Filth given form. Neglect given a name.",
     taglineHighlight: 'name',
     power: 90, bonus: 300, captureCoins: 300,
-    weakness: 'Scrubbing',
+    counterChore: 'Scrubbing',
+    weakness: { name: 'Lemon Blast', icon: '🍋', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-grimelord.mp4' },
     bossImage: require('./assets/bosses/boss=grimelord.png'),
     tiers: [5, 6],
@@ -487,7 +505,8 @@ const BOSSES: Boss[] = [
     tagline: "Left in the sink too long. Now it bites.",
     taglineHighlight: 'bites',
     power: 106, bonus: 350, captureCoins: 350,
-    weakness: 'Washing',
+    counterChore: 'Washing',
+    weakness: { name: 'Soap Suds', icon: '🫧', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-forkfang.mp4' },
     bossImage: require('./assets/bosses/boss=forkfang.png'),
     tiers: [6, 7],
@@ -500,7 +519,8 @@ const BOSSES: Boss[] = [
     tagline: "It swallowed the last clean corner. Of everything.",
     taglineHighlight: 'everything',
     power: 124, bonus: 400, captureCoins: 400,
-    weakness: 'Vacuuming',
+    counterChore: 'Vacuuming',
+    weakness: { name: 'Unplugger', icon: '🔌', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-vacuumbite.mp4' },
     bossImage: require('./assets/bosses/boss=vaccuumbite.png'),
     tiers: [7],
@@ -513,7 +533,8 @@ const BOSSES: Boss[] = [
     tagline: "The mess spilled over. There's no containing it.",
     taglineHighlight: 'no containing it',
     power: 145, bonus: 450, captureCoins: 450,
-    weakness: 'Mopping',
+    counterChore: 'Mopping',
+    weakness: { name: 'Plunger', icon: '🪠', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-the_overflow.mp4' },
     bossImage: require('./assets/bosses/boss=overflow.png'),
     tiers: [7],
@@ -526,7 +547,8 @@ const BOSSES: Boss[] = [
     tagline: "She's been growing in the walls since last winter.",
     taglineHighlight: 'growing',
     power: 190, bonus: 500, captureCoins: 500,
-    weakness: 'Scrubbing',
+    counterChore: 'Scrubbing',
+    weakness: { name: 'Sunlight Strike', icon: '☀️', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-mildew_queen.mp4' },
     bossImage: require('./assets/bosses/boss=mildewqueen.png'),
     tiers: [7],
@@ -539,7 +561,8 @@ const BOSSES: Boss[] = [
     tagline: "Every dish you ignored. Every one.",
     taglineHighlight: 'every one',
     power: 190, bonus: 500, captureCoins: 500,
-    weakness: 'Washing',
+    counterChore: 'Washing',
+    weakness: { name: 'Dish Soap', icon: '🧴', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-dishocalypse.mp4' },
     bossImage: require('./assets/bosses/boss=dishocalype.png'),
     tiers: [7],
@@ -552,7 +575,8 @@ const BOSSES: Boss[] = [
     tagline: "What's inside? Nobody checks. That's the problem.",
     taglineHighlight: "That's the problem",
     power: 215, bonus: 550, captureCoins: 550,
-    weakness: 'Cleaning',
+    counterChore: 'Cleaning',
+    weakness: { name: 'Baking Soda', icon: '🧂', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-void_fridge.mp4' },
     bossImage: require('./assets/bosses/boss=voidfridge.png'),
     tiers: [7],
@@ -565,7 +589,8 @@ const BOSSES: Boss[] = [
     tagline: "It was never cleaned. It never forgot.",
     taglineHighlight: 'never forgot',
     power: 240, bonus: 600, captureCoins: 600,
-    weakness: 'Consistency',
+    counterChore: 'Consistency',
+    weakness: { name: 'Love', icon: '❤️', damageMultiplier: 3.0 },
     video: { uri: 'https://pub-02af5b05c8cb4ae4a4d7374fd7384d7b.r2.dev/bosses/intros/boss_intro-the_forgotten.mp4' },
     bossImage: require('./assets/bosses/boss=forgotten.png'),
     tiers: [7],
@@ -598,7 +623,7 @@ function resolveCurrentBoss(monsterIdx: MonsterIdx, lockedBossName: string | nul
 // ─── Cooperative household boss (MON-84) ────────────────────────────────────
 // The whole family faces ONE boss identity; each kid fights a tier-scaled
 // *instance* of it. Combat stats come from the kid's own tier (so the fight is
-// always fair), while the identity (name/art/weakness/tagline) is shared.
+// always fair), while the identity (name/art/counterChore/weakness/tagline) is shared.
 type BossStats = Pick<Boss, 'hp' | 'attackMin' | 'attackMax' | 'threat' | 'power' | 'bonus' | 'captureCoins' | 'zapZone'>;
 
 // One representative stat block per monster tier, taken from the boss native to
@@ -2528,7 +2553,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
               <>
                 <View style={w.weaknessPill}>
                   <Image source={require('./assets/icons/icon-starbox.png')} style={{ width: scale(16), height: scale(16) }} resizeMode="contain" />
-                  <Text style={w.weaknessText}>{boss.weakness}</Text>
+                  <Text style={w.weaknessText}>{boss.counterChore}</Text>
                 </View>
               </>
             )}
@@ -4240,7 +4265,9 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     const shuffled = [...eligible].sort(() => Math.random() - 0.5);
     let picks: AttackCard[] = shuffled.slice(0, 3);
     if (weaknessUnlocked && !weaknessUsed) {
-      const wCard: AttackCard = { id:'weakness', mechanic:'weakness', label:'Weakness Attack', baseDmg:45, shardCost:0, emoji:'⭐', cardBg:'#FFF9E0', icon: require('./assets/icons/icon-starbox.png') };
+      // MON-82: the weakness card surfaces the boss's discovered weakness (name +
+      // icon); damage comes from its multiplier, applied in handleWeakness.
+      const wCard: AttackCard = { id:'weakness', mechanic:'weakness', label: boss.weakness.name, baseDmg:0, shardCost:0, emoji: boss.weakness.icon, cardBg:'#FFF9E0', icon: require('./assets/icons/icon-starbox.png') };
       picks = [wCard, ...picks.slice(0, 2)];
     }
     const dCard: AttackCard = { id:'defend', mechanic:'defend', label:'Defend', baseDmg:0, shardCost:0, emoji:'🛡', cardBg:'#FFF0F0', icon: require('./assets/icons/icon-skulldisabled.png') };
@@ -4373,8 +4400,10 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
   const handleWeakness = () => {
     if (phase !== 'choosing' || !live || weaknessUsed) return;
     setWeaknessUsed(true);
-    // Guaranteed ~95 score, base 45 dmg, minimum 20 dmg always applied
-    const rawDmg = playerDamage(45, 95);
+    // MON-82: a guaranteed ~95-score hit on a normal-strength base, multiplied by
+    // the boss's weakness damageMultiplier (default 3.0×). Minimum 20 dmg always.
+    const mult = boss.weakness?.damageMultiplier ?? WEAKNESS_DAMAGE_MULTIPLIER;
+    const rawDmg = Math.round(playerDamage(WEAKNESS_BASE_DMG, 95) * mult);
     const dmg = Math.max(20, rawDmg);
     const info = comboFromScore(95);
     setCombo({ ...info, score: 95 });
@@ -4382,7 +4411,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     setPhase('combo-reveal');
     setTimeout(() => {
       setCombo(null);
-      const won = applyPlayerAttack(dmg, 'Weakness Attack ⭐');
+      const won = applyPlayerAttack(dmg, `${boss.weakness.name}! ${boss.weakness.icon}`);
       if (!won) doBossTurn(defending);
     }, 1400);
   };
@@ -11424,7 +11453,7 @@ function AppInner() {
         bossName:      boss.name,
         capturedAt:    now.toISOString(),
         weekLabel,
-        weakness:      boss.weakness,
+        weakness:      boss.counterChore,
         threat:        boss.threat,
         completionPct: p.completionPct,
         coinsEarned:   pCoins,
@@ -11433,7 +11462,7 @@ function AppInner() {
       queueOrWriteTrophy({ kind: 'boss', kidName: p.name, bossName: boss.name, xpEarned: p.xpSnapshot, coinsEarned: pCoins, completionPct: p.completionPct });
       setKidMonster(p.name, s => ({
         ...s,
-        pendingCoopChest: { bossName: boss.name, weakness: boss.weakness, threat: boss.threat, completionPct: p.completionPct, xpEarned: p.xpSnapshot, coinsEarned: pCoins },
+        pendingCoopChest: { bossName: boss.name, weakness: boss.counterChore, threat: boss.threat, completionPct: p.completionPct, xpEarned: p.xpSnapshot, coinsEarned: pCoins },
       }));
     }
 
@@ -11459,7 +11488,7 @@ function AppInner() {
       bossName:      boss.name,
       capturedAt:    now.toISOString(),
       weekLabel,
-      weakness:      boss.weakness,
+      weakness:      boss.counterChore,
       threat:        boss.threat,
       completionPct: pct,
       coinsEarned,
@@ -11970,7 +11999,9 @@ function AppInner() {
               // The weekly grant is claimed once per week (first battle entry);
               // re-entering after an escape brings only the banked balance.
               const battleShards = Math.min(SHARD_CAP, shards + (weeklyShardsClaimed ? 0 : calcWeeklyShards(completionPct)));
-              const weaknessUnlocked = completionPct >= 50 && liveCurrentStreak >= 5;
+              // MON-82: weakness is discovered at the weekly chore threshold (75%),
+              // replacing the old 50%-plus-5-day-streak gate.
+              const weaknessUnlocked = completionPct >= WEAKNESS_THRESHOLD_PCT;
               const guaranteedWin = completionPct >= 100;
               const currentBoss = activeKidBoss;
               return <BattleArenaScreen
