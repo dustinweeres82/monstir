@@ -253,6 +253,20 @@ function getWeekStart(): string {
   return monday.toISOString().slice(0, 10);
 }
 
+/** How many times a chore may be completed per week, by frequency label.
+ *  Mirrors frequencyToWeeklyTarget in App.tsx — keep the two in sync. */
+function weeklyTarget(frequency: string | null | undefined): number {
+  switch (frequency) {
+    case 'Every day':
+    case 'daily':            return 7;
+    case '3 times per week':
+    case '3x':               return 3;
+    case '2 times per week':
+    case '2x':               return 2;
+    default:                 return 1; // Once a week / weekly / 1x / As needed / unknown
+  }
+}
+
 export async function submitChoreCompletion(params: {
   choreId: string;
   kidId: string;
@@ -265,6 +279,47 @@ export async function submitChoreCompletion(params: {
   const weekStart = getWeekStart();
   const now = new Date().toISOString();
   const status = params.requiresApproval ? 'pending' : 'approved';
+
+  // Server-side completion guards for every recurring chore. The client enforces
+  // these too, but a stale or second device can submit against a reopened tile, so
+  // the DB is the backstop. (Mirrors the read-then-insert dedup of saveBossCaptureToDb.)
+  const { data: chore } = await supabase
+    .from('chores')
+    .select('frequency')
+    .eq('id', params.choreId)
+    .maybeSingle();
+  const target = weeklyTarget(chore?.frequency);
+
+  // (1) Once per calendar day — a recurring chore can't be completed twice in a
+  //     day; it must spread across days (daily, 2×, 3×, … all behave this way).
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const { data: sameDay } = await supabase
+    .from('chore_completions')
+    .select('id')
+    .eq('chore_id', params.choreId)
+    .eq('kid_id', params.kidId)
+    .gte('completed_at', dayStart.toISOString())
+    .in('status', ['pending', 'approved'])
+    .limit(1);
+  if (sameDay && sameDay.length > 0) {
+    console.log('[DB] submitChoreCompletion skipped — already completed today');
+    return;
+  }
+
+  // (2) Weekly cap — never more than the frequency target (2×/3×/…) per week,
+  //     counting everything still standing (approved + awaiting approval).
+  const { count: weekCount } = await supabase
+    .from('chore_completions')
+    .select('id', { count: 'exact', head: true })
+    .eq('chore_id', params.choreId)
+    .eq('kid_id', params.kidId)
+    .eq('week_start', weekStart)
+    .in('status', ['pending', 'approved']);
+  if ((weekCount ?? 0) >= target) {
+    console.log(`[DB] submitChoreCompletion skipped — weekly cap reached (${weekCount}/${target})`);
+    return;
+  }
 
   const { data, error } = await supabase.from('chore_completions').insert({
     chore_id:     params.choreId,

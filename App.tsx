@@ -146,6 +146,14 @@ interface ManagedChore {
   /** ISO timestamp of when each child submitted (set to pending). Used to show submission time in review sheet. */
   childSubmittedAt?: Record<string, string>;
   /**
+   * Per-child calendar date (toDateString) of this kid's most recent completion
+   * of this chore. Used to lock ANY recurring chore (daily, 2×, 3× per week) for
+   * the rest of the day it was done so it can't be completed twice in one day —
+   * even if the daily reset reopens the tile after an app reload or on a second
+   * device whose reset state is stale. Repeats must spread across separate days.
+   */
+  childLastDoneDate?: Record<string, string>;
+  /**
    * Backlog of submissions awaiting approval that carried over from PREVIOUS days,
    * keyed by child name. This does NOT include today's live `pending` status — the
    * total awaiting approval for a kid is this backlog plus (today pending ? 1 : 0).
@@ -220,6 +228,28 @@ const getChoreCompletions = (chore: ManagedChore, kidName: string): number =>
 /** Names of the kids a chore applies to. Empty assignedTo means "everyone". */
 const choreEligibleKids = (chore: ManagedChore, allKidNames: string[]): string[] =>
   chore.assignedTo.length === 0 ? allKidNames : chore.assignedTo;
+
+/** True if this chore was already completed today and must stay locked until at
+ *  least tomorrow. Applies to EVERY recurring frequency — daily, 2×, 3× per week —
+ *  so a chore can't be done twice in one day; repeats must spread across days.
+ *  (The weekly cap is enforced separately.) Independent chores lock per kid;
+ *  shared chores lock the household for the day. */
+const completedToday = (chore: ManagedChore, kidName: string, today: string): boolean => {
+  if (!chore.childLastDoneDate) return false;
+  return isIndependentChore(chore)
+    ? chore.childLastDoneDate[kidName] === today
+    : Object.values(chore.childLastDoneDate).includes(today);
+};
+
+/** Stamps today as the last-done date for a chore. Shared chores stamp every
+ *  eligible kid (the whole household is locked for the day); independent/per-kid
+ *  chores stamp only the kid who did it. */
+const stampDoneDate = (chore: ManagedChore, kidName: string, today: string, allKidNames: string[]): Record<string, string> => {
+  const dates = { ...chore.childLastDoneDate };
+  if (isIndependentChore(chore)) dates[kidName] = today;
+  else for (const k of choreEligibleKids(chore, allKidNames)) dates[k] = today;
+  return dates;
+};
 
 /**
  * Total number of submissions awaiting parent approval for a kid:
@@ -848,8 +878,14 @@ function liveStreak(currentStreak: number, lastChoreDate: string, today: string)
  *  counting EVERY state — approved, pending, and carried-over backlog. So a
  *  2×/week chore never exists as more than 2 instances in a week, no matter how
  *  approvals are timed. 'pending' chores roll into the backlog so the parent can
- *  still approve them. */
-function applyDailyReset(chores: ManagedChore[]): ManagedChore[] {
+ *  still approve them.
+ *
+ *  `today` (toDateString) guards the once-per-day rule for EVERY recurring chore
+ *  (daily, 2×, 3× per week): a chore completed today stays locked even if this reset
+ *  runs again the same day (e.g. after an app reload, or on a second device whose
+ *  reset state is stale) — without it the tile would reopen and the same chore could
+ *  be done twice in one day instead of spreading completions across days. */
+function applyDailyReset(chores: ManagedChore[], today: string): ManagedChore[] {
   return chores.map(c => {
     const target      = frequencyToWeeklyTarget(c.frequency);
     const independent = isIndependentChore(c);
@@ -879,13 +915,16 @@ function applyDailyReset(chores: ManagedChore[]): ManagedChore[] {
         const approved = independent ? (c.childCompletions?.[kid] ?? 0) : (c.weeklyCompletions ?? 0);
         const claimed  = approved + (c.childPendingCount?.[kid] ?? 0) + (st === 'pending' ? 1 : 0);
         const kidDone  = claimed >= target;
+        // Any recurring chore stays locked for the rest of the day it was completed.
+        const lockedToday = completedToday(c, kid, today);
         if (st === 'pending') {
           // Waiting-for-approval submission rolls into the backlog (stays in the
-          // parent's queue). A fresh instance reopens only if still under target;
-          // otherwise the kid has met their weekly quota and sees it as done.
+          // parent's queue). A fresh instance reopens only if still under target
+          // AND not already done today; otherwise the kid has met their quota
+          // (or already did it today) and sees it as done.
           newPendingCount[kid] = (newPendingCount[kid] ?? 0) + 1;
-          newChildStatus[kid] = kidDone ? 'approved' : 'active';
-        } else if ((st === 'approved' || st === 'rejected') && !kidDone) {
+          newChildStatus[kid] = (kidDone || lockedToday) ? 'approved' : 'active';
+        } else if ((st === 'approved' || st === 'rejected') && !kidDone && !lockedToday) {
           newChildStatus[kid] = 'active';
           delete newChildRejectionNote[kid];
         } else {
@@ -6937,6 +6976,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         childStatus:         existing?.childStatus,
         childRejectionNote:  existing?.childRejectionNote,
         childCompletions:    existing?.childCompletions,
+        childLastDoneDate:   existing?.childLastDoneDate,
       };
       onSave(chore);
     } catch (err) {
@@ -9965,6 +10005,7 @@ function AppInner() {
           childCompletions:   renameKey(c.childCompletions),
           childRejectionNote: renameKey(c.childRejectionNote),
           childSubmittedAt:   renameKey(c.childSubmittedAt),
+          childLastDoneDate:  renameKey(c.childLastDoneDate),
           childPendingCount:  renameKey(c.childPendingCount),
           childPendingCents:  renameKey(c.childPendingCents),
           childPendingXp:     renameKey(c.childPendingXp),
@@ -10241,6 +10282,7 @@ function AppInner() {
                   childRejectionNote: loc.childRejectionNote,
                   childCompletions:   loc.childCompletions,
                   childSubmittedAt:   loc.childSubmittedAt,
+                  childLastDoneDate:  loc.childLastDoneDate,
                   childPendingCount:  loc.childPendingCount,
                   weeklyCompletions:  loc.weeklyCompletions ?? db.weeklyCompletions,
                   status:             loc.status ?? db.status,
@@ -10603,7 +10645,7 @@ function AppInner() {
     // Use functional updater so we read latest lastResetDate without adding it to deps
     setLastResetDate(prev => {
       if (prev !== today) {
-        setManagedChores(chores => applyDailyReset(chores));
+        setManagedChores(chores => applyDailyReset(chores, today));
         return today;
       }
       return prev;
@@ -10690,10 +10732,10 @@ function AppInner() {
     if (getClaimedCount(chore, currentKidName) >= frequencyToWeeklyTarget(chore.frequency)) return;
     const kidDbId = getKidDbId(currentKidName);
     const today = getSimulatedToday(debugDayOffset);
-    // Once-per-day lock for daily chores: even if the tile reopened (a same-day
-    // daily reset after a reload / on another device), don't allow a second
-    // completion on the same calendar day.
-    if (dailyDoneToday(chore, currentKidName, today)) return;
+    // Once-per-day lock for any recurring chore: even if the tile reopened (a
+    // same-day reset after a reload / on another device), don't allow a second
+    // completion on the same calendar day — repeats must land on different days.
+    if (completedToday(chore, currentKidName, today)) return;
     const earnedCents = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
     log('chore.submit', { choreId: id, kidId: kidDbId, difficulty: chore.difficulty, earnedCents, requireApproval });
     if (requireApproval) {
@@ -10725,6 +10767,8 @@ function AppInner() {
           childStatus,
           childRejectionNote: { ...c.childRejectionNote, [currentKidName]: '' },
           childSubmittedAt: { ...c.childSubmittedAt, [currentKidName]: new Date().toISOString() },
+          // Stamp the done-date so a daily chore stays locked for the rest of today.
+          childLastDoneDate: stampDoneDate(c, currentKidName, today, setupChildren.map(x => x.name)),
           // Pin this submission's pay/XP to the rate and streak in effect right now.
           childPendingCents: { ...c.childPendingCents, [currentKidName]: [...(c.childPendingCents?.[currentKidName] ?? []), earnedCents] },
           childPendingXp:    { ...c.childPendingXp,    [currentKidName]: [...(c.childPendingXp?.[currentKidName] ?? []), pendingXp] },
@@ -10746,7 +10790,10 @@ function AppInner() {
       }
     } else {
       const allKidNames = setupChildren.map(c => c.name);
-      setManagedChores(prev => prev.map(c => c.id === id ? applyChoreCompletion(c, currentKidName, allKidNames) : c));
+      setManagedChores(prev => prev.map(c => c.id === id
+        // Stamp the done-date so a daily chore stays locked for the rest of today.
+        ? { ...applyChoreCompletion(c, currentKidName, allKidNames), childLastDoneDate: stampDoneDate(c, currentKidName, today, allKidNames) }
+        : c));
       // ── XP with streak bonus ──────────────────────────────────────────────────
       const earnedCoins = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
       addKidCoins(currentKidName, earnedCoins);
@@ -11188,19 +11235,29 @@ function AppInner() {
       // eligible kid — not just the submitter — and clear their stand-in 'approved'.
       if (!isIndependentChore(c)) {
         const childStatus: Record<string, ChoreStatus> = { ...base.childStatus };
+        // Unclaiming clears the household's done-date for the day so the chore can
+        // be redone today (a rejected submission isn't a real completion).
+        const childLastDoneDate = { ...base.childLastDoneDate };
         for (const k of choreEligibleKids(c, setupChildren.map(x => x.name))) {
           childStatus[k] = (k === kidName && note) ? 'rejected' : 'active';
+          delete childLastDoneDate[k];
         }
         return {
           ...base,
           status: 'active' as ChoreStatus,
           childStatus,
+          childLastDoneDate,
           childRejectionNote: note ? { ...base.childRejectionNote, [kidName]: note } : base.childRejectionNote,
         };
       }
+      // A rejected submission isn't a real completion — clear today's done-date so
+      // the kid can redo the chore the same day.
+      const childLastDoneDate = { ...base.childLastDoneDate };
+      delete childLastDoneDate[kidName];
       return {
         ...base,
         childStatus: { ...base.childStatus, [kidName]: (note ? 'rejected' : 'active') as ChoreStatus },
+        childLastDoneDate,
         childRejectionNote: note ? { ...base.childRejectionNote, [kidName]: note } : base.childRejectionNote,
       };
     }));
