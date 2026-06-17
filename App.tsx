@@ -3627,8 +3627,8 @@ const GROSSNESS: Record<string, number> = {
   pancakes: 10,
 };
 
-const FEED_GROSS_QUIPS   = ["BLECH! That's AWFUL! 🤢", "You tricked me!! 😤", "What IS this?!", "I'm gonna be sick...", "DISGUSTING! 😫"];
-const FEED_MEDIUM_QUIPS  = ["Hmm... not bad...", "I've had worse.", "Could be grosser.", "Meh. 😐"];
+const FEED_GROSS_QUIPS   = ["BLECH! AWFUL! 🤢", "You tricked me! 😤", "What IS this?!", "I'm gonna be sick...", "DISGUSTING! 😫"];
+const FEED_MEDIUM_QUIPS  = ["Hmm... not bad.", "I've had worse.", "Could be grosser.", "Meh. 😐"];
 const FEED_YUMMY_QUIPS   = ["Mmm! Delicious! 😋", "PERFECT! More please!", "Now THAT'S a brew!", "Ooh yummy! 😍"];
 
 function FeedBossGame({ onScore, onBossReact }: { onScore: (s: number) => void; onBossReact: (text: string) => void }) {
@@ -4127,42 +4127,43 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
   const boss    = bossOverride ?? getWeeklyBoss(monsterIdx);
   const BossSvg = BOSS_SVGS[monsterIdx % BOSS_SVGS.length];
 
+  // MON-62: revised canonical quips — shorter, innuendo stripped.
   const BOSS_INTRO_QUIPS: Record<string, string[]> = {
-    'Lint Lurker':   ['I lived under\nthat couch for YEARS!', 'You dare\ndisturb my dust?!', 'So fluffy...\nSO ANGRY! 😤'],
-    'Toothpaste Ooze':['I drip.\nI spread.\nI WIN! 💜', 'You can\'t wipe\nme out!', 'Minty fresh\nDESTRUCTION! 🦷'],
-    'Cracklebug':    ['Every crumb is\nMINE! 🍪', 'You dare vacuum\nMY kingdom?!', 'CRUNCH! CRACKLE!\nFEAR ME!'],
-    'The Pile':      ['You kept adding\nto me... FOOL!', 'I\'ve been growing\nfor WEEKS! 📦', 'Tidy THIS! 😤'],
-    'Junk Giant':    ['I collect it all.\nYOU clean it up! 🗑', 'So much junk...\nso much POWER!', 'You can\'t organize\nme away!'],
-    'The Clatter':   ['Everything you\nleft out FIGHTS BACK!', 'CLATTER!\nBANG! CRASH! 💥', 'Should\'ve\npicked it up!'],
-    'Grimelord':     ['Filth given form.\nNeglect given FANGS!', 'The grime\nSTRIKES BACK! 🦠', 'You cannot clean\nwhat you cannot see...'],
-    'Forkfang':      ['Left me in the\nsink too long! 🍴', 'BITE! STAB!\nSCRATCH! 😤', 'I BITE NOW! 🔱'],
-    'Vacuumbite':    ['I swallowed the\nlast clean corner!', 'VROOM VROOM\nof DOOM! 🌀', 'Everything...\nis mine now!'],
-    'The Overflow':  ['The mess spilled!\nNO CONTAINING IT!', 'I\'m EVERYWHERE\nnow! 🌊', 'Should\'ve cleaned\nit up sooner...'],
-    'Mildew Queen':  ['Growing in the\nwalls since winter! 🍄', 'Bow before your\nMILDEW QUEEN!', 'You\'ll never\nscrub me out!'],
-    'Dishocalypse':  ['Every dish you\nignored. EVERY ONE! 🍽', 'APOCALYPSE of\nDIRTY DISHES!', 'The sink...is\nOVERFLOWING! 😤'],
-    'Void Fridge':   ['What\'s inside?\nNOBODY KNOWS... 🧊', 'Leftovers of\nDARKNESS!', 'You should\'ve\nchecked sooner...'],
-    'The Forgotten': ['It was never cleaned.\nIt never FORGOT! 👁', 'I AM the\nneglect itself!', 'All forgotten things\nreturn... as ME!'],
+    'Lint Lurker':   ['Lived under that couch for YEARS!', 'You dare disturb my dust?!', 'So fluffy. SO ANGRY! 😤'],
+    'Toothpaste Ooze':['Minty fresh DESTRUCTION! 🦷', 'You can\'t wipe me out!', 'Squeezed out and FURIOUS!'],
+    'Cracklebug':    ['Every crumb is MINE! 🍪', 'You vacuum MY kingdom?!', 'CRUNCH! CRACKLE! FEAR ME!'],
+    'The Pile':      ['You kept adding to me... FOOL!', 'Growing for WEEKS! 📦', 'Tidy THIS! 😤'],
+    'Junk Giant':    ['I collect it. YOU clean it! 🗑', 'So much junk, so much POWER!', 'You can\'t sort me away!'],
+    'The Clatter':   ['Everything you left out FIGHTS BACK!', 'CLATTER! BANG! CRASH! 💥', 'Should\'ve picked it up!'],
+    'Grimelord':     ['Neglect given FANGS!', 'The grime STRIKES BACK! 🦠', 'You can\'t clean what you can\'t see!'],
+    'Forkfang':      ['Left me in the sink too long! 🍴', 'BITE! STAB! SCRATCH!', 'I\'m POINTY now!'],
+    'Vacuumbite':    ['I ate the last clean corner!', 'VROOM VROOM of DOOM! 🌀', 'It\'s all mine now!'],
+    'The Overflow':  ['The mess spilled OVER! 🌊', 'I\'m EVERYWHERE now!', 'Should\'ve cleaned up sooner!'],
+    'Mildew Queen':  ['In the walls since winter! 🍄', 'Bow to your MILDEW QUEEN!', 'You\'ll never scrub me out!'],
+    'Dishocalypse':  ['Every dish you ignored! 🍽', 'APOCALYPSE of DIRTY DISHES!', 'The sink OVERFLOWS! 😤'],
+    'Void Fridge':   ['What\'s inside? NOBODY KNOWS... 🧊', 'Leftovers of DARKNESS!', 'You should\'ve checked sooner!'],
+    'The Forgotten': ['Never cleaned. Never FORGOT! 👁', 'I AM the neglect!', 'Forgotten things return... as ME!'],
   };
 
   const BOSS_HIT_QUIPS: Record<string, string[]> = {
-    'Lint Lurker':   ['My FLUFF! 😤', 'Still fuzzy\nand ANGRY!', 'Not the\nlint!! 😱', 'You got lucky!'],
-    'Toothpaste Ooze':['I\'m SPREADING\nmore! 💜', 'Oozing with\nRAGE!', 'You can\'t\nstop the goo!', 'Ow ow OOZ!'],
-    'Cracklebug':    ['My crumbs!! 😤', 'CRUNCH that\nhurt!', 'Still crackling!', 'The floor...mine!'],
-    'The Pile':      ['One piece less...\nSTILL A PILE!', 'I grow back! 📦', 'Unacceptable!! 😤', 'That tickled.'],
-    'Junk Giant':    ['My collection!! 🗑', 'I\'ll just collect\nMORE!', 'Ow! My junk!', 'Not the good stuff!'],
-    'The Clatter':   ['CLANG! OW! 💥', 'Still clattering!', 'That rattled me!', 'I\'ll CLATTER back!'],
-    'Grimelord':     ['The grime\nholds strong! 🦠', 'You can\'t scrub\nme fully!', 'Ow... ow... OW!', 'Filth endures!'],
-    'Forkfang':      ['PRONG-PAIN! 🔱', 'My tines!! 😤', 'Sharp and\nSTILL FIGHTING!', 'That\'ll leave a mark!'],
-    'Vacuumbite':    ['Still has\nsuction! 🌀', 'VROOM of pain!', 'My motor!! 😤', 'Powers fading...'],
-    'The Overflow':  ['Still flowing! 🌊', 'Can\'t hold\nme back!', 'The mess\nspills more!', 'OW! Still oozing!'],
-    'Mildew Queen':  ['My spores!! 🍄', 'Still growing\nin the cracks!', 'I taste defeat...\nnot yet!', 'I will REGROW!'],
-    'Dishocalypse':  ['My dishes!! 🍽', 'The stack\nstill falls!', 'CRASH! OW!', 'I\'m warning you!'],
-    'Void Fridge':   ['The cold... fades 🧊', 'Still chilling\nwith RAGE!', 'My leftovers!!', 'Into the void...'],
-    'The Forgotten': ['I remember\nthis pain... 👁', 'Still here.\nStill forgotten.', 'You won\'t\nforget ME!', 'I. Endure.'],
+    'Lint Lurker':   ['My FLUFF!', 'Still fuzzy and mad!', 'Not the lint! 😱', 'Lucky shot!'],
+    'Toothpaste Ooze':['My paste!', 'Still sticky!', 'Ow ow OOZ!', 'Can\'t scrub me!'],
+    'Cracklebug':    ['My crumbs!', 'That CRUNCH hurt!', 'Still crackling!', 'The floor is mine!'],
+    'The Pile':      ['Still a PILE!', 'I grow back!', 'Unacceptable!', 'That tickled.'],
+    'Junk Giant':    ['My collection!', 'I\'ll collect MORE!', 'Ow, my junk!', 'Not the good stuff!'],
+    'The Clatter':   ['CLANG! OW!', 'Still clattering!', 'That rattled me!', 'I\'ll clatter back!'],
+    'Grimelord':     ['Grime holds strong!', 'Can\'t scrub me out!', 'Ow... ow... OW!', 'Filth endures!'],
+    'Forkfang':      ['My tines!', 'Sharp and still fighting!', 'PRONG-PAIN!', 'That\'ll leave a mark!'],
+    'Vacuumbite':    ['My motor!', 'VROOM of pain!', 'Powers fading...', 'Losing steam!'],
+    'The Overflow':  ['Still flowing!', 'Can\'t hold me back!', 'The mess spills more!', 'OW!'],
+    'Mildew Queen':  ['My spores!', 'Still in the cracks!', 'Not defeated... yet!', 'I will REGROW!'],
+    'Dishocalypse':  ['My dishes!', 'The stack falls!', 'CRASH! OW!', 'I\'m warning you!'],
+    'Void Fridge':   ['The cold fades 🧊', 'Still chilling with rage!', 'My leftovers!', 'Into the void...'],
+    'The Forgotten': ['I remember this pain...', 'Still here. Still forgotten.', 'You won\'t forget ME!', 'I. Endure.'],
   };
 
-  const fallbackIntro = ['You dare\nchallenge ME?!', 'This ends NOW! 😤', 'Prepare yourself!'];
-  const fallbackHit   = ['OW! That tickled.', 'You got lucky!', 'Unacceptable!! 😤', 'Ow ow ow OW!'];
+  const fallbackIntro = ['You dare challenge ME?!', 'This ends NOW! 😤', 'Prepare yourself!'];
+  const fallbackHit   = ['OW! That tickled.', 'Lucky shot!', 'Unacceptable! 😤', 'Ow ow ow OW!'];
 
   const INTRO_QUIPS = BOSS_INTRO_QUIPS[boss.name] ?? fallbackIntro;
   const HIT_QUIPS   = BOSS_HIT_QUIPS[boss.name]   ?? fallbackHit;
@@ -4224,7 +4225,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
   // Feed the Boss — boss pleads for something yummy when that phase starts
   useEffect(() => {
     if (phase === 'feed-boss') {
-      setTimeout(() => showBubble("Make me something\nYUMMY! 😋", 3000), 300);
+      setTimeout(() => showBubble("Make me something YUMMY! 😋", 3000), 300);
     }
   }, [phase]);
 
