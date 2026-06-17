@@ -77,7 +77,7 @@ export async function signInWithGoogle(): Promise<SocialResult> {
   // module (Expo Go / a stale dev build). Bail with a friendly message rather
   // than letting require() throw a redbox.
   if (!googleNativeAvailable()) {
-    return { ok: false, cancelled: false, message: 'Google sign-in needs the native dev build — it isn’t available in Expo Go.' };
+    return { ok: false, cancelled: false, message: 'Google sign-in needs the native dev build. It isn’t available in Expo Go.' };
   }
   try {
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');

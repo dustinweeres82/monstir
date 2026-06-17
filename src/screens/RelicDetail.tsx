@@ -87,7 +87,7 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
 
   async function handleShare() {
     try {
-      await Share.share({ message: `I found a ${rarity} Relic — ${displayName} — in Monstir! 🏆` });
+      await Share.share({ message: `I found a ${rarity} Relic, ${displayName}, in Monstir! 🏆` });
     } catch (_) {}
   }
 

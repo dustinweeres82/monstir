@@ -15,6 +15,8 @@ import { EvolutionFX } from './src/components/EvolutionFX';
 import { ChestReveal, type ChestTier } from './src/components/ChestReveal';
 import { pickForTier, COLLECTIBLES } from './src/data/collectibles';
 import { MascotBanner } from './src/components/MascotBanner';
+import { ScreenIntroCard } from './src/components/ScreenIntroCard';
+import { Cell, CellDate } from './src/components/Cell';
 import { CreamBg } from './src/components/CreamBg';
 import { KidProfileCreation, getAvatarImage } from './src/screens/KidProfileCreation';
 
@@ -1098,14 +1100,14 @@ function calcWinOdds(completionPct: number): number {
 function battleScript(monsterName: string, bossName: string, won: boolean) {
   return won ? [
     { delay: 0,    text: `${monsterName} charges forward!`,                        bold: false },
-    { delay: 900,  text: `${bossName} strikes back — ${monsterName} holds firm.`,  bold: false },
+    { delay: 900,  text: `${bossName} strikes back. ${monsterName} holds firm.`,  bold: false },
     { delay: 1900, text: `${monsterName} lands a massive hit!`,                    bold: false },
     { delay: 2900, text: `${bossName} is weakening...`,                            bold: false },
     { delay: 3700, text: `${monsterName} wins! 🎉`,                                bold: true  },
   ] : [
     { delay: 0,    text: `${monsterName} charges forward!`,                        bold: false },
     { delay: 900,  text: `${bossName} blocks and counters hard.`,                  bold: false },
-    { delay: 1900, text: `${monsterName} stumbles — but doesn't give up.`,         bold: false },
+    { delay: 1900, text: `${monsterName} stumbles, but doesn't give up.`,         bold: false },
     { delay: 2900, text: `${bossName} overpowers with a final blow.`,              bold: false },
     { delay: 3700, text: `${monsterName} falls. Better luck next week.`,           bold: true  },
   ];
@@ -2415,10 +2417,10 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   // something the kid triggers by maxing weekly power, so we never say "evolve"
   // here.)
   const powerForecastMsg = power === 0
-    ? 'No battle power yet — do chores to power up for the boss!'
+    ? 'No battle power yet. Do chores to power up for the boss!'
     : winOdds >= 70
-      ? `You're battle-ready — ${winOdds}% chance to beat this boss!`
-      : `${winOdds}% win odds — do more chores to boost your power.`;
+      ? `You're battle-ready: ${winOdds}% chance to beat this boss!`
+      : `${winOdds}% win odds. Do more chores to boost your power.`;
 
   const cdParts = countdownParts(countdownMs);
   const threatSkulls = { Easy: 1, Medium: 3, Hard: 4, Extreme: 5 }[boss.threat] ?? 3;
@@ -2640,8 +2642,8 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
           <View style={{ marginBottom: 12, backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 12, padding: 12 }}>
             <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: '#C5F215', textAlign: 'center' }}>
               {bossHpPct <= 0.2
-                ? `${boss.name} is on his last legs — finish him together!`
-                : `${boss.name} is at ${Math.round(bossHpPct * 100)}% — keep wearing him down`}
+                ? `${boss.name} is on his last legs. Finish him together!`
+                : `${boss.name} is at ${Math.round(bossHpPct * 100)}%. Keep wearing him down`}
             </Text>
             {/* Shared HP bar */}
             <View style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.18)', marginTop: 8, overflow: 'hidden' }}>
@@ -2652,7 +2654,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
 
         {/* Battle Button — one battle per kid per week */}
         {battledThisWeek ? (
-          <Button label="⚔️  Battle used — back next week" onPress={() => {}} disabled />
+          <Button label="⚔️  Battle used, back next week" onPress={() => {}} disabled />
         ) : (
           <Button
             label={isBattleDay ? '⚔️  Fight Now!' : (isSaturday ? '⚔️  Battle unlocks tomorrow' : '⚔️  Battle Day: Sunday')}
@@ -2664,7 +2666,7 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
         {/* DEBUG — dev only */}
         {__DEV__ && (
           <TouchableOpacity style={s.debugBtn} onPress={onStartBattle} activeOpacity={0.7}>
-            <Text style={s.debugBtnText}>🐛  Debug — trigger battle instantly</Text>
+            <Text style={s.debugBtnText}>🐛  Debug: trigger battle instantly</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -3291,9 +3293,6 @@ function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
   const shakeX   = useRef(new Animated.Value(0)).current;
   const shakeRot = useRef(new Animated.Value(0)).current;
 
-  // Liquid colour animated 0→1
-  const liquidProg = useRef(new Animated.Value(0)).current;
-
   const resolve = () => {
     if (doneRef.current) return;
     doneRef.current = true;
@@ -3340,22 +3339,10 @@ function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
     tapsRef.current = next;
     setTaps(next);
     triggerShake();
-    // Liquid colour progress
-    Animated.timing(liquidProg, {
-      toValue: Math.min(1, next / TARGET),
-      duration: 150,
-      useNativeDriver: false,
-    }).start();
     if (next >= TARGET) resolve();
   };
 
   const rotateDeg = shakeRot.interpolate({ inputRange: [-360, 360], outputRange: ['-360deg', '360deg'] });
-
-  // Liquid colour: purple → blue → teal → lime
-  const liquidColor = liquidProg.interpolate({
-    inputRange:  [0,         0.33,       0.66,       1        ],
-    outputRange: ['#7C3AED', '#2563EB',  '#0891B2',  '#65A30D'],
-  });
 
   return (
     <View style={{ paddingHorizontal: scale(20) }}>
@@ -3368,21 +3355,11 @@ function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
         {/* Potion with animated liquid colour overlay */}
         <Animated.View style={{ transform: [{ translateX: shakeX }, { rotate: rotateDeg }] }}>
           <View style={{ width: scale(120), height: scale(140), alignItems: 'center', justifyContent: 'center' }}>
-            {/* Base potion image */}
             <Image
               source={require('./assets/battleui/potionicon.png')}
               style={{ width: scale(120), height: scale(140) }}
               resizeMode="contain"
             />
-            {/* Colour overlay — sits on top, blend mode shifts liquid hue */}
-            <Animated.View style={{
-              position: 'absolute',
-              width: scale(120),
-              height: scale(140),
-              backgroundColor: liquidColor,
-              mixBlendMode: 'color',
-              opacity: 0.75,
-            } as any} />
           </View>
         </Animated.View>
 
@@ -4021,7 +3998,7 @@ function EarthquakeGame({ onScore }: { onScore: (s: number) => void }) {
   return (
     <View style={{ alignItems:'center', gap: scale(12) }}>
       <Text style={b.mgTitle}>EARTHQUAKE</Text>
-      <Text style={b.mgInstr}>Alternate left and right — don't repeat the same side!</Text>
+      <Text style={b.mgInstr}>Alternate left and right. Don't repeat the same side!</Text>
       <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
         <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
       </View>
@@ -4757,7 +4734,7 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
     pct >= 1    ? `You did it!! ${mn} is SO proud of you! 🎉`
     : pct >= 0.75 ? `So close! One more week could do it! 💪`
     : pct >= 0.5  ? `Halfway there! ${mn} can almost taste the victory! 🎮`
-    : pct >= 0.25 ? `You're building momentum — keep those chores going!`
+    : pct >= 0.25 ? `You're building momentum. Keep those chores going!`
     : pct > 0     ? `${mn} is rooting for you! Keep going! 🔥`
     : `Start completing chores to get closer to your goal! 💪`;
 
@@ -5702,7 +5679,7 @@ function MoneyScreen({
                   <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 4 }} numberOfLines={1}>
                     {kid.name}
                   </Text>
-                  <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: 'SpaceMono_700Bold', fontSize: scale(10), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>
                     This Week
                   </Text>
                   {/* Earned is neutral ink — green is reserved for the settled/paid
@@ -6289,7 +6266,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
             </View>
             {recentKidMilestones.length === 0 ? (
               <Text style={{ fontSize: scale(12), fontFamily: 'Inter_400Regular', color: '#767676', marginTop: 8 }}>
-                Your kids haven't earned any milestones yet — they'll appear here as they do.
+                Your kids haven't earned any milestones yet. They'll appear here as they do.
               </Text>
             ) : (
               recentKidMilestones.slice(0, 3).map((e, i) => (
@@ -6720,15 +6697,15 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                 </View>
               </View>
             ) : (
-              <View style={{ paddingVertical: 12, paddingHorizontal: 4 }}>
-                <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(16), color: '#767676' }}>✓ Nothing to approve right now.</Text>
+              <View style={{ paddingVertical: 12, paddingHorizontal: 4, alignItems: 'center' }}>
+                <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(16), color: '#767676', textAlign: 'center' }}>✓ Nothing to approve right now.</Text>
               </View>
             )}
 
             {/* Compact count legend (§C): a key to the cells below, not a progress bar.
                 Each square lights its status colour only when count > 0; To do stays a
                 neutral ink outline always (not-started is not a failure — warm floor). */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 16, marginBottom: 4, paddingHorizontal: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20, marginTop: 16, marginBottom: 4, paddingHorizontal: 4 }}>
               {[
                 { label: 'To do',     count: todoCount,    fill: 'transparent' },
                 { label: 'To review', count: pendingCount, fill: '#E8A11C' },
@@ -7146,7 +7123,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, paddingHorizontal: 4 }}>
               <Text style={{ fontSize: scale(12), color: C.muted }}>ⓘ</Text>
               <Text style={{ flex: 1, fontSize: scale(12), lineHeight: scale(18), color: C.muted, fontFamily: 'Inter_500Medium' }}>
-                Good for shared household tasks — dishes, vacuuming, taking out the bins.
+                Good for shared household tasks: dishes, vacuuming, taking out the bins.
               </Text>
             </View>
           </View>
@@ -7265,6 +7242,12 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate }: {
       </View>
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        {/* Intro banner (MON-87: ledger-only positioning) */}
+        <ScreenIntroCard
+          icon={<Text style={{ fontSize: scale(28) }}>🛡️</Text>}
+          title="No money moves here"
+          body="Monstir just tracks what kids earn. You pay them yourself, however you like."
+        />
         {/* Default currency */}
         <View style={p.sectionCard}>
           <Text style={p.sectionCardTitle}>Default currency</Text>
@@ -7653,8 +7636,16 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
         <View style={p.backBtn} />
       </View>
 
-      {/* Filter chips: All + each kid */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 4 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+      {/* Filter chips: All + each kid. The row bleeds to the screen edges and the
+          content gets top/bottom padding so the pills' 6px offset shadow is never
+          clipped (MON-87). flexShrink:0 pins the row to its content height so the
+          sibling content ScrollView can't squeeze it and crop the pills. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0, flexShrink: 0 }}
+        contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingTop: 4, paddingBottom: 12 }}
+      >
         {['All', ...kidProfiles.map(k => k.name)].map((name, i) => {
           const active = filter === name;
           return (
@@ -7662,8 +7653,9 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
               backgroundColor: active ? PURPLE : '#FFFFFF',
               borderRadius: 999, borderWidth: 2, borderColor: '#1A1A1A',
               paddingHorizontal: 16, paddingVertical: 8,
+              ...shadows.solid,
             }}>
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: active ? '#FFFFFF' : '#1A1A1A' }}>{name}</Text>
+              <Text style={{ fontFamily: 'Nunito_800ExtraBold', fontSize: scale(12), color: active ? '#FFFFFF' : '#1A1A1A' }}>{name}</Text>
             </TouchableOpacity>
           );
         })}
@@ -7684,26 +7676,21 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
             </Text>
           </View>
         ) : shown.map((e, i) => (
-          <View key={`${e.kidName}-${e.def.id}-${i}`} style={{
-            flexDirection: 'row', alignItems: 'center', gap: 16,
-            backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A',
-            padding: 16, marginBottom: 12,
-          }}>
-            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', flexShrink: 0 }}>
-              {e.def.image
-                ? <Image source={e.def.image} style={{ width: 32, height: 32 }} resizeMode="contain" />
-                : <Text style={{ fontSize: scale(22) }}>{e.def.icon}</Text>}
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <Image source={getAvatarImage(e.avatarIdx)} style={{ width: 18, height: 18, borderRadius: 9 }} />
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: PURPLE }}>{e.kidName}</Text>
-              </View>
-              <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{e.def.name}</Text>
-              <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(12), color: '#767676', lineHeight: 17 }}>{e.def.tagline}</Text>
-            </View>
-            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(12), color: '#3B6D11', flexShrink: 0 }}>{timeAgo(e.earnedAt)}</Text>
-          </View>
+          // MON-87: Kids' Achievements rows now use the shared Cell (badge + tag +
+          // title + subtitle + date).
+          <Cell
+            key={`${e.kidName}-${e.def.id}-${i}`}
+            leadingShape="badge"
+            leadingBg={PURPLE}
+            leading={e.def.image
+              ? <Image source={e.def.image} style={{ width: 32, height: 32 }} resizeMode="contain" />
+              : <Text style={{ fontSize: scale(22) }}>{e.def.icon}</Text>}
+            tag={{ avatar: <Image source={getAvatarImage(e.avatarIdx)} style={{ width: 22, height: 22 }} />, name: e.kidName }}
+            title={e.def.name}
+            subtitle={e.def.tagline}
+            trailing={<CellDate label={timeAgo(e.earnedAt)} />}
+            style={{ marginBottom: 12 }}
+          />
         ))}
       </ScrollView>
     </CreamBg>
@@ -7873,24 +7860,41 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBa
   );
 }
 
+// MON-87: the monetary bonus is a multiplier (1x–3x in 0.5 steps), not a percent.
+// Per win = base rate × multiplier (the existing earning formula already multiplies
+// `baseRateCents × battleCoinBonusMultiplier`, so only the UI range/display change).
+const BONUS_MULT_MIN  = 1;
+const BONUS_MULT_MAX  = 3;
+const BONUS_MULT_STEP = 0.5;
+const BONUS_MULT_STOPS = [1, 1.5, 2, 2.5, 3];
+const snapBonusMult = (m: number) =>
+  Math.min(BONUS_MULT_MAX, Math.max(BONUS_MULT_MIN, Math.round(m / BONUS_MULT_STEP) * BONUS_MULT_STEP));
+const bonusMultToPct = (m: number) =>
+  Math.max(0, Math.min(100, ((m - BONUS_MULT_MIN) / (BONUS_MULT_MAX - BONUS_MULT_MIN)) * 100));
+const fmtBonusMult = (m: number) => `${m}x`;
+
 function BonusSlider({ value, onChange, onDragging }: { value: number; onChange: (v: number) => void; onDragging?: (d: boolean) => void }) {
   const trackRef  = useRef<View>(null);
   const trackX    = useRef(0);
   const trackW    = useRef(1);
 
-  const pctFromPageX = (pageX: number) =>
-    Math.round(Math.max(0, Math.min(100, ((pageX - trackX.current) / trackW.current) * 100)));
+  const multFromPageX = (pageX: number) => {
+    const frac = Math.max(0, Math.min(1, (pageX - trackX.current) / trackW.current));
+    return snapBonusMult(BONUS_MULT_MIN + frac * (BONUS_MULT_MAX - BONUS_MULT_MIN));
+  };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder:  () => true,
-      onPanResponderGrant: (_e, gs) => { onDragging?.(true);  onChange(pctFromPageX(gs.x0)); },
-      onPanResponderMove:  (_e, gs) => { onChange(pctFromPageX(gs.moveX)); },
+      onPanResponderGrant: (_e, gs) => { onDragging?.(true);  onChange(multFromPageX(gs.x0)); },
+      onPanResponderMove:  (_e, gs) => { onChange(multFromPageX(gs.moveX)); },
       onPanResponderRelease:   () => { onDragging?.(false); },
       onPanResponderTerminate: () => { onDragging?.(false); },
     })
   ).current;
+
+  const pct = bonusMultToPct(value);
 
   return (
     <View
@@ -7904,11 +7908,11 @@ function BonusSlider({ value, onChange, onDragging }: { value: number; onChange:
       }}
       {...panResponder.panHandlers}
     >
-      <View style={[ps.sliderFill, { width: `${value}%` as any }]} />
-      <View style={[ps.sliderThumb, { left: `${value}%` as any }]} />
+      <View style={[ps.sliderFill, { width: `${pct}%` as any }]} />
+      <View style={[ps.sliderThumb, { left: `${pct}%` as any }]} />
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
-        {[0, 25, 50, 75, 100].map(v => (
-          <Text key={v} style={[ps.sliderTickLabel, value === v && { color: '#6B35F0', fontFamily: 'Inter_700Bold' }]}>{v}%</Text>
+        {BONUS_MULT_STOPS.map(v => (
+          <Text key={v} style={[ps.sliderTickLabel, value === v && { color: '#6B35F0', fontFamily: 'Nunito_800ExtraBold' }]}>{fmtBonusMult(v)}</Text>
         ))}
       </View>
     </View>
@@ -7926,14 +7930,15 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const captureRewards = ['Captured boss', 'Collectible relic'];
 
-  // The slider works in whole percent; the persisted value is a fraction.
+  // MON-87: the persisted value IS the multiplier (1x–3x). Snap legacy values
+  // (older builds stored a 0–1 fraction) into the valid range on read.
   const bonusEnabled   = battleCoinBonusEnabled;
   const setBonusEnabled = setBattleCoinBonusEnabled;
-  const bonusPct       = Math.round((battleCoinBonusMultiplier || 0) * 100);
-  const setBonusPct    = (pct: number) => setBattleCoinBonusMultiplier(pct / 100);
+  const bonusMult      = snapBonusMult(battleCoinBonusMultiplier || BONUS_MULT_MIN);
+  const setBonusMult   = (m: number) => setBattleCoinBonusMultiplier(m);
 
   const base = parseFloat(baseRate) || 0;
-  const bonusAmount = (base * bonusPct / 100).toFixed(2);
+  const bonusAmount = (base * bonusMult).toFixed(2);
 
   return (
     <CreamBg>
@@ -7945,14 +7950,12 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
         <View style={{ width: 40 }} />
       </View>
       <ScrollView scrollEnabled={scrollEnabled} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120 }}>
-        {/* Hero card */}
-        <View style={ps.battleHero}>
-          <Text style={{ fontSize: scale(44) }}>👾</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={ps.battleHeroTitle}>Boss battles</Text>
-            <Text style={ps.battleHeroSub}>Kids earn XP fighting bosses. Configure whether winning also earns real money.</Text>
-          </View>
-        </View>
+        {/* Hero card (MON-87: pulled back onto ScreenIntroCard — bright purple + lime tile) */}
+        <ScreenIntroCard
+          icon={<Text style={{ fontSize: scale(30) }}>👾</Text>}
+          title="Boss battles"
+          body="Kids earn XP fighting bosses. Configure whether winning also earns real money."
+        />
 
         {/* Monetary bonus toggle */}
         <Text style={[ps.sectionLabel, { paddingHorizontal: 0, paddingTop: 4 }]}>Monetary bonus</Text>
@@ -7967,26 +7970,28 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
 
           {bonusEnabled && (
             <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: C.border, gap: 16 }}>
-              {/* Base rate + impact */}
+              {/* Base rate + impact. Values never wrap mid-number; the unit drops
+                  to its own smaller line (MON-87). */}
               <View style={ps.impactRow}>
                 <View style={ps.impactCell}>
                   <Text style={ps.impactLabel}>Base rate</Text>
-                  <Text style={ps.impactValue}>${base.toFixed(2)}<Text style={ps.impactUnit}>/chore</Text></Text>
+                  <Text style={ps.impactValue} numberOfLines={1}>${base.toFixed(2)}</Text>
+                  <Text style={ps.impactUnit}>/chore</Text>
                 </View>
                 <Text style={ps.impactArrow}>×</Text>
                 <View style={ps.impactCell}>
                   <Text style={ps.impactLabel}>Bonus</Text>
-                  <Text style={[ps.impactValue, { color: '#6B35F0' }]}>{bonusPct}%</Text>
+                  <Text style={[ps.impactValue, { color: '#6B35F0' }]} numberOfLines={1}>{fmtBonusMult(bonusMult)}</Text>
                 </View>
                 <Text style={ps.impactArrow}>=</Text>
                 <View style={[ps.impactCell, ps.impactCellHighlight]}>
                   <Text style={ps.impactLabel}>Per win</Text>
-                  <Text style={[ps.impactValue, { color: '#6B35F0' }]}>${bonusAmount}</Text>
+                  <Text style={[ps.impactValue, { color: '#6B35F0' }]} numberOfLines={1}>${bonusAmount}</Text>
                 </View>
               </View>
 
               {/* Slider */}
-              <BonusSlider value={bonusPct} onChange={setBonusPct} onDragging={(d) => setScrollEnabled(!d)} />
+              <BonusSlider value={bonusMult} onChange={setBonusMult} onDragging={(d) => setScrollEnabled(!d)} />
             </View>
           )}
         </View>
@@ -8003,7 +8008,7 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
 
         <View style={p.noteCard}>
           <Text style={{ fontSize: scale(18), marginRight: 8 }}>💡</Text>
-          <Text style={p.noteText}>When a boss is defeated your kid captures it into their collection and earns a collectible relic — always, regardless of the cash bonus setting.</Text>
+          <Text style={p.noteText}>When a boss is defeated your kid captures it into their collection and earns a collectible relic. This always happens, regardless of the cash bonus setting.</Text>
         </View>
       </ScrollView>
     </CreamBg>
@@ -8044,16 +8049,12 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
-        {/* Header card */}
-        <View style={ps.apprHeaderCard}>
-          <View style={ps.apprHeaderIcon}>
-            <Text style={{ fontSize: scale(22) }}>✅</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={ps.apprHeaderTitle}>Who needs sign-off?</Text>
-            <Text style={ps.apprHeaderSub}>Choose which kids need your approval before earning XP and coins.</Text>
-          </View>
-        </View>
+        {/* Header card (MON-87: ScreenIntroCard) */}
+        <ScreenIntroCard
+          icon={<Text style={{ fontSize: scale(28) }}>✅</Text>}
+          title="Who needs sign-off?"
+          body="Choose which kids need your approval before earning XP and coins."
+        />
 
         {/* Per-kid cards */}
         <Text style={ps.apprSectionLabel}>Per-kid settings</Text>
@@ -8116,8 +8117,8 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
         <View style={ps.apprInfoBox}>
           <Text style={{ fontSize: scale(16), marginTop: 0 }}>💡</Text>
           <Text style={ps.apprInfoText}>
-            <Text style={{ color: '#7B3FF2', fontFamily: 'Inter_700Bold' }}>Require on</Text> — rewards held until you approve the chore.{'\n'}
-            <Text style={{ color: '#7B3FF2', fontFamily: 'Inter_700Bold' }}>Require off</Text> — rewards granted instantly when your kid marks it done.
+            <Text style={{ color: '#7B3FF2', fontFamily: 'Inter_700Bold' }}>Require on</Text>: rewards held until you approve the chore.{'\n'}
+            <Text style={{ color: '#7B3FF2', fontFamily: 'Inter_700Bold' }}>Require off</Text>: rewards granted instantly when your kid marks it done.
           </Text>
         </View>
       </ScrollView>
@@ -9927,10 +9928,10 @@ function AppInner() {
   // boss down further (and how many fights remain)?
   const [coopWin, setCoopWin] = useState<{ familyCaptured: boolean; fightsLeft: number; totalFighters: number; bossName: string } | null>(null);
   const [battleCoinBonusEnabled,    setBattleCoinBonusEnabled]    = useState(false);
-  // Fraction of the base chore rate paid on a boss win (0.25 = 25%). Was a
-  // multiple of the boss's capture value; now a % of base rate (one model,
-  // configured on the Battle & bonuses screen).
-  const [battleCoinBonusMultiplier, setBattleCoinBonusMultiplier] = useState(0.25);
+  // Coins paid on a boss win = base chore rate × this multiplier (configured on
+  // the Battle & bonuses screen). MON-87: this is a 1x–3x multiplier (0.5 steps);
+  // earlier builds stored a 0–1 fraction, which the settings screen snaps on read.
+  const [battleCoinBonusMultiplier, setBattleCoinBonusMultiplier] = useState(1.5);
 
   // Parent state
   const [viewMode, setViewMode]               = useState<ViewMode>('kid');
@@ -12345,7 +12346,7 @@ function AppInner() {
                     }}
                     activeOpacity={0.8}
                   >
-                    <Text style={s.debugResetTxt}>🎁  Win Reveal (chest) — {dbgCompletionPct}% → {tierFromPct(dbgCompletionPct)}</Text>
+                    <Text style={s.debugResetTxt}>🎁  Win Reveal (chest): {dbgCompletionPct}% → {tierFromPct(dbgCompletionPct)}</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -12413,7 +12414,7 @@ function AppInner() {
                     }}
                   >
                     <Text style={[s.debugMaxTxt, { color: '#fff' }]}>
-                      ⚔ Launch debug battle — {BOSSES[dbgBossIdx].name}
+                      ⚔ Launch debug battle: {BOSSES[dbgBossIdx].name}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -12643,14 +12644,18 @@ const s = StyleSheet.create({
   choreCheck:      { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: '#DDDBD5', alignItems: 'center', justifyContent: 'center' },
   choreCheckDone:  { backgroundColor: C.accent, borderColor: C.accent },
   checkDot:        { width: 7, height: 7, borderRadius: 4, backgroundColor: 'white' },
-  tabBar:          { position: 'absolute', bottom: 36, left: 12, right: 12 },
-  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 8, justifyContent: 'space-between', alignItems: 'center', ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12 }, android: { elevation: 8 } }) },
-  tab:             { flex: 1, alignItems: 'center', gap: 4 },
-  tabIconWrap:     { width: 86, borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 4 },
+  // MON-87: outer margin 16 keeps the bar off the screen edge; inner padding 12
+  // keeps the active pill from colliding with the border.
+  tabBar:          { position: 'absolute', bottom: 36, left: 16, right: 16 },
+  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'space-between', alignItems: 'center', ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12 }, android: { elevation: 8 } }) },
+  tab:             { flex: 1, alignItems: 'center', gap: 3 },
+  // No fixed width — sizes to content so all four labels fit at the narrowest
+  // supported width; tight 3px icon-to-label gap keeps each tab short (MON-87).
+  tabIconWrap:     { borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 12, gap: 3 },
   tabIconWrapActive: { backgroundColor: '#EAE4FF' }, // legacy static highlight — superseded by the animated tabPill
   tabPill:         { position: 'absolute', top: 8, bottom: 8, left: 0, borderRadius: 32, backgroundColor: '#EAE4FF' },
   tabIcon:         { width: 44, height: 44 },
-  tabLabel:        { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676', letterSpacing: 0.1 },
+  tabLabel:        { fontSize: scale(12), fontFamily: 'Nunito_700Bold', color: '#767676', letterSpacing: 0.1 },
   tabLabelActive:  { color: '#6B35F0' },
   // home screen
   homeRoot:           { flex: 1, backgroundColor: 'transparent' },
@@ -13005,15 +13010,8 @@ const ps = StyleSheet.create({
   badgeText:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#FFFFFF' },
   chevron:        { fontSize: scale(18), color: '#767676', fontFamily: 'Inter_300Light' },
   kidAvatar:      { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  battleHero:     { backgroundColor: '#3D1FA3', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, flexDirection: 'row', alignItems: 'center', gap: 16, ...SOLID_SHADOW },
-  battleHeroTitle:{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF', marginBottom: 4 },
-  battleHeroSub:  { fontSize: scale(12), color: 'rgba(255,255,255,0.7)', lineHeight: scale(18) },
 
   // ── Chore Approval (v2) ──────────────────────────────────────────────────
-  apprHeaderCard:   { backgroundColor: '#7B3FF2', borderRadius: 18, borderWidth: 2, borderColor: '#111', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 4, ...SOLID_SHADOW },
-  apprHeaderIcon:   { width: 52, height: 52, backgroundColor: '#D8F52F', borderWidth: 2, borderColor: '#111', borderRadius: 14, alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
-  apprHeaderTitle:  { fontFamily: 'FredokaOne_400Regular', fontSize: scale(18), color: '#FFFFFF' },
-  apprHeaderSub:    { fontSize: scale(12), color: 'rgba(255,255,255,0.85)', marginTop: 4, lineHeight: scale(18), fontFamily: 'Inter_600SemiBold' },
   apprSectionLabel: { fontSize: scale(12), fontFamily: 'Inter_700Bold', letterSpacing: 1.5, textTransform: 'uppercase', color: '#888', paddingTop: 20, paddingBottom: 12 },
   apprKidCard:      { backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#111', borderRadius: 18, padding: 16, marginBottom: 12, ...SOLID_SHADOW },
   apprKidName:      { fontFamily: 'FredokaOne_400Regular', fontSize: scale(18), color: '#111' },
@@ -13034,9 +13032,9 @@ const ps = StyleSheet.create({
   impactRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   impactCell:     { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 10, padding: 12, alignItems: 'center', borderWidth: 2, borderColor: '#111111' },
   impactCellHighlight: { backgroundColor: '#EAE4FF' },
-  impactLabel:    { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#767676', letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase' },
-  impactValue:    { fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' },
-  impactUnit:     { fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676' },
+  impactLabel:    { fontSize: scale(10), fontFamily: 'SpaceMono_700Bold', color: '#767676', letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase' },
+  impactValue:    { fontSize: scale(18), fontFamily: 'Nunito_900Black', color: '#1A1A1A' },
+  impactUnit:     { fontSize: scale(10), fontFamily: 'Nunito_700Bold', color: '#767676', marginTop: 2 },
   impactArrow:    { fontSize: scale(18), color: '#767676', fontFamily: 'Inter_300Light' },
   cosmeticPill:   { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1.5, borderColor: '#C4B5FD', paddingHorizontal: 12, paddingVertical: 4 },
   cosmeticText:   { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#6B35F0' },

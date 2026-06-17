@@ -153,7 +153,7 @@ export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDon
     ? `🎉 The family captured ${bossName}!`
     : `💥 You staggered ${bossName}!`;
   const coopSub   = coopFamilyCaptured
-    ? 'You all wore him down — he’s in the collection.'
+    ? 'You all wore him down. He’s in the collection.'
     : coopFightsLeft <= 1
       ? 'One more fight and the family captures him!'
       : `${coopFightsLeft} more fights and the family captures him!`;
