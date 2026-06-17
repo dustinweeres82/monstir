@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, Platform, Image, TextInput, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
-  ActivityIndicator, LogBox, AccessibilityInfo, type LayoutChangeEvent,
+  ActivityIndicator, LogBox, AccessibilityInfo, AppState, type LayoutChangeEvent,
 } from 'react-native';
 
 // Suppress spurious dev-mode RN warning — not a real bug in this codebase
@@ -70,8 +70,13 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
 import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword } from './src/lib/db';
+import { initDebugLog, log, flushNow } from './src/lib/debugLog';
+import { DebugTap } from './src/components/DebugTap';
+
+const APP_VERSION = Constants.expoConfig?.version ?? null;
 
 // ─── Disable system accessibility font scaling globally ───────────────────────
 // Our scale() utility handles all proportional sizing; allowing the OS to also
@@ -7417,6 +7422,13 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
           <View style={ps.divider} />
           <SettingsRow iconBg="#94A3B8" iconEmoji="ℹ️" title="About Monstir" />
         </View>
+
+        {/* Version label doubles as the hidden support gesture: press and hold
+            to ship the debug-log buffer (alpha diagnostics). Parent-side only,
+            already behind the PIN switcher — a kid never reaches this screen. */}
+        <DebugTap reason="manual.settings">
+          <Text style={ps.version}>v{APP_VERSION ?? '—'}</Text>
+        </DebugTap>
       </ScrollView>
     </CreamBg>
   );
@@ -9797,6 +9809,24 @@ function AppInner() {
   const [toastMilestoneId, setToastMid]   = useState<string | null>(null);
   const [appMode, setAppMode]             = useState<AppMode>('splash');
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+
+  // ── Episodic debug logging ───────────────────────────────────────────────
+  // family_id is read at flush time off this ref, so the buffer always tags
+  // the currently signed-in parent without threading auth state through the
+  // logger. Set in the bootstrap on session restore/login; cleared on sign-out.
+  const familyIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    initDebugLog({
+      client: supabase,
+      getContext: () => ({ family_id: familyIdRef.current, app_version: APP_VERSION }),
+    });
+    log('app.launch', { v: APP_VERSION });
+    const sub = AppState.addEventListener('change', (next) => {
+      log('app.state', { next });
+      if (next === 'background') flushNow('session.background');
+    });
+    return () => sub.remove();
+  }, []);
   // Pending auth state for the email confirmation / password-reset round trips (MON-54).
   const [pendingAuthEmail, setPendingAuthEmail] = useState('');
   const [pendingAuthName, setPendingAuthName]   = useState('');
@@ -9849,6 +9879,14 @@ function AppInner() {
   const [parentScreen, setParentScreen]       = useState<ParentScreen>('parentHome');
   const [prevParentScreen, setPrevParentScreen] = useState<ParentScreen>('parentHome');
   const [parentTab, setParentTab]             = useState<ParentTab>('home');
+
+  // ── Nav breadcrumbs for the debug-log buffer ─────────────────────────────
+  // This app has no NavigationContainer (screen is plain state), so the
+  // equivalent of onStateChange is an effect over the active surface. These
+  // breadcrumbs are the connective tissue between the explicit domain.action
+  // logs; route names only, never any kid data.
+  useEffect(() => { log('nav.screen', { mode: appMode, screen, parent: parentScreen }); },
+    [appMode, screen, parentScreen]);
   const [managedChores, setManagedChores]     = useState<ManagedChore[]>(DEFAULT_MANAGED_CHORES);
   const [choreHistory, setChoreHistory]       = useState<{ id: string; choreName: string; kidName: string; earnedCents: number; approvedAt: string; icon: string | number; bg: string }[]>([]);
   const [appDataLoaded, setAppDataLoaded]     = useState(false);
@@ -10002,6 +10040,7 @@ function AppInner() {
         if (!session) return false;
 
         setSessionUser({ name: session.user.user_metadata?.name ?? '', email: session.user.email ?? '' });
+        familyIdRef.current = session.user.id;   // tag debug-log flushes with this parent
 
         // ── Per-account cache guard ───────────────────────────────────────────
         // The `monstir:*` AsyncStorage keys are device-global, but the DB rows
@@ -10644,7 +10683,12 @@ function AppInner() {
     if (getClaimedCount(chore, currentKidName) >= frequencyToWeeklyTarget(chore.frequency)) return;
     const kidDbId = getKidDbId(currentKidName);
     const today = getSimulatedToday(debugDayOffset);
+    // Once-per-day lock for daily chores: even if the tile reopened (a same-day
+    // daily reset after a reload / on another device), don't allow a second
+    // completion on the same calendar day.
+    if (dailyDoneToday(chore, currentKidName, today)) return;
     const earnedCents = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
+    log('chore.submit', { choreId: id, kidId: kidDbId, difficulty: chore.difficulty, earnedCents, requireApproval });
     if (requireApproval) {
       // Shared "first to finish" chores: the moment one kid submits, lock it for
       // the whole household. The submitter goes 'pending' (awaiting approval);
@@ -10882,9 +10926,12 @@ function AppInner() {
 
   const writeTrophyToDb = useCallback((w: PendingTrophyWrite, kidDbId: string) => {
     if (w.kind === 'boss') {
+      // bossName is fixed game content (from BOSSES), not kid PII — safe to log.
+      log('boss.capture', { kidId: kidDbId, bossName: w.bossName, xpEarned: w.xpEarned, coinsEarned: w.coinsEarned, completionPct: w.completionPct });
       saveBossCaptureToDb({ kidId: kidDbId, bossName: w.bossName, xpEarned: w.xpEarned, coinsEarned: w.coinsEarned, completionPct: w.completionPct })
         .catch(e => console.warn('[DB] saveBossCaptureToDb error:', e));
     } else {
+      log('collectible.earn', { kidId: kidDbId, collectibleId: w.collectibleId, rarity: w.rarity });
       saveCollectibleToDb({ kidId: kidDbId, collectibleId: w.collectibleId, rarity: w.rarity })
         .catch(e => console.warn('[DB] saveCollectibleToDb error:', e));
     }
@@ -11102,6 +11149,7 @@ function AppInner() {
   const approveManagedChore = useCallback((id: string, kidName: string) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore || getPendingCount(chore, kidName) <= 0) return;
+    log('chore.approve', { choreId: id, kidId: getKidDbId(kidName), pending: getPendingCount(chore, kidName) });
     grantChoreApproval(id, kidName);
   }, [managedChores, grantChoreApproval]);
 
@@ -11197,6 +11245,7 @@ function AppInner() {
 
     // Save to Supabase
     const kidDbId = getKidDbId(kidName);
+    log('payout.confirm', { kidId: kidDbId, amountCents: amount, completedCount, weeks: weeks.length, battleBonus });
     if (kidDbId) {
       savePayoutToDb({ kidId: kidDbId, kidName, amountCents: amount }).catch(e => console.warn('[DB] savePayoutToDb error:', e));
     }
@@ -11503,6 +11552,7 @@ function AppInner() {
       if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove);
     } catch {}
     setSessionUser(null);
+    familyIdRef.current = null;   // stop tagging debug-log flushes with the signed-out parent
     setSetupChildren([]);
     setKids([]);
     setManagedChores(DEFAULT_MANAGED_CHORES);
@@ -12862,6 +12912,7 @@ const p = StyleSheet.create({
 
 const ps = StyleSheet.create({
   sectionLabel:   { fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+  version:        { fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#ABABAB', textAlign: 'center', paddingTop: 20, paddingBottom: 8 },
   group:          { marginHorizontal: 16, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   divider:        { height: 1, backgroundColor: '#F0EEE8', marginLeft: 68 },
   row:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, gap: 12 },

@@ -1,6 +1,7 @@
 import React, { Component, type ReactNode, type ErrorInfo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors, scale, radii, spacing } from '../design-system/tokens';
+import { captureError } from '../lib/debugLog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,12 @@ export class ErrorBoundary extends Component<Props, State> {
     if (__DEV__) {
       console.error('[ErrorBoundary] Caught error:', error, info.componentStack);
     }
+
+    // Ship render-time crashes (the white-screen cases the global JS handler
+    // never sees) to debug_logs. Best-effort + fire-and-forget: captureError
+    // swallows its own failures, so logging can never break the fallback UI.
+    const firstFrame = info.componentStack?.split('\n')[1]?.trim() ?? 'unknown';
+    captureError(error, `render: ${firstFrame}`);
 
     this.props.onError?.(error, info);
   }
