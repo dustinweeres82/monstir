@@ -66,6 +66,18 @@ export const log = (event: string, data?: unknown) => push('info', event, data);
 export const logWarn = (event: string, data?: unknown) => push('warn', event, data);
 export const logError = (event: string, data?: unknown) => push('error', event, data);
 
+/**
+ * For the many `.catch(e => console.warn('[DB] ...'))` write sites. Records a
+ * failed Supabase write into the buffer (does NOT flush — these are common and
+ * a flush-per-failure would spam; the breadcrumb rides along on the next real
+ * trigger or a manual dump). This is the core silent-failure case: a write that
+ * never surfaces to the user but quietly drops their data. IDs/counts only.
+ */
+export function logDbError(op: string, err: unknown, data?: Record<string, unknown>) {
+  const message = err instanceof Error ? err.message : String(err);
+  logWarn(op, { message, ...data });
+}
+
 export function dumpLogs(): string {
   return buffer.map((e) => JSON.stringify(e)).join('\n');
 }

@@ -73,7 +73,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
 import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword } from './src/lib/db';
-import { initDebugLog, log, flushNow } from './src/lib/debugLog';
+import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
 
 const APP_VERSION = Constants.expoConfig?.version ?? null;
@@ -9042,11 +9042,13 @@ function LandingScreen({ onEmailPath, onSocialSuccess, onDevSuccess }: {
     if (busy) return;
     setError('');
     setBusy(provider);
+    log('auth.social.start', { provider });
     const result = provider === 'apple' ? await signInWithApple() : await signInWithGoogle();
     setBusy(null);
-    if (result.ok) { onSocialSuccess(result.user); return; }
+    if (result.ok) { log('auth.social.ok', { provider }); onSocialSuccess(result.user); return; }
     // Cancelled → return to this screen silently (no toast), per ticket edge cases.
-    if (result.cancelled) return;
+    if (result.cancelled) { log('auth.social.cancel', { provider }); return; }
+    logError('auth.social.fail', { provider, message: result.message });
     setError(result.message ?? 'Sign-in failed. Please try again.');
   };
 
@@ -9183,6 +9185,7 @@ function LoginScreen({ onBack, onSuccess, onSignUp, onForgotPassword, onUnconfir
     const { error: authError } = await supabase.auth.signInWithPassword({ email: trimmed, password });
     setLoading(false);
     if (authError) {
+      logError('auth.password.fail', { message: authError.message });
       // Unconfirmed email → friendly check-your-email state, not a generic failure (MON-54).
       if (/email not confirmed/i.test(authError.message)) { onUnconfirmed(trimmed); return; }
       // OAuth-only accounts have no password, so signInWithPassword returns this same
@@ -9195,6 +9198,7 @@ function LoginScreen({ onBack, onSuccess, onSignUp, onForgotPassword, onUnconfir
       setError(authError.message);
       return;
     }
+    log('auth.password.ok', {});
     onSuccess();
   };
 
@@ -9986,7 +9990,7 @@ function AppInner() {
       showParentToast(`${data.name} added! 🎉`);
       addKid({ name: data.name, avatar_idx: data.avatarIdx, avatar_color: data.avatarColor, age_range: data.ageRange })
         .then(row => { if (row?.id) setSetupChildren(prev => prev.map(c => c.id === newChild.id ? { ...c, id: row.id } : c)); })
-        .catch(e => console.warn('[DB] addKid error:', e));
+        .catch(e => logDbError('db.kid.add', e));
     }
   };
   // Goals are per kid profile — each child has their own savings goals.
@@ -10058,6 +10062,7 @@ function AppInner() {
             const allKeys = await AsyncStorage.getAllKeys();
             const toRemove = allKeys.filter(k => k.startsWith('monstir:') && k !== 'monstir:lastUserId');
             if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove);
+            log('auth.cache.cleared', { keys: toRemove.length });   // account switch — guards the cache-bleed bug
             console.log('[bootstrap] account switched — cleared', toRemove.length, 'stale cache keys');
           }
           await AsyncStorage.setItem('monstir:lastUserId', session.user.id);
@@ -10342,9 +10347,11 @@ function AppInner() {
         // finished onboarding) has no kids yet — send them through parent
         // onboarding instead of dropping them into an empty app shell (MON-54).
         const hasOnboarded = Array.isArray(dbKids) && dbKids.length > 0;
+        log('auth.bootstrap.ok', { kids: Array.isArray(dbKids) ? dbKids.length : 0, chores: Array.isArray(dbChores) ? dbChores.length : 0, onboarded: hasOnboarded });
         setAppMode(hasOnboarded ? 'app' : 'parentOnboarding');
         return true;
     } catch (e) {
+      logError('auth.bootstrap.fail', { message: e instanceof Error ? e.message : String(e) });
       console.warn('[DB] loadUserData failed, falling back to AsyncStorage:', e);
       const [choreSaved, historySaved, approvalDaysSaved] = await Promise.all([
         AsyncStorage.getItem('monstir:managedChores'),
@@ -10393,7 +10400,7 @@ function AppInner() {
     AsyncStorage.setItem('monstir:managedChores', JSON.stringify(managedChores)).catch(() => {});
     if (choresStateSyncTimer.current) clearTimeout(choresStateSyncTimer.current);
     choresStateSyncTimer.current = setTimeout(() => {
-      saveAppState({ chores_state_json: JSON.stringify(managedChores) }).catch(e => console.warn('[DB] saveAppState (choresState) error:', e));
+      saveAppState({ chores_state_json: JSON.stringify(managedChores) }).catch(e => logDbError('db.board.save', e));
     }, 2000);
   }, [managedChores, appDataLoaded]);
 
@@ -10441,7 +10448,7 @@ function AppInner() {
     AsyncStorage.setItem('monstir:choreHistory', JSON.stringify(choreHistory)).catch(() => {});
     if (appStateSyncTimer.current) clearTimeout(appStateSyncTimer.current);
     appStateSyncTimer.current = setTimeout(() => {
-      saveAppState({ chore_history_json: JSON.stringify(choreHistory) }).catch(e => console.warn('[DB] saveAppState (history) error:', e));
+      saveAppState({ chore_history_json: JSON.stringify(choreHistory) }).catch(e => logDbError('db.history.save', e));
     }, 2000);
   }, [choreHistory, appDataLoaded]);
 
@@ -10734,7 +10741,7 @@ function AppInner() {
       // Save to Supabase
       if (kidDbId) {
         ensureChoreInDb(id).then(realId => {
-          if (realId) submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: true }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
+          if (realId) submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: true }).catch(e => logDbError('db.chore.submit', e));
         });
       }
     } else {
@@ -10789,8 +10796,8 @@ function AppInner() {
       if (kidDbId) {
         ensureChoreInDb(id).then(realId => {
           if (!realId) return;
-          submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents }).catch(e => console.warn('[DB] submitChoreCompletion error:', e));
-          approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+          submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents }).catch(e => logDbError('db.chore.submit', e));
+          approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => logDbError('db.chore.approve', e));
         });
       }
     }
@@ -10891,7 +10898,7 @@ function AppInner() {
       // kid row id isn't resolvable yet (Finding B).
       const kidDbId = setupChildren.find(c => c.name === name)?.id;
       if (kidDbId) {
-        saveMilestoneToDb({ kidId: kidDbId, milestoneId: id }).catch(e => console.warn('[DB] saveMilestoneToDb error:', e));
+        saveMilestoneToDb({ kidId: kidDbId, milestoneId: id }).catch(e => logDbError('db.milestone.save', e));
       } else {
         pendingMilestoneWrites.current.push({ kidName: name, milestoneId: id });
       }
@@ -10905,7 +10912,7 @@ function AppInner() {
     for (const w of pendingMilestoneWrites.current) {
       const kidDbId = setupChildren.find(c => c.name === w.kidName)?.id;
       if (kidDbId) {
-        saveMilestoneToDb({ kidId: kidDbId, milestoneId: w.milestoneId }).catch(e => console.warn('[DB] saveMilestoneToDb (retry) error:', e));
+        saveMilestoneToDb({ kidId: kidDbId, milestoneId: w.milestoneId }).catch(e => logDbError('db.milestone.save.retry', e));
       } else {
         stillPending.push(w);
       }
@@ -10929,11 +10936,11 @@ function AppInner() {
       // bossName is fixed game content (from BOSSES), not kid PII — safe to log.
       log('boss.capture', { kidId: kidDbId, bossName: w.bossName, xpEarned: w.xpEarned, coinsEarned: w.coinsEarned, completionPct: w.completionPct });
       saveBossCaptureToDb({ kidId: kidDbId, bossName: w.bossName, xpEarned: w.xpEarned, coinsEarned: w.coinsEarned, completionPct: w.completionPct })
-        .catch(e => console.warn('[DB] saveBossCaptureToDb error:', e));
+        .catch(e => logDbError('db.boss.save', e));
     } else {
       log('collectible.earn', { kidId: kidDbId, collectibleId: w.collectibleId, rarity: w.rarity });
       saveCollectibleToDb({ kidId: kidDbId, collectibleId: w.collectibleId, rarity: w.rarity })
-        .catch(e => console.warn('[DB] saveCollectibleToDb error:', e));
+        .catch(e => logDbError('db.collectible.save', e));
     }
   }, []);
 
@@ -11140,7 +11147,7 @@ function AppInner() {
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
       ensureChoreInDb(id).then(realId => {
-        if (realId) approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => console.warn('[DB] approveChoreCompletion error:', e));
+        if (realId) approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => logDbError('db.chore.approve', e));
       });
     }
   }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, ensureChoreInDb]);
@@ -11208,7 +11215,7 @@ function AppInner() {
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
       ensureChoreInDb(id).then(realId => {
-        if (realId) rejectChoreCompletion({ choreId: realId, kidId: kidDbId, rejectionNote: note }).catch(e => console.warn('[DB] rejectChoreCompletion error:', e));
+        if (realId) rejectChoreCompletion({ choreId: realId, kidId: kidDbId, rejectionNote: note }).catch(e => logDbError('db.chore.reject', e));
       });
     }
   }, [managedChores, setupChildren, ensureChoreInDb, checkMilestone]);
@@ -11247,7 +11254,7 @@ function AppInner() {
     const kidDbId = getKidDbId(kidName);
     log('payout.confirm', { kidId: kidDbId, amountCents: amount, completedCount, weeks: weeks.length, battleBonus });
     if (kidDbId) {
-      savePayoutToDb({ kidId: kidDbId, kidName, amountCents: amount }).catch(e => console.warn('[DB] savePayoutToDb error:', e));
+      savePayoutToDb({ kidId: kidDbId, kidName, amountCents: amount }).catch(e => logDbError('db.payout.save', e));
     }
   }, [kidCoins, resetKidCoins, choreHistory, payoutLog, managedChores, setupChildren, checkMilestone]);
 
@@ -11264,6 +11271,7 @@ function AppInner() {
 
     const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number, completionPctOverride?: number, bossOverride?: Boss, remainingBossHp?: number) => {
     const boss = bossOverride ?? activeKidBoss;
+    log('battle.end', { result, kidId: getKidDbId(currentKidName), shardsUsed, bossName: boss?.name });
     let coinsEarned = 0;
     if (result === 'captured' && battleCoinBonusEnabled) {
       coinsEarned = Math.round(baseRateCents(baseRate) * battleCoinBonusMultiplier);
@@ -11393,7 +11401,7 @@ function AppInner() {
     setScreen('chestReveal');
   }, [monsterIdx, activeKidBoss, householdBoss, householdIdentity, householdKidNames, householdTier, battleCoinBonusEnabled, battleCoinBonusMultiplier, baseRate, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone]);
 
-  const startBattle = useCallback(() => { setScreen('boss-intro'); }, []);
+  const startBattle = useCallback(() => { log('battle.start', { kidId: getKidDbId(currentKidName) }); setScreen('boss-intro'); }, [currentKidName]);
 
   const navTab = useCallback((t: Tab) => { setTab(t); setScreen(t); }, []);
   // Include 'trophyRoom' (the standalone trophy room opened from Wallet) so it keeps
@@ -11490,15 +11498,15 @@ function AppInner() {
     if (chore.id.startsWith('_')) {
       addChore(fields).then(row => {
         if (row?.id) setManagedChores(prev => prev.map(c => c.id === chore.id ? { ...c, id: row.id } : c));
-      }).catch(e => console.warn('[DB] addChore error:', e));
+      }).catch(e => logDbError('db.chore.add', e));
     } else {
-      updateChoreDb(chore.id, fields).catch(e => console.warn('[DB] updateChore error:', e));
+      updateChoreDb(chore.id, fields).catch(e => logDbError('db.chore.update', e));
     }
   };
   const deleteChore = (id: string) => {
     setManagedChores(prev => prev.filter(c => c.id !== id));
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
-    if (!id.startsWith('_')) deleteChoreDb(id).catch(e => console.warn('[DB] deleteChore error:', e));
+    if (!id.startsWith('_')) deleteChoreDb(id).catch(e => logDbError('db.chore.delete', e));
   };
 
   const addGoal = useCallback((data: GoalData) => {
@@ -11545,6 +11553,8 @@ function AppInner() {
   }, []);
 
   const handleSignOut = useCallback(async () => {
+    log('auth.signout', {});
+    flushNow('auth.signout');   // ship the session's buffer before we clear identity
     await supabase.auth.signOut();
     try {
       const allKeys = await AsyncStorage.getAllKeys();
