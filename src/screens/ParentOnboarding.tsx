@@ -22,6 +22,8 @@ export interface OnboardingChild {
   ageRange: '5-6' | '7-9' | '10-12' | '13+';
   difficulty: 'Easy' | 'Medium' | 'Hard';
   selectedChoreIds: string[];
+  // Standing kid-device pairing code (kids.pairing_code); present after a DB load.
+  pairingCode?: string;
 }
 
 export interface ChoreMapEntry {
@@ -207,6 +209,14 @@ function difficultyAmounts(baseIdx: number) {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+// A random 8-digit standing pairing code, shown in onboarding (Step 5) and used
+// as the kid's kids.pairing_code on insert. The DB enforces uniqueness; a
+// collision (astronomically unlikely at 90M codes) falls back to the DB
+// generator in saveOnboardingSetup, so onboarding never fails.
+function gen8(): string {
+  return String(Math.floor(10000000 + Math.random() * 90000000));
+}
+
 function makeChild(index: number): OnboardingChild {
   return {
     id: `child_${Date.now()}_${index}`,
@@ -216,6 +226,7 @@ function makeChild(index: number): OnboardingChild {
     ageRange: '7-9',
     difficulty: 'Medium',
     selectedChoreIds: CHORES_BY_AGE['7-9'].slice(0, 4).map(c => c.id),
+    pairingCode: gen8(),
   };
 }
 
@@ -1003,10 +1014,10 @@ function Step5AllSet({
 }
 
 // ─── Step 5: Pairing codes ─────────────────────────────────────────────────
-// MON-85 two-device model. PHASE 1: codes are display-only placeholders minted
-// client-side. Real per-device pairing (a parent-session-minted, time-limited,
-// single-use code that authenticates a kid device + RLS scoping) is a Phase-2
-// backend ticket — see MON-54 / MON-63.
+// MON-85 Phase 2: each kid has one standing 8-digit code (child.pairingCode,
+// generated in makeChild and stored as kids.pairing_code on insert). The kid
+// types it on their own device to sign into this account, locked to their
+// profile. Reusable — no expiry.
 
 function StepPairingCodes({
   children, onNext, onBack,
@@ -1015,11 +1026,8 @@ function StepPairingCodes({
   onNext: () => void;
   onBack: () => void;
 }) {
-  // One placeholder code per kid, stable for the life of this screen.
-  const codes = useMemo(
-    () => children.map(() => String(Math.floor(100000 + Math.random() * 900000))),
-    [children.length],
-  );
+  // Group the 8 digits 4-4 for readability, e.g. 4829 1057.
+  const fmt = (code?: string) => (code && code.length === 8 ? `${code.slice(0, 4)} ${code.slice(4)}` : code ?? '— — — —');
 
   return (
     <DotGridBg>
@@ -1028,7 +1036,7 @@ function StepPairingCodes({
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
           <View style={{ paddingHorizontal: 8 }}>
-            <Helper text="Each kid opens Monstir on their device and enters their code to join. You can also just hand them yours." />
+            <Helper text="Each kid opens Monstir on their own device, taps “I’m a kid,” and enters their code to sign in. You can change a code later in Settings → Kids." />
             <Text style={[s.heading, { marginBottom: 4 }]}>Connect your kids</Text>
           </View>
           {children.map((child, i) => (
@@ -1037,10 +1045,10 @@ function StepPairingCodes({
                 <Text style={s.pairKidName}>{child.name || `Kid ${i + 1}`}</Text>
                 <Text style={s.pairHint}>Enter on their device</Text>
               </View>
-              <Text style={s.pairCode}>{codes[i]}</Text>
+              <Text style={s.pairCode}>{fmt(child.pairingCode)}</Text>
             </View>
           ))}
-          <Text style={s.pairExpires}>⏱ Codes expire in 14:57</Text>
+          <Text style={s.pairExpires}>🔒 Each code is unique and reusable — keep them private.</Text>
           <TouchableOpacity onPress={onNext} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 6 }}>
             <Text style={s.pairLink}>I'll connect their devices later</Text>
           </TouchableOpacity>
@@ -1119,7 +1127,8 @@ export function ParentOnboarding({ onComplete }: Props) {
         if (!raw) return;
         try {
           const draft = JSON.parse(raw) as { step: number; children: OnboardingChild[]; rewardType: string; parentRole?: string; sharedChoreIds?: string[]; customChores?: SuggestedChore[] };
-          if (draft.children?.length) setChildren(draft.children);
+          // Backfill standing pairing codes for drafts saved before they existed.
+          if (draft.children?.length) setChildren(draft.children.map(c => c.pairingCode ? c : { ...c, pairingCode: gen8() }));
           if (draft.rewardType)       setRewardType(draft.rewardType);
           if (draft.parentRole)       setParentRole(draft.parentRole);
           if (draft.sharedChoreIds)   setSharedChoreIds(draft.sharedChoreIds);
