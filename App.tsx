@@ -73,7 +73,7 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode } from './src/lib/db';
 import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
 
@@ -7680,7 +7680,7 @@ function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   );
 }
 
-function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBattleCoinBonusEnabled, battleCoinBonusMultiplier, setBattleCoinBonusMultiplier, onAddKid, onEditKid, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles, sessionUser, parentRole, pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName, onSignOut }: {
+function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBattleCoinBonusEnabled, battleCoinBonusMultiplier, setBattleCoinBonusMultiplier, onAddKid, onEditKid, onRotateCode, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles, sessionUser, parentRole, pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName, onSignOut }: {
   onNav: (s: ParentScreen) => void;
   baseRate: string;
   battleCoinBonusEnabled: boolean;
@@ -7689,10 +7689,11 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
   setBattleCoinBonusMultiplier: (v: number) => void;
   onAddKid?: () => void;
   onEditKid?: (k: { name: string; avatarColor: string; avatarIdx: number }) => void;
+  onRotateCode?: (kidName: string) => Promise<string | null>;
   kids: string[];
   kidApprovalSettings: Record<string, boolean>;
   setKidApprovalSettings: (v: Record<string, boolean>) => void;
-  kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
+  kidProfiles: { name: string; avatarColor: string; avatarIdx: number; pairingCode?: string }[];
   sessionUser?: SessionUser | null;
   parentRole?: string;
   pinEnabled: boolean;
@@ -7705,7 +7706,7 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
   const [sub, setSub] = useState<SettingsSubScreen>('main');
   const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
-  if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} kidProfiles={kidProfiles} />;
+  if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} onRotateCode={onRotateCode} kidProfiles={kidProfiles} />;
   if (sub === 'battle')   return <SettingsBattleScreen   onBack={() => setSub('main')} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} />;
   if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} onSignOut={onSignOut} />;
   if (sub === 'approval') return <SettingsApprovalScreen onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={kidProfiles} />;
@@ -8094,7 +8095,23 @@ function AddEditKidModal({
   );
 }
 
-function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBack: () => void; onAddKid?: () => void; onEditKid?: (k: { name: string; avatarColor: string; avatarIdx: number }) => void; kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[] }) {
+function SettingsKidsScreen({ onBack, onAddKid, onEditKid, onRotateCode, kidProfiles }: { onBack: () => void; onAddKid?: () => void; onEditKid?: (k: { name: string; avatarColor: string; avatarIdx: number }) => void; onRotateCode?: (kidName: string) => Promise<string | null>; kidProfiles: { name: string; avatarColor: string; avatarIdx: number; pairingCode?: string }[] }) {
+  // Pair-a-device flow (MON-85 Phase 2): each kid has a standing 8-digit code the
+  // child types on their own device to sign into this account, locked to their
+  // profile. `pairing` holds the kid name; the live code is read from kidProfiles
+  // so it refreshes after a rotate.
+  const [pairing, setPairing]   = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotErr, setRotErr]     = useState('');
+  const pairingCode = pairing ? kidProfiles.find(k => k.name === pairing)?.pairingCode : undefined;
+  const rotate = async (name: string) => {
+    setRotating(true); setRotErr('');
+    try {
+      const code = await onRotateCode?.(name);
+      if (!code) setRotErr('Could not refresh the code. Please try again.');
+    } catch { setRotErr('Could not refresh the code. Please try again.'); }
+    setRotating(false);
+  };
   return (
     <CreamBg>
       <View style={p.screenHeader}>
@@ -8133,6 +8150,16 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBa
                   <View style={{ flex: 1 }}>
                     <Text style={ps.rowTitle}>{k.name}</Text>
                   </View>
+                  {onRotateCode && (
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EAE4FF', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 }}
+                      activeOpacity={0.7}
+                      onPress={() => { setRotErr(''); setPairing(k.name); }}
+                    >
+                      <Text style={{ fontSize: scale(13) }}>🔗</Text>
+                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(13), color: '#6B35F0' }}>Pair device</Text>
+                    </TouchableOpacity>
+                  )}
                   <Text style={ps.chevron}>›</Text>
                 </TouchableOpacity>
               </View>
@@ -8145,6 +8172,41 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, kidProfiles }: { onBa
           )}
         </ScrollView>
       )}
+
+      <Modal visible={pairing !== null} transparent animationType="fade" onRequestClose={() => setPairing(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+          <View style={{ width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 24, padding: 24, alignItems: 'center', gap: 6 }}>
+            <Text style={{ fontSize: scale(40) }}>🔗</Text>
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(20), color: '#1A1A1A', textAlign: 'center' }}>{pairing}'s pairing code</Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(14), color: '#767676', textAlign: 'center', lineHeight: 20, marginTop: 4 }}>
+              On {pairing}'s device, tap “I’m a kid” and enter this code:
+            </Text>
+            {/* Grouped 4-4 for readability, e.g. 4829 1057 */}
+            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(38), letterSpacing: 6, color: '#1A1A1A', marginVertical: 10 }}>
+              {pairingCode ? `${pairingCode.slice(0, 4)} ${pairingCode.slice(4)}` : '— — — —'}
+            </Text>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(13), color: '#767676', textAlign: 'center' }}>
+              Reusable — works on any device, anytime.
+            </Text>
+            {!!rotErr && <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(13), color: '#E53935', textAlign: 'center', marginTop: 6 }}>{rotErr}</Text>}
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, opacity: rotating ? 0.5 : 1 }}
+              activeOpacity={0.7}
+              disabled={rotating}
+              onPress={() => pairing && rotate(pairing)}
+            >
+              {rotating ? <ActivityIndicator color="#6B35F0" /> : <Text style={{ fontSize: scale(14) }}>🔄</Text>}
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(14), color: '#6B35F0' }}>Generate a new code</Text>
+            </TouchableOpacity>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(11), color: '#A0A0A0', textAlign: 'center', marginTop: 4 }}>
+              Replaces the old code — only do this if it was shared by mistake.
+            </Text>
+            <View style={{ width: '100%', marginTop: 16 }}>
+              <Button label="Done" onPress={() => setPairing(null)} />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </CreamBg>
   );
 }
@@ -9229,20 +9291,36 @@ function RoleSelectScreen({ onParent, onKid }: { onParent: () => void; onKid: ()
 }
 
 // ─── Kid device pairing (MON-85) ─────────────────────────────────────────────
-// PHASE 1 SCAFFOLD ONLY: code entry is not validated against any backend (kid
-// devices aren't authenticated clients yet). Submitting previews the kid setup
-// (monster carousel → name). Real code minting/validation + kid-device auth +
-// RLS is the Phase-2 backend ticket.
-function KidPairingScreen({ onSubmit, onBack }: { onSubmit: (code: string) => void; onBack: () => void }) {
+// PHASE 1, HONEST STUB: kid-device sign-in isn't built. There's no backend to
+// mint/validate codes and kid devices aren't authenticated clients, so entering
+// a full code refuses with an explanatory message rather than faking onboarding
+// over the existing kid account the parent already set up. Real code
+// minting/validation + kid-device auth + RLS is the Phase-2 backend ticket.
+// onSubmit redeems the code: resolves to null on success (the call site swaps the
+// app into the kid's view), or an error message to show inline on failure.
+function KidPairingScreen({ onSubmit, onBack }: { onSubmit: (code: string) => Promise<string | null>; onBack: () => void }) {
   const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy]   = useState(false);
   const press = (d: string) => {
-    if (code.length >= 6) return;
+    if (busy || code.length >= 8) return;
     const next = code + d;
     setCode(next);
-    // Auto-advance into the preview once 6 digits are in (prototype behavior).
-    if (next.length === 6) setTimeout(() => onSubmit(next), 260);
+    setError('');
+    // Auto-submit once all 8 digits are in. Redeeming swaps the device into the
+    // kid's existing account (MON-85 Phase 2); on failure we surface the reason
+    // and clear the cells to retry.
+    if (next.length === 8) {
+      setBusy(true);
+      setTimeout(async () => {
+        const err = await onSubmit(next);
+        if (err) { setError(err); setCode(''); setBusy(false); }
+        // On success the call site changes appMode, unmounting this screen — keep
+        // busy=true so the keypad stays inert during the brief handoff.
+      }, 260);
+    }
   };
-  const del = () => setCode(c => c.slice(0, -1));
+  const del = () => { if (busy) return; setCode(c => c.slice(0, -1)); setError(''); };
   return (
     <DotGridBg>
       <SafeAreaView style={obf.safe}>
@@ -9255,11 +9333,19 @@ function KidPairingScreen({ onSubmit, onBack }: { onSubmit: (code: string) => vo
           </View>
           <Text style={{ textAlign: 'center', fontSize: scale(44), marginTop: 8 }}>🔗</Text>
           <Text style={[obText.titleSm, { textAlign: 'center', marginTop: 4 }]}>Enter your{'\n'}pairing code</Text>
-          <Text style={[obText.sub, { textAlign: 'center', marginTop: 8 }]}>Ask a parent for the 6-digit code from their app.</Text>
-          <CodeCells code={code} />
+          <Text style={[obText.sub, { textAlign: 'center', marginTop: 8 }]}>Ask a parent for your 8-digit code from their app.</Text>
+          <CodeCells code={code} length={8} />
+          {busy ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12 }}>
+              <ActivityIndicator color={obc.ink} />
+              <Text style={{ fontSize: scale(12), color: obc.muted, fontFamily: 'Inter_600SemiBold' }}>Pairing…</Text>
+            </View>
+          ) : !!error && (
+            <Text style={{ fontSize: scale(12), color: '#E53935', textAlign: 'center', fontFamily: 'Inter_600SemiBold', marginTop: 12, paddingHorizontal: 24 }}>{error}</Text>
+          )}
           <View style={{ flex: 1 }} />
           <Keypad onKey={press} onDelete={del} />
-          <Text style={rs.note}>Pairing isn't connected yet. This previews your Monstir setup.</Text>
+          <Text style={rs.note}>A parent can get your code in Settings → Kids → Pair a device.</Text>
         </ScreenEnter>
       </SafeAreaView>
     </DotGridBg>
@@ -10169,11 +10255,6 @@ function AppInner() {
   const [pendingAuthName, setPendingAuthName]   = useState('');
   const [checkEmailMode, setCheckEmailMode]     = useState<'confirm' | 'reset'>('confirm');
   const [kidWelcomeName, setKidWelcomeName] = useState('there');
-  // MON-85 Phase 1: when KidWelcome is reached via the (stubbed) device-pairing
-  // flow rather than the on-device profile switcher, it's a preview — completing
-  // it returns to the role selector instead of writing a kid profile / entering
-  // the app (no authenticated kid device exists yet).
-  const [kidWelcomePreview, setKidWelcomePreview] = useState(false);
   const [kidMonsterState, setKidMonsterState] = useState<Record<string, KidMonsterState>>({});
   const getKidMonster = (name: string): KidMonsterState => kidMonsterState[name] ?? { ...DEFAULT_KID_MONSTER_STATE };
   const setKidMonster = (name: string, updater: (prev: KidMonsterState) => KidMonsterState) =>
@@ -10245,6 +10326,10 @@ function AppInner() {
   const [setupChildren, setSetupChildren]     = useState<import('./src/screens/ParentOnboarding').OnboardingChild[]>([]);
   const [kids, setKids]                       = useState<string[]>([]);
   const [currentKidName, setCurrentKidName]   = useState('');
+  // MON-85 Phase 2: when set, this is a kid-paired device ("device acts as the
+  // household") locked into one kid's view. Persisted in AsyncStorage so the lock
+  // survives restarts; hydrated in the startup bootstrap before data loads.
+  const [pairedKidName, setPairedKidName]     = useState<string | null>(null);
   const [kidOnboardingDone, setKidOnboardingDone] = useState<Record<string, boolean>>({});
   // Kid-welcome writes (monster choice + onboarding flag) that fired before the
   // kid's real Supabase UUID was available are queued here by name, then flushed
@@ -10339,7 +10424,9 @@ function AppInner() {
       setKidApprovalSettings(prev => ({ ...prev, [data.name]: true }));
       showParentToast(`${data.name} added! 🎉`);
       addKid({ name: data.name, avatar_idx: data.avatarIdx, avatar_color: data.avatarColor, age_range: data.ageRange })
-        .then(row => { if (row?.id) setSetupChildren(prev => prev.map(c => c.id === newChild.id ? { ...c, id: row.id } : c)); })
+        // Capture the DB-assigned standing pairing code (kids.pairing_code default)
+        // so the Pair-device modal shows it without waiting for an app reload.
+        .then(row => { if (row?.id) setSetupChildren(prev => prev.map(c => c.id === newChild.id ? { ...c, id: row.id, pairingCode: (row as { pairing_code?: string }).pairing_code ?? c.pairingCode } : c)); })
         .catch(e => logDbError('db.kid.add', e));
     }
   };
@@ -10386,7 +10473,12 @@ function AppInner() {
   }>>({});
 
   // ── Load all user data from Supabase after login or on startup ─────────────
-  const loadUserDataFromSupabase = useCallback(async () => {
+  const loadUserDataFromSupabase = useCallback(async (opts?: { pairedKid?: string | null }) => {
+    // MON-85 Phase 2: a kid-paired device shares the parent session but must enter
+    // locked into one kid's view instead of the parent shell. The paired kid is
+    // passed in explicitly (not read from state) because this callback has empty
+    // deps, and the per-account cache guard below may clear the AsyncStorage key.
+    const pairedKid = opts?.pairedKid ?? null;
     try {
         const { data: { session } } = await supabase.auth.getSession();
         console.log('[bootstrap] session:', session?.user?.email ?? 'none');
@@ -10502,7 +10594,7 @@ function AppInner() {
           const names = dbKids.map((k: { name: string }) => k.name);
           setKids(names);
           setCurrentKidName(names[0]);
-          setSetupChildren(dbKids.map((k: { id: string; name: string; avatar_color: string; avatar_idx: number; age_range: string }) => ({
+          setSetupChildren(dbKids.map((k: { id: string; name: string; avatar_color: string; avatar_idx: number; age_range: string; pairing_code?: string | null }) => ({
             id:               k.id,
             name:             k.name,
             avatarColor:      k.avatar_color ?? '#EAE4FF',
@@ -10510,6 +10602,7 @@ function AppInner() {
             ageRange:         (k.age_range ?? '7-9') as '5-6' | '7-9' | '10-12' | '13+',
             difficulty:       'Easy' as const,
             selectedChoreIds: [],
+            pairingCode:      k.pairing_code ?? undefined,
           })));
           // Granular local setting wins; the DB boolean only seeds kids with no
           // local entry (e.g. fresh install on a new device).
@@ -10602,9 +10695,16 @@ function AppInner() {
                   status:             loc.status ?? db.status,
                 };
               });
-              setManagedChores(merged);
-              if (migrated) {
-                saveAppState({ chores_state_json: JSON.stringify(merged) })
+              // Local-only chores (created while offline, or whose addChore insert
+              // never landed) live in the saved board but not in `mapped`. `merged`
+              // iterates DB chores only, so without re-appending these they silently
+              // vanish on reload — a parent's chore disappearing after a restart.
+              // ensureChoreInDb upgrades their '_' ids lazily on next completion.
+              const localOnly = local.filter(l => !mapped.some(db => db.id === l.id || db.name === l.name));
+              const full = [...merged, ...localOnly];
+              setManagedChores(full);
+              if (migrated || localOnly.length > 0) {
+                saveAppState({ chores_state_json: JSON.stringify(full) })
                   .catch(e => console.warn('[DB] migrate chore IDs error:', e));
               }
             } catch { setManagedChores(mapped); }
@@ -10698,6 +10798,32 @@ function AppInner() {
         }
 
         setAppDataLoaded(true);
+
+        // MON-85 Phase 2: paired kid device → enter locked into that kid's view
+        // (their REAL account: monster, chores, wallet), NOT the parent shell and
+        // NOT onboarding. Match the paired name against the loaded kids; if the
+        // kid was removed parent-side, the lock is stale → clear it and fall back
+        // to the normal parent flow below.
+        const pairedRow = pairedKid
+          ? (dbKids as { name: string; kid_onboarding_done: boolean }[]).find(k => k.name === pairedKid)
+          : undefined;
+        if (pairedKid && pairedRow) {
+          // Re-assert the lock (the cache guard above may have cleared the key).
+          AsyncStorage.setItem('monstir:pairedKid', JSON.stringify({ name: pairedKid })).catch(() => {});
+          setPairedKidName(pairedKid);
+          setCurrentKidName(pairedKid);
+          setKidWelcomeName(pairedKid);
+          setViewMode('kid');
+          log('auth.bootstrap.ok.paired', { kid: pairedKid, onboarded: pairedRow.kid_onboarding_done });
+          // First-ever sign-in for this kid still needs the monster picker.
+          setAppMode(pairedRow.kid_onboarding_done ? 'app' : 'kidWelcome');
+          return true;
+        }
+        if (pairedKid && !pairedRow) {
+          AsyncStorage.removeItem('monstir:pairedKid').catch(() => {});
+          setPairedKidName(null);
+        }
+
         setViewMode('parent');
         // A freshly created account (social sign-in or an email signup that never
         // finished onboarding) has no kids yet — send them through parent
@@ -10728,9 +10854,17 @@ function AppInner() {
       // Hydrate the week-reset marker before appDataLoaded flips on, so the weekly
       // reset effect can tell "already reset this week" from "new week began".
       try { const lwr = await AsyncStorage.getItem('monstir:lastWeekReset'); if (lwr) setLastWeekReset(lwr); } catch {}
+      // MON-85 Phase 2: read the kid-paired lock before loading so a paired device
+      // enters its kid's view rather than the parent shell. Captured here (not via
+      // state) since the load's cache guard may clear the key mid-flight.
+      let pairedKid: string | null = null;
+      try {
+        const raw = await AsyncStorage.getItem('monstir:pairedKid');
+        if (raw) { const v = JSON.parse(raw) as { name?: string }; pairedKid = v?.name ?? null; if (pairedKid) setPairedKidName(pairedKid); }
+      } catch {}
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        await loadUserDataFromSupabase();
+        await loadUserDataFromSupabase({ pairedKid });
       } else {
         const [choreSaved, historySaved, approvalDaysSaved, goalsByKidSaved, goalsSaved] = await Promise.all([
           AsyncStorage.getItem('monstir:managedChores'),
@@ -11980,6 +12114,14 @@ function AppInner() {
 
   // Avatar index for the currently active kid (0 = fallback)
   const currentKidAvatarIdx = setupChildren.find(c => c.name === currentKidName)?.avatarIdx ?? 0;
+  // Profiles shown in the kid-facing profile switcher. On a kid-paired device the
+  // switcher is locked to that one kid so the device can't hop to siblings; on a
+  // shared device it lists every kid (MON-85 Phase 2). Parent screens keep using
+  // the full setupChildren list.
+  const kidSwitcherProfiles = (pairedKidName
+    ? setupChildren.filter(c => c.name === pairedKidName)
+    : setupChildren
+  ).map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }));
   // Cash bonus paid on a boss win: a fraction of the base chore rate (in coins =
   // cents). 0 when the bonus is disabled. Shown as the battle "coins" stake.
   const battleBonusCoins = battleCoinBonusEnabled ? Math.round(baseRateCents(baseRate) * battleCoinBonusMultiplier) : 0;
@@ -11991,6 +12133,22 @@ function AppInner() {
   const getKidDbId = (name: string): string | null => {
     const id = setupChildren.find(c => c.name === name)?.id;
     return id && isUUID(id) ? id : null;
+  };
+
+  // Rotate a kid's standing pairing code (MON-85 Phase 2). Needs the kid's real
+  // Supabase UUID — bail if it hasn't resolved yet (temp local id). Updates local
+  // state so the Settings modal reflects the new code immediately.
+  const handleRotateCode = async (kidName: string): Promise<string | null> => {
+    const kidId = getKidDbId(kidName);
+    if (!kidId) return null;
+    try {
+      const code = await rotatePairingCode(kidId);
+      if (code) setSetupChildren(prev => prev.map(c => c.name === kidName ? { ...c, pairingCode: code } : c));
+      return code;
+    } catch (e) {
+      console.warn('[DB] rotatePairingCode error:', e);
+      return null;
+    }
   };
 
   // Switch the active kid — shows KidWelcome the first time, otherwise goes straight to kid view
@@ -12041,11 +12199,23 @@ function AppInner() {
         <StatusBar barStyle="dark-content" />
         <KidPairingScreen
           onBack={() => setAppMode('roleSelect')}
-          onSubmit={() => {
-            // Phase 1 scaffold: no backend validation — preview the kid setup.
-            setKidWelcomeName('there');
-            setKidWelcomePreview(true);
-            setAppMode('kidWelcome');
+          onSubmit={async (code) => {
+            // Redeem → assume the parent session on this device, persist the kid
+            // lock, then hydrate into that kid's existing view (MON-85 Phase 2).
+            try {
+              const { kidName } = await redeemPairingCode(code);
+              await AsyncStorage.setItem('monstir:pairedKid', JSON.stringify({ name: kidName }));
+              setPairedKidName(kidName);
+              await loadUserDataFromSupabase({ pairedKid: kidName });
+              return null;
+            } catch (e) {
+              const reason = e instanceof Error ? e.message : '';
+              if (reason === 'invalid_or_expired' || reason === 'invalid_code')
+                return 'That code is invalid or expired. Ask a parent for a new one.';
+              if (reason === 'session_failed')
+                return "Couldn't sign in with that code. Please try again.";
+              return 'Pairing failed. Check the code and try again.';
+            }
           }}
         />
       </SafeAreaProvider>
@@ -12186,9 +12356,10 @@ function AppInner() {
               const choreIdToName = Object.fromEntries(
                 Object.entries(setup.choreMap).map(([id, e]) => [id, { name: e.name, icon: id, difficulty: e.difficulty, frequency: e.frequency ?? 'Every day', completionMode: e.completionMode }])
               );
-              const { kidIdMap, choreNameToId } = await saveOnboardingSetup(setup, choreIdToName);
-              // Replace temporary local kid IDs with real Supabase UUIDs
-              setSetupChildren(prev => prev.map(c => kidIdMap[c.name] ? { ...c, id: kidIdMap[c.name] } : c));
+              const { kidIdMap, kidCodeMap, choreNameToId } = await saveOnboardingSetup(setup, choreIdToName);
+              // Replace temporary local kid IDs with real Supabase UUIDs, and carry
+              // the DB-assigned standing pairing code so it's visible right away.
+              setSetupChildren(prev => prev.map(c => kidIdMap[c.name] ? { ...c, id: kidIdMap[c.name], pairingCode: kidCodeMap[c.name] ?? c.pairingCode } : c));
               // Replace _-prefixed local chore IDs with real Supabase UUIDs so kids
               // can submit completions immediately without hitting a UUID format error
               if (Object.keys(choreNameToId).length > 0) {
@@ -12211,13 +12382,6 @@ function AppInner() {
             dbg={kwDbg}
             childName={kidWelcomeName}
             onComplete={(monsterId, monsterName) => {
-              // Phase 1: reached via the stubbed pairing flow → preview only, no
-              // profile write / app entry (no authenticated kid device yet).
-              if (kidWelcomePreview) {
-                setKidWelcomePreview(false);
-                setAppMode('roleSelect');
-                return;
-              }
               const validId: MonsterId = (monsterId === 'slime' || monsterId === 'robot' || monsterId === 'flamer') ? monsterId : 'slime';
               setKidMonster(currentKidName, s => ({
                 ...s,
@@ -12275,8 +12439,8 @@ function AppInner() {
                   setKidMonster(currentKidName, s => ({ ...s, selectedMonsterName: name }));
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
-                }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
-            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} bossHpPct={householdHpPct} totalFighters={householdKidNames.length} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
+                }} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
+            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} bossHpPct={householdHpPct} totalFighters={householdKidNames.length} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : activeKidBoss} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} /></ErrorBoundary>
             </Modal>
@@ -12344,7 +12508,7 @@ function AppInner() {
                 />
               </ErrorBoundary>
             )}
-            {screen === 'wallet'   && <ErrorBoundary key={`wallet-${currentKidName}`}><WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={getKidCoins(currentKidName)} weeklyEarnedCents={computeKidLedger(currentKidName, getKidCoins(currentKidName), choreHistory, payoutLog, debugDayOffset).earnedThisWeekCents} weeklyHistory={getKidWeeklyHistory(currentKidName, choreHistory, payoutLog, debugDayOffset)} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={getKidGoals(currentKidName)} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={liveCurrentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={requestParentMode} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} onOpenTrophyRoom={() => { setTrophyInitialKey(undefined); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }}
+            {screen === 'wallet'   && <ErrorBoundary key={`wallet-${currentKidName}`}><WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={getKidCoins(currentKidName)} weeklyEarnedCents={computeKidLedger(currentKidName, getKidCoins(currentKidName), choreHistory, payoutLog, debugDayOffset).earnedThisWeekCents} weeklyHistory={getKidWeeklyHistory(currentKidName, choreHistory, payoutLog, debugDayOffset)} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={getKidGoals(currentKidName)} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={liveCurrentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={requestParentMode} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} onOpenTrophyRoom={() => { setTrophyInitialKey(undefined); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }}
                 onOpenRelicDetail={(key) => { setTrophyInitialKey(key); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }} parentRole={parentRole} /></ErrorBoundary>}
             {screen === 'trophies' && <ErrorBoundary key={`trophies-${currentKidName}`}><TrophyRoom monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} xp={xp} currentKidName={currentKidName} isTab header={
                 <View style={[s.homeHeader, { backgroundColor: 'transparent' }]}>
@@ -12408,7 +12572,7 @@ function AppInner() {
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
             {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
-            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} /></ErrorBoundary>}
+            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} onRotateCode={handleRotateCode} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx, pairingCode: c.pairingCode }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'kidMilestones' && <ErrorBoundary key="kidMilestones"><ParentKidMilestonesScreen kidProfiles={setupChildren.map(c => ({ name: c.name, avatarIdx: c.avatarIdx }))} onBack={goBack} /></ErrorBoundary>}
             {parentScreen !== 'parentPayout' && (

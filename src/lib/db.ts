@@ -194,7 +194,7 @@ export async function deleteChore(choreId: string) {
 export async function saveOnboardingSetup(
   setup: ParentSetupResult,
   choreCatalogue: Record<string, { name: string; icon: string; difficulty: string; frequency?: string; completionMode?: 'shared' | 'independent' }>,
-): Promise<{ kidIdMap: Record<string, string>; choreNameToId: Record<string, string> }> {
+): Promise<{ kidIdMap: Record<string, string>; kidCodeMap: Record<string, string>; choreNameToId: Record<string, string> }> {
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Not logged in');
 
@@ -202,23 +202,31 @@ export async function saveOnboardingSetup(
   const { data: profileData, error: profileError } = await supabase.from('profiles').update({ parent_role: setup.parentRole }).eq('id', userId);
   console.log('[DB] saveOnboardingSetup profile data:', profileData, 'error:', profileError);
 
-  // 2. Insert kids and build name→id map
+  // 2. Insert kids and build name→id / name→standing-pairing-code maps. The
+  // pairing_code is assigned by the column default (gen_kid_pairing_code()); we
+  // capture it from the returned row so onboarding kids show a code immediately.
   const kidIdMap: Record<string, string> = {};
+  const kidCodeMap: Record<string, string> = {};
   for (const child of setup.children) {
-    const { data, error } = await supabase
-      .from('kids')
-      .insert({
-        parent_id:    userId,
-        name:         child.name,
-        avatar_color: child.avatarColor,
-        avatar_idx:   child.avatarIdx,
-        age_range:    child.ageRange,
-      })
-      .select()
-      .single();
+    const baseFields: Record<string, unknown> = {
+      parent_id:    userId,
+      name:         child.name,
+      avatar_color: child.avatarColor,
+      avatar_idx:   child.avatarIdx,
+      age_range:    child.ageRange,
+    };
+    // Insert the code shown to the parent in onboarding. On the (astronomically
+    // unlikely) unique-code collision, retry without it so the DB assigns a fresh
+    // unique one — onboarding never fails; the authoritative code comes back below.
+    const withCode = child.pairingCode ? { ...baseFields, pairing_code: child.pairingCode } : baseFields;
+    let { data, error } = await supabase.from('kids').insert(withCode).select().single();
+    if (error && (error as { code?: string }).code === '23505') {
+      ({ data, error } = await supabase.from('kids').insert(baseFields).select().single());
+    }
     console.log('[DB] saveOnboardingSetup insert kid', child.name, 'data:', data, 'error:', error);
     if (error) throw error;
     kidIdMap[child.name] = data.id;
+    if (data.pairing_code) kidCodeMap[child.name] = data.pairing_code;
   }
 
   // 3. MON-85: one shared chore set for the whole family. Each selected chore is
@@ -239,7 +247,7 @@ export async function saveOnboardingSetup(
     if (data?.id && data?.name) choreNameToId[data.name] = data.id;
   }
 
-  return { kidIdMap, choreNameToId };
+  return { kidIdMap, kidCodeMap, choreNameToId };
 }
 
 // ─── Chore Completions ─────────────────────────────────────────────────────
@@ -556,4 +564,36 @@ export async function updateKidStats(kidId: string, delta: {
   if (delta.monster_name !== undefined)    updates.monster_name = delta.monster_name;
   const { data, error } = await supabase.from('kids').update(updates).eq('id', kidId);
   console.log('[DB] updateKidStats data:', data, 'error:', error);
+}
+
+// ─── Kid-device pairing (MON-85 Phase 2) ─────────────────────────────────────
+
+// Each kid has a standing 8-digit code (kids.pairing_code, auto-assigned on
+// insert). It's reusable — the kid types it on their own device to sign in.
+// This rotates it to a fresh unique code (e.g. if it leaks); returns the new code.
+export async function rotatePairingCode(kidId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('rotate_kid_pairing_code', { kid: kidId });
+  if (error) throw error;
+  return (data as string | null) ?? null;
+}
+
+// Kid device redeems a code: the edge function validates it (service role) and
+// returns a magic-link token_hash for the PARENT account, which we verify to
+// assume the parent session on this device ("device acts as the household").
+// Returns the kid's name to lock the device into on success.
+export async function redeemPairingCode(code: string): Promise<{ kidName: string }> {
+  const { data, error } = await supabase.functions.invoke('redeem-pairing-code', { body: { code } });
+  if (error) {
+    // Surface the function's structured reason when present (e.g. invalid_or_expired).
+    let reason = '';
+    try { reason = (await (error as { context?: { json?: () => Promise<{ error?: string }> } }).context?.json?.())?.error ?? ''; } catch {}
+    throw new Error(reason || 'redeem_failed');
+  }
+  const { token_hash, kid_name } = (data ?? {}) as { token_hash?: string; kid_name?: string };
+  if (!token_hash || !kid_name) throw new Error('redeem_failed');
+
+  const { error: verifyErr } = await supabase.auth.verifyOtp({ token_hash, type: 'magiclink' });
+  if (verifyErr) throw new Error('session_failed');
+
+  return { kidName: kid_name };
 }
