@@ -7234,6 +7234,12 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
     setSaveError('');
     try {
       const chore: ManagedChore = {
+        // Spread the existing chore FIRST so every per-child field is carried over
+        // intact — especially the pending backlog and snapshotted pay
+        // (childPendingCount / childPendingCents / childPendingXp / childSubmittedAt).
+        // Listing fields explicitly used to silently drop those, wiping a kid's
+        // unreviewed work and the money owed for it whenever a parent edited a chore.
+        ...(existing ?? {}),
         id: existing?.id ?? '_' + randomUUID(),
         name: name.trim(),
         description,
@@ -7246,12 +7252,22 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         weeklyCompletions: existing?.weeklyCompletions ?? 0,
         // Mode only applies when 2+ kids are eligible; otherwise behaves as shared.
         completionMode: modeApplies ? completionMode : undefined,
-        // Preserve per-child progress when editing an existing chore.
-        childStatus:         existing?.childStatus,
-        childRejectionNote:  existing?.childRejectionNote,
-        childCompletions:    existing?.childCompletions,
-        childLastDoneDate:   existing?.childLastDoneDate,
       };
+      // ── Guard against a mid-week completion-mode flip bypassing the weekly cap ──
+      // The cap reads whichever counter is authoritative for the CURRENT mode
+      // (shared → weeklyCompletions, independent → per-kid childCompletions). When a
+      // parent flips a chore to 'shared' mid-week, weeklyCompletions may be 0 while
+      // kids already logged independent completions — leaving the shared chore
+      // re-claimable past target. Seed it from the most any single kid has done (a
+      // safe lower bound on real household completions) so the cap still holds. No
+      // pending pay is touched. The reverse flip (→ independent) reads each kid's own
+      // real childCompletions, so it can't be bypassed and needs no adjustment.
+      const wasIndependent = isIndependentChore(existing ?? chore);
+      const nowIndependent = isIndependentChore(chore);
+      if (existing && wasIndependent && !nowIndependent) {
+        const maxKidDone = Math.max(0, ...Object.values(existing.childCompletions ?? {}));
+        chore.weeklyCompletions = Math.max(chore.weeklyCompletions, maxKidDone);
+      }
       onSave(chore);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save chore. Please try again.');
@@ -10290,6 +10306,10 @@ function AppInner() {
         setPayoutLog(prev => prev.map(p => p.kidName === oldName ? { ...p, kidName: newName } : p));
         setManagedChores(prev => prev.map(c => ({
           ...c,
+          // assignedTo is a list of kid NAMES — re-key it too, or a chore assigned
+          // to this kid stops matching their board filter and silently vanishes
+          // (and choreEligibleKids keeps returning the dead name for shared chores).
+          assignedTo:         c.assignedTo.map(n => n === oldName ? newName : n),
           childStatus:        renameKey(c.childStatus),
           childCompletions:   renameKey(c.childCompletions),
           childRejectionNote: renameKey(c.childRejectionNote),
@@ -10572,6 +10592,12 @@ function AppInner() {
                   childSubmittedAt:   loc.childSubmittedAt,
                   childLastDoneDate:  loc.childLastDoneDate,
                   childPendingCount:  loc.childPendingCount,
+                  // Carry the snapshotted pay/XP for pending backlog too — without
+                  // these, a cold start kept the backlog COUNT but lost its pinned
+                  // amounts, so later approval silently paid the current rate instead
+                  // of the rate in effect when the kid actually did the work.
+                  childPendingCents:  loc.childPendingCents,
+                  childPendingXp:     loc.childPendingXp,
                   weeklyCompletions:  loc.weeklyCompletions ?? db.weeklyCompletions,
                   status:             loc.status ?? db.status,
                 };
@@ -12813,8 +12839,14 @@ function AppInner() {
                       <Text style={s.debugSectionLabel}>WEEKLY CHORE PROGRESS</Text>
                       {managedChores.map(c => {
                         const { target } = householdChoreTotals([c], setupChildren.map(k => k.name));
+                        // `done` is the raw count of approval rows in the history log for
+                        // this chore in the simulated week. Clean data can't exceed the
+                        // weekly cap, so the headline % is clamped to 100 to match real
+                        // gameplay — a chore is never "more than done". When the log holds
+                        // MORE rows than the cap allows (stale/legacy data), `over` flags
+                        // it and the raw N/target below stays visible so the anomaly shows.
                         const done   = doneInSimWeek(c);
-                        const pct    = Math.round((done / (target || 1)) * 100);
+                        const pct    = Math.min(100, Math.round((done / (target || 1)) * 100));
                         const over   = done > target;
                         return (
                           <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
