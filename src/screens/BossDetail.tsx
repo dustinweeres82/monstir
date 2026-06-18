@@ -75,6 +75,9 @@ export function BossDetail({ captures, initialIndex, relics, onBack }: BossDetai
   const threat      = capture.threat ?? 'Easy';
   const jarRarity   = THREAT_TO_RARITY[threat] ?? 'common';
   const artSrc      = boss?.jar ?? boss?.image;
+  // MON-82: show the boss's proper battle weakness (name + icon), not the stored
+  // counter-chore string. Looked up by boss name so it's correct for old captures too.
+  const weaknessText = boss?.battleWeakness ? `${boss.battleWeakness.icon}  ${boss.battleWeakness.name}` : capture.weakness;
   const footerText  = boss?.tagline ?? `Captured on ${dayStr}.`;
   const { relicName, relicImage, relicRarity } = relicForCapture(capture, relics);
 
@@ -131,7 +134,7 @@ export function BossDetail({ captures, initialIndex, relics, onBack }: BossDetai
 
         {/* Stats row 2 */}
         <View style={s.row}>
-          <StatCard label="Weakness" value={capture.weakness} valueColor={PURPLE} />
+          <StatCard label="Weakness" value={weaknessText} valueColor={PURPLE} />
           <StatCard label="Threat" value={stars} sublabel={`${threat} difficulty`} />
         </View>
 

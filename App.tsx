@@ -40,6 +40,7 @@ import { earnMilestone, getEarnedMilestones, mergeMilestones, PARENT_OWNER, type
 import { evalKidMilestones, evalParentMilestones } from './src/lib/milestoneEval';
 import { getMilestone, MILESTONES, KID_MILESTONES, type MilestoneDef } from './src/data/milestones';
 import { MilestoneToast } from './src/components/MilestoneToast';
+import { RewardModal, RewardModalStrong } from './src/components/WeaknessDiscoveryModal';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { ScreenHeading } from './src/design-system/components/ScreenHeading';
 import { Button } from './src/design-system/components/Button';
@@ -848,8 +849,11 @@ function computeFamilyLedger(
 }
 
 /** Ms remaining until next Sunday midnight. */
-function msUntilSunday(): number {
-  const now = new Date();
+function msUntilSunday(offsetDays = 0): number {
+  // Honor the debug day-offset so the live countdown matches the "Arriving in N
+  // days" label (which uses daysUntilSunday(offset)); otherwise day-scrubbing
+  // desyncs the two. Counts down to the upcoming Sunday 00:00 (battle day).
+  const now = new Date(Date.now() + offsetDays * 86_400_000);
   const target = new Date(now);
   const d = now.getDay();
   if (d !== 0) target.setDate(now.getDate() + (7 - d));
@@ -1909,10 +1913,11 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, nextMonsterImg, platformImg, platformAspect, baseRate, parentRole, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid, initialAvatarIdx, evolutionAutoOpen, onConsumeAutoOpen, onEvolveComplete }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, nextMonsterImg, platformImg, platformAspect, baseRate, parentRole, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid, initialAvatarIdx, evolutionAutoOpen, onConsumeAutoOpen, onEvolveComplete, debugDayOffset = 0 }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
   currentKidName: string;
+  debugDayOffset?: number;
   onSwitchToParent: () => void;
   onOpenDebug: () => void;
   dbgMonsterSize: number;
@@ -1949,9 +1954,18 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const allAssignedChores = managedChores.filter(c =>
     c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName)
   );
-  const allDailyDone = allAssignedChores.length > 0 && allAssignedChores.every(c => getChoreStatus(c, currentKidName) === 'approved');
-  // Only show non-approved chores in the list — approved ones are gone
-  const dailyChores  = allAssignedChores.filter(c => getChoreStatus(c, currentKidName) !== 'approved');
+  // A chore is "done for now" if it's approved OR it's locked by the once-per-day
+  // rule OR it's hit its weekly cap — in all three cases it isn't tappable, so it
+  // must read as done, not as a live to-do. Otherwise a board full of already-done
+  // chores shows open circles that silently do nothing when tapped.
+  const choreToday = getSimulatedToday(debugDayOffset);
+  const isDoneForNow = (c: ManagedChore) =>
+    getChoreStatus(c, currentKidName) === 'approved' ||
+    completedToday(c, currentKidName, choreToday) ||
+    getClaimedCount(c, currentKidName) >= frequencyToWeeklyTarget(c.frequency);
+  const allDailyDone = allAssignedChores.length > 0 && allAssignedChores.every(isDoneForNow);
+  // Only show not-yet-done chores in the list — done/locked/capped ones drop off.
+  const dailyChores  = allAssignedChores.filter(c => !isDoneForNow(c));
   const remaining    = dailyChores.filter(c => { const s = getChoreStatus(c, currentKidName); return s === 'active' || s === 'rejected'; }).length;
   const allSubmitted = !allDailyDone && dailyChores.length > 0 && dailyChores.every(c => getChoreStatus(c, currentKidName) === 'pending');
   const dollars    = (coins / 100).toFixed(2);
@@ -2342,12 +2356,12 @@ function ReadyToEvolvePill({ onPress }: { onPress: () => void }) {
 // ─── World Screen (formerly BattleScreen) ────────────────────────────────────
 // Mid-week: war room / countdown. Sunday: battle is live.
 
-function useCountdown() {
-  const [ms, setMs] = useState(msUntilSunday());
+function useCountdown(offsetDays = 0) {
+  const [ms, setMs] = useState(msUntilSunday(offsetDays));
   useEffect(() => {
-    const id = setInterval(() => setMs(msUntilSunday()), 1000);
+    const id = setInterval(() => setMs(msUntilSunday(offsetDays)), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [offsetDays]);
   return ms;
 }
 
@@ -2411,9 +2425,8 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   const winOdds     = calcWinOdds(chorePct);
   const power       = weeklyXp;
   const bossVideoPlayer = useVideoPlayer(boss.video, p => { p.loop = true; p.muted = true; p.play(); });
-  const countdownMs = useCountdown();
+  const countdownMs = useCountdown(debugDayOffset);
   const days         = daysUntilSunday(debugDayOffset);
-  const simDayOfWeek = new Date(Date.now() + debugDayOffset * 86_400_000).getDay(); // 0=Sun,6=Sat
   const isBattleDay  = days === 0;   // Sunday
   const isSaturday   = days === 1;   // Saturday — big reveal
   const isFriday     = days === 2;   // Friday — power check
@@ -2535,26 +2548,35 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
         {/* ── Boss Stats ── */}
         <Text style={w.sectionHeader}>Boss stats</Text>
         <View style={w.intelRow}>
-          {/* Weakness */}
-          <View style={[w.intelChip, { flex: 1, gap: 12 }]}>
-            <Text style={[w.sectionTitle, { letterSpacing: 0.8 }]}>WEAKNESS</Text>
-            {revealLevel < 2 ? (
+          {/* Weakness — "WEAK TO" card: locked (??? + unlock arrow) vs discovered
+              (weakness icon + name + Sunday-battle hint). */}
+          <View style={[w.intelChip, { flex: 1, gap: 10 }]}>
+            <Text style={w.weakToLabel}>WEAK TO</Text>
+            {/* MON-82: the weakness unlocks at the weekly chore threshold (75%),
+                not by day-of-week — keeps the "Do more chores to unlock" copy
+                honest and matches the battle's weaknessUnlocked gate. */}
+            {chorePct < WEAKNESS_THRESHOLD_PCT ? (
               <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Image source={require('./assets/icons/icon-starbox.png')} style={{ width: 48, height: 48 }} resizeMode="contain" />
-                  <Text style={[w.intelValue, { fontSize: scale(16) }]}>???</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={w.weakIconSquare}>
+                    <Image source={require('./assets/icons/icon-starbox.png')} style={{ width: scale(34), height: scale(34) }} resizeMode="contain" />
+                  </View>
+                  <Text style={w.weakQ}>???</Text>
                 </View>
-                <Text style={{ fontSize: scale(12), color: C.muted, fontFamily: 'Inter_600SemiBold' }}>Do more chores{'\n'}to unlock.</Text>
+                <Text style={w.weakSub}>Do more chores to unlock.</Text>
                 <View style={w.unlockArrow}>
-                  <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: 14, height: 14 }} resizeMode="contain" />
+                  <Text style={w.unlockArrowText}>›</Text>
                 </View>
               </>
             ) : (
               <>
-                <View style={w.weaknessPill}>
-                  <Image source={require('./assets/icons/icon-starbox.png')} style={{ width: scale(16), height: scale(16) }} resizeMode="contain" />
-                  <Text style={w.weaknessText}>{boss.counterChore}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={w.weakIconCircle}>
+                    <Text style={{ fontSize: scale(22) }}>{boss.weakness.icon}</Text>
+                  </View>
+                  <Text style={w.weakName} numberOfLines={1}>{boss.weakness.name}</Text>
                 </View>
+                <Text style={w.weakSub}>Use this in your Sunday battle for a special bonus!</Text>
               </>
             )}
           </View>
@@ -2630,33 +2652,6 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
             </View>
             <Text style={[w.forecastText, { flex: 1, textAlign: 'left' }]}>{powerForecastMsg}</Text>
           </View>
-        </View>
-
-        {/* 7-day dot row */}
-        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
-          {['M','T','W','T','F','S','S'].map((label, i) => {
-            // i=0 Mon … i=6 Sun
-            const jsDay = i === 6 ? 0 : i + 1; // convert to JS getDay()
-            const todayJs = simDayOfWeek;
-            const isPast = (jsDay !== 0 && todayJs !== 0 && jsDay < todayJs) ||
-                           (todayJs === 0 && jsDay !== 0); // Sun = all past
-            const isToday = jsDay === todayJs;
-            // filled if this day had at least one approval (Mon=1..Sat=6)
-            const dateForDay = new Date(Date.now() + debugDayOffset * 86_400_000);
-            const diff = jsDay === 0 ? (7 - dateForDay.getDay()) % 7 : jsDay - dateForDay.getDay();
-            dateForDay.setDate(dateForDay.getDate() + diff);
-            const filled = weekApprovalDays.includes(dateForDay.toDateString());
-            return (
-              <View key={i} style={{ alignItems: 'center', gap: 4 }}>
-                <View style={{
-                  width: 10, height: 10, borderRadius: 5,
-                  backgroundColor: filled ? '#C5F215' : isToday ? '#FFFFFF' : 'rgba(255,255,255,0.25)',
-                  borderWidth: isToday ? 2 : 0, borderColor: '#C5F215',
-                }} />
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: isToday ? '#C5F215' : 'rgba(255,255,255,0.5)' }}>{label}</Text>
-              </View>
-            );
-          })}
         </View>
 
         {/* Cooperative shared-HP meter (MON-84) — "wear him down together."
@@ -2940,21 +2935,45 @@ function calcPowerRating(pct: number, idx: number, streak: number): number {
 }
 
 const SHARD_CAP = 12; // max shards a player can bring into a battle
+// MON-19 Shard Economy: a flat, completely-random chance to drop one battle shard
+// each time a chore is completed (independent of difficulty/streak). Tunable;
+// TODO(MON-81) move to app_config.
+const SHARD_DROP_CHANCE = 0.18;
 
-function calcWeeklyShards(pct: number): number {
-  if (pct >= 100) return 6;
-  if (pct >= 80)  return 4;
-  if (pct >= 60)  return 3;
-  if (pct >= 40)  return 2;
-  return 1;
+// MON-19 Rev 7: canonical Unified Combo Payoff ladder, reconciled to ONE set
+// (weak → nice → huge → out of this world → UNSTOPPABLE!!). `stars` (1–5) lights
+// the result screen's star row.
+function comboFromScore(score: number): { label: string; color: string; stars: number } {
+  if (score >= 90) return { label: 'UNSTOPPABLE!!',      color: '#C5F215', stars: 5 };
+  if (score >= 75) return { label: 'Out of this world!', color: '#6B35F0', stars: 4 };
+  if (score >= 50) return { label: 'Huge hit!',          color: '#F59E0B', stars: 3 };
+  if (score >= 30) return { label: 'Nice combo!',        color: '#3B8A3A', stars: 2 };
+  return              { label: 'Weak hit...',            color: '#767676', stars: 1 };
 }
 
-function comboFromScore(score: number): { label: string; color: string } {
-  if (score >= 90) return { label: 'UNSTOPPABLE!!',      color: '#C5F215' };
-  if (score >= 75) return { label: 'Out of this world!', color: '#6B35F0' };
-  if (score >= 50) return { label: 'Huge hit!',          color: '#F59E0B' };
-  if (score >= 30) return { label: 'Nice combo!',        color: '#3B8A3A' };
-  return              { label: 'Weak hit...',            color: '#767676' };
+// MON-19 Rev 7 legibility rule: every minigame title + instruction sits in a solid
+// banner so raw text never lands on the boss art / splatter background. The title
+// is an ink plate with a lime accent word (the move-name's last word); the
+// instruction is a cream pill. `title` is the MOVE name (move-name-as-skin), not
+// the mechanic name.
+function MiniGameBanner({ title, instr }: { title: string; instr: string }) {
+  const parts = title.trim().split(/\s+/);
+  const last  = parts.length > 1 ? parts[parts.length - 1] : null;
+  const head  = last ? parts.slice(0, -1).join(' ') : title.trim();
+  return (
+    <View style={{ alignItems: 'center', gap: scale(8), paddingHorizontal: scale(16) }}>
+      <View style={b.mgTitlePlate}>
+        <Text style={b.mgTitleText}>
+          {last
+            ? <>{head + ' '}<Text style={b.mgTitleAccent}>{last}</Text></>
+            : <Text style={b.mgTitleAccent}>{head}</Text>}
+        </Text>
+      </View>
+      <View style={b.mgInstrPill}>
+        <Text style={b.mgInstrText}>{instr}</Text>
+      </View>
+    </View>
+  );
 }
 
 // ── Mini-game: Zap Strike ─────────────────────────────────────────────────────
@@ -2966,13 +2985,16 @@ const ZAP_ZONES: Record<Boss['zapZone'], { green: number; yellow: number; orange
   'very-narrow': { green: 0.08, yellow: 0.26, orange: 0.50 },
 };
 
-function ZapStrikeGame({ onScore, zapZone = 'normal' }: { onScore: (s: number) => void; zapZone?: Boss['zapZone'] }) {
+function ZapStrikeGame({ onScore, zapZone = 'normal', title = 'ZAP STRIKE', ease = 0 }: { onScore: (s: number) => void; zapZone?: Boss['zapZone']; title?: string; ease?: number }) {
   const needle    = useRef(new Animated.Value(0)).current;
   const needleRef = useRef(0);
   const [scores, setScores] = useState<number[]>([]);
   const [done,   setDone]   = useState(false);
   const TRACK_W = scale(280);
-  const zones = ZAP_ZONES[zapZone];
+  // Chore-difficulty lever (MON-19 Rev 7): a better week loosens the green zone.
+  const baseZones = ZAP_ZONES[zapZone];
+  const widen = (v: number) => Math.min(0.5, v * (1 + ease * 0.6));
+  const zones = { green: widen(baseZones.green), yellow: widen(baseZones.yellow), orange: widen(baseZones.orange) };
 
   useEffect(() => {
     const id = needle.addListener(({ value }) => { needleRef.current = value; });
@@ -3010,8 +3032,7 @@ function ZapStrikeGame({ onScore, zapZone = 'normal' }: { onScore: (s: number) =
 
   return (
     <View style={{ alignItems: 'center', gap: scale(18), paddingHorizontal: scale(20) }}>
-      <Text style={b.mgTitle}>ZAP STRIKE</Text>
-      <Text style={b.mgInstr}>Tap when the needle hits the green zone!</Text>
+      <MiniGameBanner title={title} instr="Tap when the needle hits the green zone!" />
 
       {/* Track */}
       <View style={{ width: TRACK_W, height: scale(36), borderRadius: scale(18), overflow: 'hidden', borderWidth: 2, borderColor: '#1A1A1A', position: 'relative', backgroundColor: '#FF6B35' }}>
@@ -3138,13 +3159,14 @@ function FrenzyGame({ onScore }: { onScore: (s: number) => void; onFlash?: (colo
 }
 
 // ── Mini-game: Overcharge ─────────────────────────────────────────────────────
-function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
+function OverchargeGame({ onScore, title = 'OVERCHARGE', ease = 0 }: { onScore: (s: number) => void; title?: string; ease?: number }) {
   const charge    = useRef(new Animated.Value(0)).current;
   const chargeRef = useRef(0);
   const animRef   = useRef<Animated.CompositeAnimation | null>(null);
   const [chargeVal, setChargeVal] = useState(0);
   const [released,  setReleased]  = useState(false);
-  const GREEN_MIN = 0.55, GREEN_MAX = 0.80;
+  // Chore-difficulty lever: a better week widens the green release zone.
+  const GREEN_MIN = 0.55 - ease * 0.12, GREEN_MAX = Math.min(0.92, 0.80 + ease * 0.10);
   const BAR_H = scale(180);
 
   useEffect(() => {
@@ -3181,8 +3203,7 @@ function OverchargeGame({ onScore }: { onScore: (s: number) => void }) {
 
   return (
     <View style={{ alignItems: 'center', gap: scale(16), paddingHorizontal: scale(20) }}>
-      <Text style={b.mgTitle}>OVERCHARGE</Text>
-      <Text style={b.mgInstr}>Hold and release in the green zone!</Text>
+      <MiniGameBanner title={title} instr="Hold and release in the green zone!" />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(16) }}>
         <View style={{ width: scale(36), height: BAR_H, borderRadius: scale(10), backgroundColor: '#ECEAE4', borderWidth: 2, borderColor: '#1A1A1A', overflow: 'hidden', position: 'relative' }}>
           <View style={{ position: 'absolute', bottom: GREEN_MIN * BAR_H, height: (GREEN_MAX - GREEN_MIN) * BAR_H, left: 0, right: 0, backgroundColor: 'rgba(197,242,21,0.35)' }} />
@@ -3376,12 +3397,6 @@ function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
 
   const rotateDeg = shakeRot.interpolate({ inputRange: [-360, 360], outputRange: ['-360deg', '360deg'] });
 
-  // Liquid colour: purple → blue → teal → lime
-  const liquidColor = liquidProg.interpolate({
-    inputRange:  [0,         0.33,       0.66,       1        ],
-    outputRange: ['#7C3AED', '#2563EB',  '#0891B2',  '#65A30D'],
-  });
-
   return (
     <View style={{ paddingHorizontal: scale(20) }}>
       <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(24), gap: scale(20), alignItems: 'center', ...SOLID_SHADOW }}>
@@ -3390,25 +3405,15 @@ function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
           Shake the potion!
         </Text>
 
-        {/* Potion with animated liquid colour overlay */}
+        {/* Potion image. (The animated colour overlay was removed — `mixBlendMode`
+            doesn't blend on native RN and rendered as a solid square behind the
+            jar; the potion art already shows the liquid.) */}
         <Animated.View style={{ transform: [{ translateX: shakeX }, { rotate: rotateDeg }] }}>
-          <View style={{ width: scale(120), height: scale(140), alignItems: 'center', justifyContent: 'center' }}>
-            {/* Base potion image */}
-            <Image
-              source={require('./assets/battleui/potionicon.png')}
-              style={{ width: scale(120), height: scale(140) }}
-              resizeMode="contain"
-            />
-            {/* Colour overlay — sits on top, blend mode shifts liquid hue */}
-            <Animated.View style={{
-              position: 'absolute',
-              width: scale(120),
-              height: scale(140),
-              backgroundColor: liquidColor,
-              mixBlendMode: 'color',
-              opacity: 0.75,
-            } as any} />
-          </View>
+          <Image
+            source={require('./assets/battleui/potionicon.png')}
+            style={{ width: scale(120), height: scale(140) }}
+            resizeMode="contain"
+          />
         </Animated.View>
 
         {/* Shake button */}
@@ -3457,13 +3462,14 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
   const [done,      setDone]      = useState(false);
   const [hit,       setHit]       = useState(false);
   const [miss,      setMiss]      = useState(false);
+  const [shotPts,   setShotPts]   = useState(0);
   const totalScore                = useRef(0);
   const [containerH, setContainerH] = useState(SH * 0.5);
 
-  // Hitzone — centred horizontally, near the top of the action area
-  const HITZONE_R  = scale(52);
+  // Hitzone — centred horizontally, raised toward the boss (moved up ~100px)
+  const HITZONE_R  = scale(72);
   const hitzoneX   = SW / 2;
-  const hitzoneY   = scale(60); // from top of container
+  const hitzoneY   = scale(60) - 100; // from top of container
 
   // Rock rest position in container coordinates
   const restX = SLING_L + REST_X;
@@ -3499,15 +3505,19 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
         setPull({ dx: 0, dy: 0 });
         return;
       }
-      const power = Math.min(1, dist / 200);
-
-      // Hit = fired upward (pulled down, dy > 20) AND horizontal aim
-      // lands within the hitzone's x-range (centre ± radius).
-      const finalX = restX + (-g.dx * 4);
+      // Bullseye scoring: the rock lands where it flies to (rest minus 4× the
+      // pull), and the shot scores by how close that landing is to the target
+      // centre — dead-centre = 100, falling off to 0 at the outer edge.
+      const landX = restX - g.dx * 4;
+      const landY = restY - g.dy * 4;
       const firedUp = g.dy > 20;
-      const inXRange = Math.abs(finalX - hitzoneX) < HITZONE_R * 2.5;
-      const isHit = firedUp && inXRange;
-      totalScore.current += isHit ? Math.round(power * 100) : 0;
+      const landDist = Math.hypot(landX - hitzoneX, landY - hitzoneY);
+      const MAX_D = HITZONE_R * 2.4;                 // beyond this = a clean miss
+      const acc = firedUp ? Math.max(0, 1 - landDist / MAX_D) : 0;
+      const shotScore = Math.round(acc * 100);
+      const isHit  = shotScore > 0;
+      const isBull = shotScore >= 85;
+      totalScore.current += shotScore;
       // Release haptic — heavy thud on fire
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       setFiring(true);
@@ -3518,9 +3528,10 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
         Animated.timing(rockDX, { toValue: -g.dx * 4, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
         Animated.timing(rockDY, { toValue: -g.dy * 4, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
       ]).start(() => {
+        setShotPts(shotScore);
         if (isHit) {
           setHit(true);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Haptics.notificationAsync(isBull ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
         } else {
           setMiss(true);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -3577,7 +3588,10 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
           justifyContent: 'center',
           zIndex: 1,
         }} pointerEvents="none">
-          <Text style={{ fontSize: scale(22), opacity: 0.7 }}>🎯</Text>
+          {/* Concentric rings — closer to centre scores more */}
+          <View style={{ position: 'absolute', width: HITZONE_R * 1.3, height: HITZONE_R * 1.3, borderRadius: HITZONE_R, borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)' }} />
+          <View style={{ position: 'absolute', width: HITZONE_R * 0.7, height: HITZONE_R * 0.7, borderRadius: HITZONE_R, borderWidth: 2, borderColor: 'rgba(255,255,255,0.5)' }} />
+          <Text style={{ fontSize: scale(34), opacity: 0.85 }}>🎯</Text>
         </View>
       )}
 
@@ -3603,12 +3617,17 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
         <Image source={require('./assets/battleui/slingshothandle.png')} style={{ width: HANDLE_W, height: HANDLE_H }} resizeMode="contain" />
       </View>
 
-      {/* HIT */}
-      {hit && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
-        <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(44), color: '#C5F215' }}>💥 HIT!</Text>
+      {/* HIT — legible ink plate so the call-out never floats on the bg */}
+      {hit && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: scale(8) }} pointerEvents="none">
+        <View style={b.mgTitlePlate}>
+          <Text style={b.mgTitleText}>{shotPts >= 85 ? <>🎯 <Text style={b.mgTitleAccent}>BULLSEYE!</Text></> : <>💥 <Text style={b.mgTitleAccent}>HIT!</Text></>}</Text>
+        </View>
+        <View style={b.resultChip}><Text style={b.resultChipText}>+{shotPts}</Text></View>
       </View>}
       {miss && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
-        <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(44), color: '#FF6B6B' }}>Miss!</Text>
+        <View style={b.mgTitlePlate}>
+          <Text style={b.mgTitleText}><Text style={b.mgTitleDanger}>MISS!</Text></Text>
+        </View>
       </View>}
 
       {/* Ammo — vertical stack beside the slingshot */}
@@ -3619,7 +3638,9 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
       </View>
 
       {!firing && !done && <View style={{ position: 'absolute', bottom: HANDLE_H + scale(40), left: 0, right: 0, alignItems: 'center' }}>
-        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: 'rgba(255,255,255,0.85)' }}>Pull back and release!</Text>
+        <View style={b.mgInstrPill}>
+          <Text style={b.mgInstrText}>Pull back and aim for the bullseye!</Text>
+        </View>
       </View>}
     </View>
   );
@@ -3795,63 +3816,81 @@ function FeedBossGame({ onScore, onBossReact }: { onScore: (s: number) => void; 
 }
 
 // ── Mini-game: Whack the Weak Spot ────────────────────────────────────────────
-function WhackGame({ onScore }: { onScore: (s: number) => void }) {
-  const [count,   setCount]   = useState(0);
-  const [timeLeft,setTimeLeft]= useState(4000);
-  const [started, setStarted] = useState(false);
-  const [done,    setDone]    = useState(false);
-  const [spot, setSpot] = useState({ x: 50, y: 50 });
-  const countRef = useRef(0);
-  const startRef = useRef(0);
-  const AREA_W   = scale(280);
-  const AREA_H   = scale(160);
+// Whack-a-mole (matches the Rev 7 prototype): weak spots SPAWN at random spots
+// and VANISH after a short life — tap each one before it disappears. Score is
+// the fraction of the spawned spots you hit.
+function WhackGame({ onScore, title = 'WHACK', ease = 0 }: { onScore: (s: number) => void; title?: string; ease?: number }) {
+  const AREA_W   = scale(290);
+  const AREA_H   = scale(200);
+  const TOTAL    = 8;
+  // Chore-difficulty lever: a better week leaves each spot up longer.
+  const LIFE     = 850 + ease * 550;
 
-  const moveSpot = () => setSpot({ x: 10 + Math.random() * 80, y: 10 + Math.random() * 80 });
+  const [targets, setTargets] = useState<{ id:number; x:number; y:number }[]>([]);
+  const [score,   setScore]   = useState(0);
+  const [timePct, setTimePct] = useState(100);
+  const scoreRef   = useRef(0);
+  const spawnedRef = useRef(0);
+  const doneRef    = useRef(false);
+  const timers     = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  useEffect(() => {
-    if (!started) return;
-    const iv = setInterval(() => {
-      const rem = Math.max(0, 4000 - (Date.now() - startRef.current));
-      setTimeLeft(rem);
-      if (rem <= 0) {
-        clearInterval(iv);
-        setDone(true);
-        setTimeout(() => onScore(Math.min(100, Math.round((countRef.current / 12) * 100))), 400);
-      }
-    }, 50);
-    return () => clearInterval(iv);
-  }, [started]);
-
-  const handleTap = () => {
-    if (done) return;
-    if (!started) { setStarted(true); startRef.current = Date.now(); }
-    countRef.current += 1;
-    setCount(countRef.current);
-    moveSpot();
+  const finish = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    timers.current.forEach(clearTimeout);
+    setTimeout(() => onScore(Math.round((scoreRef.current / TOTAL) * 100)), 400);
   };
 
-  const timerPct = started ? (timeLeft / 4000) * 100 : 100;
+  const spawn = () => {
+    if (doneRef.current) return;
+    const id = spawnedRef.current;
+    setTargets(t => [...t, { id, x: 4 + Math.random() * 80, y: 4 + Math.random() * 76 }]);
+    timers.current.push(setTimeout(() => setTargets(t => t.filter(o => o.id !== id)), LIFE));
+    spawnedRef.current += 1;
+    if (spawnedRef.current < TOTAL) {
+      timers.current.push(setTimeout(spawn, 420 + Math.random() * 260));
+    } else {
+      timers.current.push(setTimeout(finish, LIFE + 250));
+    }
+  };
+
+  useEffect(() => {
+    const start = Date.now();
+    const TOTAL_MS = 7000; // generous safety net; the spawn sequence ends it first
+    const iv = setInterval(() => {
+      const rem = Math.max(0, 100 - ((Date.now() - start) / TOTAL_MS) * 100);
+      setTimePct(rem);
+      if (rem <= 0) { clearInterval(iv); finish(); }
+    }, 50);
+    timers.current.push(setTimeout(spawn, 400));
+    return () => { clearInterval(iv); timers.current.forEach(clearTimeout); };
+  }, []);
+
+  const hit = (id: number) => {
+    if (doneRef.current) return;
+    setTargets(t => t.filter(o => o.id !== id));
+    scoreRef.current += 1;
+    setScore(scoreRef.current);
+  };
+
   return (
     <View style={{ alignItems:'center', gap: scale(10), paddingHorizontal: scale(20) }}>
-      <Text style={b.mgTitle}>WHACK THE WEAK SPOT</Text>
-      <Text style={b.mgInstr}>Tap the glowing spot as fast as you can!</Text>
+      <MiniGameBanner title={title} instr="Tap the glowing weak spots before they vanish!" />
       <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
-        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
+        <View style={{ width:`${timePct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timePct > 50 ? '#C5F215' : timePct > 20 ? '#F59E0B' : '#FF3B55' }} />
       </View>
       <View style={{ width: AREA_W, height: AREA_H, backgroundColor:'#F0EDFF', borderRadius: scale(12), borderWidth:2, borderColor:'#1A1A1A', overflow:'hidden' }}>
-        <TouchableOpacity
-          onPress={handleTap} disabled={done} activeOpacity={0.7}
-          style={{ position:'absolute', width: scale(52), height: scale(52), borderRadius: scale(26),
-            backgroundColor: done ? '#ABABAB' : '#FF3B55',
-            left: (AREA_W - scale(52)) * (spot.x / 100),
-            top: (AREA_H - scale(52)) * (spot.y / 100),
-            justifyContent:'center', alignItems:'center',
-          }}
-        >
-          <Text style={{ fontSize: scale(22) }}>💥</Text>
-        </TouchableOpacity>
+        {targets.map(t => (
+          <TouchableOpacity
+            key={t.id} onPress={() => hit(t.id)} activeOpacity={0.6}
+            style={{ position:'absolute', left:`${t.x}%`, top:`${t.y}%`, width: scale(50), height: scale(50), borderRadius: scale(25),
+              backgroundColor:'#FF3B55', borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center' }}
+          >
+            <Text style={{ fontSize: scale(22) }}>⭐</Text>
+          </TouchableOpacity>
+        ))}
       </View>
-      <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(44), color:'#1A1A1A' }}>{count}</Text>
+      <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(40), color:'#1A1A1A' }}>{score}</Text>
     </View>
   );
 }
@@ -3860,7 +3899,7 @@ function WhackGame({ onScore }: { onScore: (s: number) => void }) {
 const BB_COLORS = ['#FF3B55', '#6B35F0', '#C5F215', '#F59E0B'];
 const BB_LABELS = ['●', '■', '▲', '★'];
 
-function SequenceGame({ onScore, fast = false }: { onScore: (s: number) => void; fast?: boolean }) {
+function SequenceGame({ onScore, fast = false, title }: { onScore: (s: number) => void; fast?: boolean; title?: string }) {
   const SEQ = useRef(Array.from({ length: 4 }, () => Math.floor(Math.random() * 4))).current;
   const [gPhase, setGPhase] = useState<'show' | 'wait' | 'input' | 'done'>('show');
   const [showIdx, setShowIdx] = useState(0);
@@ -3901,10 +3940,10 @@ function SequenceGame({ onScore, fast = false }: { onScore: (s: number) => void;
 
   return (
     <View style={{ alignItems:'center', gap: scale(14), paddingHorizontal: scale(20) }}>
-      <Text style={b.mgTitle}>{fast ? 'COMBO CHAIN' : 'BLOCK BREAKER'}</Text>
-      <Text style={b.mgInstr}>
-        {gPhase === 'show' ? 'Watch the sequence...' : gPhase === 'wait' ? 'Get ready!' : gPhase === 'input' ? `Repeat it! (${inputIdx + 1}/4)` : '✓'}
-      </Text>
+      <MiniGameBanner
+        title={title ?? (fast ? 'COMBO CHAIN' : 'BLOCK BREAKER')}
+        instr={gPhase === 'show' ? 'Watch the sequence...' : gPhase === 'wait' ? 'Get ready!' : gPhase === 'input' ? `Repeat it! (${inputIdx + 1}/4)` : 'Nice!'}
+      />
       <View style={{ flexDirection:'row', gap: scale(8) }}>
         {SEQ.map((ci, i) => {
           const lit = gPhase === 'show' && i < showIdx;
@@ -3933,49 +3972,91 @@ function SequenceGame({ onScore, fast = false }: { onScore: (s: number) => void;
   );
 }
 
-// ── Mini-game: Power Slash ────────────────────────────────────────────────────
-function PowerSlashGame({ onScore }: { onScore: (s: number) => void }) {
-  const TARGET_X_PCT = useRef(10 + Math.random() * 80).current;
+// ── Mini-game: Power Slash (MON-19 Rev 7: a finger-trace along a sweeping arc) ──
+// A dotted arc runs from a random start along the bottom to a random star along
+// the top. The kid traces it; score = accuracy to the path + reaching the star.
+// Fresh geometry each play so the path can't be memorised.
+function PowerSlashGame({ onScore, title = 'POWER SLASH', ease = 0 }: { onScore: (s: number) => void; title?: string; ease?: number }) {
   const AREA_W = scale(280); const AREA_H = scale(190);
-  const START  = { x: AREA_W / 2, y: AREA_H - scale(24) };
-  const END    = { x: AREA_W * (TARGET_X_PCT / 100), y: scale(24) };
-  const lineLen = Math.sqrt((END.x-START.x)**2 + (END.y-START.y)**2);
-  const lineDir = { x:(END.x-START.x)/lineLen, y:(END.y-START.y)/lineLen };
-  const angleDeg = Math.atan2(END.y-START.y, END.x-START.x) * 180 / Math.PI;
-  const [trail, setTrail] = useState<{ x:number; y:number; ok:boolean }[]>([]);
+  // Random endpoints + a perpendicular control point => a sweeping quadratic arc.
+  const geom = useRef((() => {
+    const start = { x: AREA_W * (0.12 + Math.random() * 0.30) + (Math.random() < 0.5 ? 0 : AREA_W * 0.46), y: AREA_H - scale(24) };
+    const end   = { x: AREA_W * (0.12 + Math.random() * 0.76), y: scale(24) };
+    const mid   = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    const dx = end.x - start.x, dy = end.y - start.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const sweep = (Math.random() < 0.5 ? -1 : 1) * (scale(40) + Math.random() * scale(50));
+    const ctrl = { x: mid.x + (-dy / len) * sweep, y: mid.y + (dx / len) * sweep };
+    return { start, end, ctrl };
+  })()).current;
+  const { start: START, end: END, ctrl: CTRL } = geom;
+
+  const bezier = (t: number) => {
+    const u = 1 - t;
+    return {
+      x: u * u * START.x + 2 * u * t * CTRL.x + t * t * END.x,
+      y: u * u * START.y + 2 * u * t * CTRL.y + t * t * END.y,
+    };
+  };
+  // Pre-sample the arc for both the dotted guide and distance scoring.
+  const SAMPLES = 48;
+  const arcPts = useRef(Array.from({ length: SAMPLES + 1 }, (_, i) => bezier(i / SAMPLES))).current;
+  // Tighter tolerance than before — the trace should reward staying ON the line,
+  // not just somewhere near it. The chore lever still widens it on a better week.
+  const TOL = scale(15) * (1 + ease * 0.6);
+
+  const nearest = (px: number, py: number) => {
+    let best = Infinity, bestIdx = 0;
+    for (let i = 0; i < arcPts.length; i++) {
+      const d = Math.hypot(px - arcPts[i].x, py - arcPts[i].y);
+      if (d < best) { best = d; bestIdx = i; }
+    }
+    return { dist: best, idx: bestIdx };
+  };
+
+  const [trail, setTrail] = useState<{ x:number; y:number; ok:boolean; q:number }[]>([]);
+  const maxIdx = useRef(0);
   const [done,  setDone]  = useState(false);
   const scored = useRef(false);
 
-  const distToLine = (px:number, py:number) => {
-    const dx = px-START.x, dy = py-START.y;
-    return Math.abs(dx*lineDir.y - dy*lineDir.x);
-  };
-  const coverage = (pts: { x:number; y:number }[]) => {
-    if (!pts.length) return 0;
-    const p = pts[pts.length-1];
-    const proj = (p.x-START.x)*lineDir.x + (p.y-START.y)*lineDir.y;
-    return Math.min(1, Math.max(0, proj/lineLen));
+  const addPoint = (x: number, y: number) => {
+    const n = nearest(x, y);
+    if (n.idx > maxIdx.current) maxIdx.current = n.idx;
+    // Continuous quality: dead-on = 1, falling to 0 at the tolerance edge. A
+    // sloppy-but-nearby trace no longer scores like a perfect one.
+    const q = Math.max(0, 1 - n.dist / TOL);
+    return { x, y, ok: q > 0.5, q };
   };
 
   const panResponder = useRef(PanResponder.create({
+    // Claim the gesture on the capture phase so a child decoration under the
+    // finger (e.g. the start circle) can't swallow the initial touch — this is
+    // what made the drag sometimes fail to begin.
+    onStartShouldSetPanResponderCapture: () => !scored.current,
+    onMoveShouldSetPanResponderCapture:  () => !scored.current,
     onStartShouldSetPanResponder: () => !scored.current,
     onMoveShouldSetPanResponder:  () => !scored.current,
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
     onPanResponderGrant: (e) => {
       const { locationX:x, locationY:y } = e.nativeEvent;
-      setTrail([{ x, y, ok: distToLine(x,y) < scale(26) }]);
+      setTrail([addPoint(x, y)]);
     },
     onPanResponderMove: (e) => {
       const { locationX:x, locationY:y } = e.nativeEvent;
-      setTrail(prev => [...prev, { x, y, ok: distToLine(x,y) < scale(26) }]);
+      setTrail(prev => [...prev, addPoint(x, y)]);
     },
     onPanResponderRelease: () => {
       if (scored.current) return;
       scored.current = true; setDone(true);
       setTrail(prev => {
         if (!prev.length) { setTimeout(() => onScore(0), 300); return prev; }
-        const cov = coverage(prev);
-        const acc = prev.filter(p => p.ok).length / prev.length;
-        setTimeout(() => onScore(Math.round(Math.min(100, cov*60 + acc*40))), 400);
+        const reach = maxIdx.current / SAMPLES;                       // progress to the star
+        const acc   = prev.reduce((s, p) => s + p.q, 0) / prev.length; // mean on-path quality
+        // Accuracy is the multiplicative gate (so a careless flick to the top
+        // can't win); reach is a 0.5–1.0 modifier for how far you got.
+        const score = (0.5 + 0.5 * reach) * acc * 100;
+        setTimeout(() => onScore(Math.round(Math.min(100, score))), 400);
         return prev;
       });
     },
@@ -3983,26 +4064,30 @@ function PowerSlashGame({ onScore }: { onScore: (s: number) => void }) {
 
   return (
     <View style={{ alignItems:'center', gap: scale(10), paddingHorizontal: scale(20) }}>
-      <Text style={b.mgTitle}>POWER SLASH</Text>
-      <Text style={b.mgInstr}>Drag from the circle to the star!</Text>
+      <MiniGameBanner title={title} instr="Trace the arc from the circle to the star!" />
       <View style={{ width: AREA_W, height: AREA_H, backgroundColor:'#F0EDFF', borderRadius: scale(12), borderWidth:2, borderColor:'#1A1A1A', overflow:'hidden' }} {...panResponder.panHandlers}>
-        {/* Guide line */}
-        <View style={{ position:'absolute', width: lineLen, height:2, backgroundColor:'#DDDAFF',
-          left: START.x, top: START.y, transformOrigin:'0 0',
-          transform:[{ rotate:`${angleDeg}deg` }] }} />
-        {/* Trail dots */}
-        {trail.map((pt, i) => (
-          <View key={i} style={{ position:'absolute', width: scale(8), height: scale(8), borderRadius: scale(4),
-            backgroundColor: pt.ok ? '#22A050' : '#FF3B55',
-            left: pt.x-scale(4), top: pt.y-scale(4) }} />
-        ))}
-        {/* Start */}
-        <View style={{ position:'absolute', width: scale(32), height: scale(32), borderRadius: scale(16), backgroundColor:'#6B35F0', borderWidth:2, borderColor:'#1A1A1A', left: START.x-scale(16), top: START.y-scale(16), justifyContent:'center', alignItems:'center' }}>
-          <Text style={{ color:'#fff', fontFamily: 'Inter_900Black', fontSize: scale(12) }}>●</Text>
-        </View>
-        {/* End */}
-        <View style={{ position:'absolute', width: scale(28), height: scale(28), borderRadius: scale(14), backgroundColor:'#C5F215', borderWidth:2, borderColor:'#1A1A1A', left: END.x-scale(14), top: END.y-scale(14), justifyContent:'center', alignItems:'center' }}>
-          <Text style={{ fontSize: scale(12) }}>★</Text>
+        {/* All decorations are non-interactive so every touch lands on the arena
+            (keeps the drag from ever being swallowed by a dot/circle). */}
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          {/* Dotted arc guide */}
+          {arcPts.filter((_, i) => i % 2 === 0).map((pt, i) => (
+            <View key={`g${i}`} style={{ position:'absolute', width: scale(5), height: scale(5), borderRadius: scale(3),
+              backgroundColor:'#B9B2F5', left: pt.x-scale(2.5), top: pt.y-scale(2.5) }} />
+          ))}
+          {/* Trail dots */}
+          {trail.map((pt, i) => (
+            <View key={i} style={{ position:'absolute', width: scale(8), height: scale(8), borderRadius: scale(4),
+              backgroundColor: pt.ok ? '#22A050' : '#FF3B55',
+              left: pt.x-scale(4), top: pt.y-scale(4) }} />
+          ))}
+          {/* Start */}
+          <View style={{ position:'absolute', width: scale(32), height: scale(32), borderRadius: scale(16), backgroundColor:'#6B35F0', borderWidth:2, borderColor:'#1A1A1A', left: START.x-scale(16), top: START.y-scale(16), justifyContent:'center', alignItems:'center' }}>
+            <Text style={{ color:'#fff', fontFamily: 'Inter_900Black', fontSize: scale(12) }}>●</Text>
+          </View>
+          {/* End (star) */}
+          <View style={{ position:'absolute', width: scale(28), height: scale(28), borderRadius: scale(14), backgroundColor:'#C5F215', borderWidth:2, borderColor:'#1A1A1A', left: END.x-scale(14), top: END.y-scale(14), justifyContent:'center', alignItems:'center' }}>
+            <Text style={{ fontSize: scale(12) }}>★</Text>
+          </View>
         </View>
       </View>
       {done && <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color:'#6B35F0' }}>Slash scored!</Text>}
@@ -4011,7 +4096,7 @@ function PowerSlashGame({ onScore }: { onScore: (s: number) => void }) {
 }
 
 // ── Mini-game: Earthquake ─────────────────────────────────────────────────────
-function EarthquakeGame({ onScore }: { onScore: (s: number) => void }) {
+function EarthquakeGame({ onScore, title = 'EARTHQUAKE', ease = 0 }: { onScore: (s: number) => void; title?: string; ease?: number }) {
   const [timeLeft, setTimeLeft] = useState(3000);
   const [started,  setStarted]  = useState(false);
   const [done,     setDone]     = useState(false);
@@ -4019,6 +4104,8 @@ function EarthquakeGame({ onScore }: { onScore: (s: number) => void }) {
   const lastSide = useRef<'left'|'right'|null>(null);
   const altCount = useRef(0);
   const startRef = useRef(0);
+  // Chore-difficulty lever: a better week needs fewer alternations for a perfect.
+  const TARGET = Math.max(10, Math.round(16 - ease * 5));
 
   useEffect(() => {
     if (!started) return;
@@ -4027,7 +4114,7 @@ function EarthquakeGame({ onScore }: { onScore: (s: number) => void }) {
       setTimeLeft(rem);
       if (rem <= 0) {
         clearInterval(iv); setDone(true);
-        setTimeout(() => onScore(Math.min(100, Math.round((altCount.current / 16) * 100))), 400);
+        setTimeout(() => onScore(Math.min(100, Math.round((altCount.current / TARGET) * 100))), 400);
       }
     }, 50);
     return () => clearInterval(iv);
@@ -4045,8 +4132,7 @@ function EarthquakeGame({ onScore }: { onScore: (s: number) => void }) {
   const timerPct = started ? (timeLeft / 3000) * 100 : 100;
   return (
     <View style={{ alignItems:'center', gap: scale(12) }}>
-      <Text style={b.mgTitle}>EARTHQUAKE</Text>
-      <Text style={b.mgInstr}>Alternate left and right — don't repeat the same side!</Text>
+      <MiniGameBanner title={title} instr="Alternate left and right — don't repeat a side!" />
       <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
         <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
       </View>
@@ -4072,49 +4158,100 @@ const DEFUSE_WIRES = [
   { id:2, label:'YELLOW', bg:'#F59E0B', text:'#1A1A1A'  },
 ];
 
-function DefuseGame({ onScore }: { onScore: (s: number) => void }) {
-  const wrongWire = useRef(Math.floor(Math.random() * 3)).current;
-  const [timeLeft, setTimeLeft] = useState(3000);
-  const [done, setDone] = useState(false);
-  const startRef = useRef(Date.now());
+// Multi-round defuse (matches the Rev 7 prototype): each round, snip BOTH safe
+// wires before the timer runs out — the one ⚠️ danger wire is marked; cutting it
+// ends the round with no further credit. 4 rounds, 2 safe wires each → score is
+// the fraction of safe wires you snipped across all rounds.
+const DEFUSE_MAXROUNDS = 4;
+function DefuseGame({ onScore, title = 'DEFUSE', ease = 0 }: { onScore: (s: number) => void; title?: string; ease?: number }) {
+  // Chore-difficulty lever: a better week buys more time per round.
+  const ROUND_MS = Math.round(3000 + ease * 2000);
+  const SAFE_PER_ROUND = DEFUSE_WIRES.length - 1; // 2
+
+  const [round,   setRound]   = useState(1);
+  const [danger,  setDanger]  = useState(() => Math.floor(Math.random() * DEFUSE_WIRES.length));
+  const [cut,     setCut]     = useState<number[]>([]);
+  const [timeLeft,setTimeLeft]= useState(ROUND_MS);
+  const [done,    setDone]    = useState(false);
+
+  const scoreRef   = useRef(0);
+  const roundRef   = useRef(1);
+  const advancing  = useRef(false);
+  const doneRef    = useRef(false);
+  const startRef   = useRef(Date.now());
+
+  const end = () => {
+    if (doneRef.current) return;
+    doneRef.current = true; setDone(true);
+    setTimeout(() => onScore(Math.round(Math.min(100, (scoreRef.current / (DEFUSE_MAXROUNDS * SAFE_PER_ROUND)) * 100))), 400);
+  };
+
+  const newRound = () => {
+    if (doneRef.current) return;
+    if (roundRef.current >= DEFUSE_MAXROUNDS) { end(); return; }
+    roundRef.current += 1;
+    setRound(roundRef.current);
+    setDanger(Math.floor(Math.random() * DEFUSE_WIRES.length));
+    setCut([]);
+    startRef.current = Date.now();
+    setTimeLeft(ROUND_MS);
+    advancing.current = false;
+  };
+
+  const roundDone = () => {
+    if (advancing.current) return;
+    advancing.current = true;
+    setTimeout(newRound, 450);
+  };
 
   useEffect(() => {
     const iv = setInterval(() => {
-      const rem = Math.max(0, 3000 - (Date.now() - startRef.current));
+      if (doneRef.current || advancing.current) return;
+      const rem = Math.max(0, ROUND_MS - (Date.now() - startRef.current));
       setTimeLeft(rem);
-      if (rem <= 0) { clearInterval(iv); setDone(true); setTimeout(() => onScore(0), 300); }
-    }, 50);
+      if (rem <= 0) roundDone();
+    }, 80);
     return () => clearInterval(iv);
   }, []);
 
   const handleCut = (id: number) => {
-    if (done) return;
-    setDone(true);
-    if (id === wrongWire) {
-      setTimeout(() => onScore(0), 400);
-    } else {
-      const elapsed = Date.now() - startRef.current;
-      const speedBonus = Math.max(0, (3000 - elapsed) / 3000);
-      setTimeout(() => onScore(Math.round(70 + speedBonus * 30)), 400);
-    }
+    if (doneRef.current || advancing.current || cut.includes(id)) return;
+    if (id === danger) { roundDone(); return; }          // hit the danger wire — round over
+    scoreRef.current += 1;
+    const next = [...cut, id];
+    setCut(next);
+    if (next.length >= SAFE_PER_ROUND) roundDone();      // all safe wires snipped
   };
 
-  const timerPct = (timeLeft / 3000) * 100;
+  const timerPct = (timeLeft / ROUND_MS) * 100;
+  const secs = Math.ceil(timeLeft / 1000);
   return (
-    <View style={{ alignItems:'center', gap: scale(14), paddingHorizontal: scale(20) }}>
-      <Text style={b.mgTitle}>DEFUSE</Text>
-      <Text style={[b.mgInstr, { color:'#FF3B55' }]}>Don't cut the {DEFUSE_WIRES[wrongWire].label} wire!</Text>
+    <View style={{ alignItems:'center', gap: scale(12), paddingHorizontal: scale(20) }}>
+      <MiniGameBanner title={title} instr="Snip the safe wires — never the ⚠️ wire!" />
+      <View style={{ flexDirection:'row', alignItems:'center', gap: scale(12) }}>
+        <Text style={{ fontFamily:'Inter_900Black', fontSize: scale(30), color: timerPct > 25 ? '#1A1A1A' : '#FF3B55', letterSpacing: 2 }}>
+          {`0:0${Math.min(9, secs)}`}
+        </Text>
+        <Text style={{ fontFamily:'Inter_800ExtraBold', fontSize: scale(13), color:'#767676' }}>Round {round}/{DEFUSE_MAXROUNDS}</Text>
+      </View>
       <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
-        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 20 ? '#F59E0B' : '#FF3B55' }} />
+        <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 25 ? '#F59E0B' : '#FF3B55' }} />
       </View>
       <View style={{ gap: scale(10), width:'100%' }}>
-        {DEFUSE_WIRES.map(w => (
-          <TouchableOpacity key={w.id} onPress={() => handleCut(w.id)} disabled={done} activeOpacity={0.8}
-            style={{ height: scale(52), borderRadius: scale(14), backgroundColor: done ? '#ECEAE4' : w.bg,
-              borderWidth:2, borderColor:'#1A1A1A', justifyContent:'center', alignItems:'center', opacity: done ? 0.5 : 1 }}>
-            <Text style={{ color: w.text, fontFamily: 'Inter_900Black', fontSize: scale(16) }}>✂ CUT {w.label} WIRE</Text>
-          </TouchableOpacity>
-        ))}
+        {DEFUSE_WIRES.map(w => {
+          const isDanger = w.id === danger;
+          const isCut    = cut.includes(w.id);
+          return (
+            <TouchableOpacity key={w.id} onPress={() => handleCut(w.id)} disabled={done || isCut} activeOpacity={0.8}
+              style={{ height: scale(50), borderRadius: scale(14), backgroundColor: isCut ? '#ECEAE4' : w.bg,
+                borderWidth:2, borderColor: isDanger ? '#1A1A1A' : '#1A1A1A', borderStyle: isDanger ? 'dashed' : 'solid',
+                justifyContent:'center', alignItems:'center', opacity: isCut ? 0.4 : 1 }}>
+              <Text style={{ color: isCut ? '#767676' : w.text, fontFamily: 'Inter_900Black', fontSize: scale(16) }}>
+                {isCut ? `✓ ${w.label} cut` : isDanger ? `⚠️ ${w.label} — DON'T CUT` : `✂ CUT ${w.label} WIRE`}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </View>
   );
@@ -4231,7 +4368,10 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
   const [defending,   setDefending]   = useState(false);
   const [weaknessUsed,setWeaknessUsed]= useState(false);
   const [log,         setLog]         = useState(`${boss.name} appears! What will ${monsterName} do?`);
-  const [combo,       setCombo]       = useState<{ label:string; color:string; score:number } | null>(null);
+  const [combo,       setCombo]       = useState<{ label:string; color:string; score:number; stars:number; dmg:number; boosted:boolean } | null>(null);
+  const resultAnim    = useRef(new Animated.Value(0)).current;
+  const [captured,    setCaptured]    = useState(false);
+  const captureAnim   = useRef(new Animated.Value(0)).current;
   const [live,        setLive]        = useState(true);
   const [hand,        setHand]        = useState<AttackCard[]>([]);
   const [activeCard,  setActiveCard]  = useState<AttackCard | null>(null);
@@ -4253,6 +4393,13 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     }
   }, [phase]);
 
+  // Capture payoff — pop the boss-in-jar moment in when the boss is caught.
+  useEffect(() => {
+    if (!captured) return;
+    captureAnim.setValue(0);
+    Animated.spring(captureAnim, { toValue: 1, useNativeDriver: true, tension: 120, friction: 8 }).start();
+  }, [captured]);
+
   const animHp = (anim: Animated.Value, ratio: number) =>
     Animated.timing(anim, { toValue: ratio, duration: 500, useNativeDriver: false }).start();
 
@@ -4263,13 +4410,10 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
       .filter(a => a.shardCost === 0 || shards >= a.shardCost)
       .map(a => ({ ...a, label: atkName(monsterId, a.id, a.id) } as AttackCard));
     const shuffled = [...eligible].sort(() => Math.random() - 0.5);
-    let picks: AttackCard[] = shuffled.slice(0, 3);
-    if (weaknessUnlocked && !weaknessUsed) {
-      // MON-82: the weakness card surfaces the boss's discovered weakness (name +
-      // icon); damage comes from its multiplier, applied in handleWeakness.
-      const wCard: AttackCard = { id:'weakness', mechanic:'weakness', label: boss.weakness.name, baseDmg:0, shardCost:0, emoji: boss.weakness.icon, cardBg:'#FFF9E0', icon: require('./assets/icons/icon-starbox.png') };
-      picks = [wCard, ...picks.slice(0, 2)];
-    }
+    // MON-19 Rev 7: 3 attacks + Defend. The discovered weakness is no longer a
+    // hand card — it surfaces as the earned-weapon slot in the bottom HUD
+    // (tappable mid-battle via handleWeakness), so it isn't double-surfaced here.
+    const picks: AttackCard[] = shuffled.slice(0, 3);
     const dCard: AttackCard = { id:'defend', mechanic:'defend', label:'Defend', baseDmg:0, shardCost:0, emoji:'🛡', cardBg:'#FFF0F0', icon: require('./assets/icons/icon-skulldisabled.png') };
     setHand([...picks, dCard]);
   }, [phase, live]);
@@ -4294,6 +4438,23 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
                   : completionPct >= 10  ? 0.18
                   : completionPct >= 1   ? 0.12
                   : 0.08;
+
+  // Chore-based difficulty lever (MON-19 Rev 7) — effort only ever HELPS, never
+  // punishes. Two knobs, both keyed off this week's completion:
+  //   • scoreFloor: raises the minimum result tier (the legible, primary lever —
+  //     "I did my chores so I hit hard"). Floored modestly so the average week
+  //     keeps real stakes and the minigame never becomes a pure formality.
+  //   • ease (0→1): loosens each minigame's tolerances (wider zones, more bomb
+  //     time, larger trace tolerance). Secondary; partly overlaps the floor.
+  // TODO(MON-81): move these thresholds into app_config rather than hardcoding.
+  const scoreFloor = completionPct >= 100 ? 50
+                   : completionPct >= 80  ? 35
+                   : completionPct >= 60  ? 20
+                   : 0;
+  const ease = completionPct >= 100 ? 1.0
+             : completionPct >= 80  ? 0.6
+             : completionPct >= 60  ? 0.3
+             : 0;
 
   // Evolution damage cap — per-level, all 8 monster evolutions
   const EVO_CAP_FACTORS = [0.55, 0.62, 0.68, 0.74, 0.80, 0.88, 0.94, 1.0];
@@ -4336,7 +4497,9 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     if (newEH <= 0) {
       setLive(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); // victory!
-      setTimeout(() => onBattleEnd('captured', shardsUsed), 900);
+      // Rev 7: the capture is the payoff moment — show the boss in its jar and
+      // HOLD (no auto-dismiss) until the kid taps to continue to the chest.
+      setTimeout(() => setCaptured(true), 700);
       return true;
     }
     return false;
@@ -4373,21 +4536,35 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     }, 1300);
   };
 
-  const handleScore = (attackName: string, baseDmg: number, score: number, shardCost = 0) => {
-    const dmg = playerDamage(baseDmg, score);
+  // Shared per-hit reveal: tier banner + 1–5 stars + damage chip pop in over a
+  // light scrim (boss visible behind), hold ~1.1s, then fade while HP drains.
+  const revealHit = (score: number, dmg: number, attackName: string, boosted: boolean) => {
     const info = comboFromScore(score);
-    setCombo({ ...info, score });
+    setCombo({ ...info, score, dmg, boosted });
     flashScreen(info.color);
+    resultAnim.setValue(0);
+    Animated.spring(resultAnim, { toValue: 1, useNativeDriver: true, tension: 180, friction: 9 }).start();
+    setPhase('combo-reveal');
+    setTimeout(() => {
+      Animated.timing(resultAnim, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+      const won = applyPlayerAttack(dmg, attackName); // HP drains as the result fades
+      setTimeout(() => {
+        setCombo(null);
+        if (!won) doBossTurn(defending);
+      }, 280);
+    }, 1100);
+  };
+
+  const handleScore = (attackName: string, baseDmg: number, score: number, shardCost = 0) => {
+    // Chore-difficulty floor: effort guarantees a minimum outcome.
+    const effScore = Math.max(score, scoreFloor);
+    const boosted  = effScore > score;
+    const dmg = playerDamage(baseDmg, effScore);
     if (shardCost > 0) {
       setShards(s => s - shardCost);
       setShardsUsed(u => u + shardCost);
     }
-    setPhase('combo-reveal');
-    setTimeout(() => {
-      setCombo(null);
-      const won = applyPlayerAttack(dmg, attackName);
-      if (!won) doBossTurn(defending);
-    }, 1400);
+    revealHit(effScore, dmg, attackName, boosted);
   };
 
   const handleDefend = () => {
@@ -4405,15 +4582,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
     const mult = boss.weakness?.damageMultiplier ?? WEAKNESS_DAMAGE_MULTIPLIER;
     const rawDmg = Math.round(playerDamage(WEAKNESS_BASE_DMG, 95) * mult);
     const dmg = Math.max(20, rawDmg);
-    const info = comboFromScore(95);
-    setCombo({ ...info, score: 95 });
-    flashScreen(info.color);
-    setPhase('combo-reveal');
-    setTimeout(() => {
-      setCombo(null);
-      const won = applyPlayerAttack(dmg, `${boss.weakness.name}! ${boss.weakness.icon}`);
-      if (!won) doBossTurn(defending);
-    }, 1400);
+    revealHit(95, dmg, `${boss.weakness.name}! ${boss.weakness.icon}`, false);
   };
 
   const handleCardPlay = (card: AttackCard) => {
@@ -4443,6 +4612,47 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
           backgroundColor: combo.color, opacity: flashAnim.interpolate({ inputRange:[0,1], outputRange:[0, 0.35] }),
         }} />
       )}
+
+      {/* Per-hit result — tier banner + stars + damage chip over a light scrim
+          (boss visible behind, not over the minigame). Auto-dismisses. (Rev 7) */}
+      {phase === 'combo-reveal' && combo && (
+        <Animated.View pointerEvents="none" style={[b.resultScrim, { opacity: resultAnim }]}>
+          <Animated.View style={{ alignItems: 'center', gap: scale(12), transform: [{ scale: resultAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }] }}>
+            <View style={[b.resultBanner, { backgroundColor: combo.color }]}>
+              <Text style={b.resultBannerText}>{combo.label}</Text>
+            </View>
+            <View style={b.resultStars}>
+              {[0,1,2,3,4].map(i => (
+                <Text key={i} style={[b.resultStar, { color: i < combo.stars ? '#FFD23F' : 'rgba(255,255,255,0.28)' }]}>★</Text>
+              ))}
+            </View>
+            <View style={b.resultChip}><Text style={b.resultChipText}>−{combo.dmg} HP</Text></View>
+            {combo.boosted && (
+              <View style={b.resultBoost}><Text style={b.resultBoostText}>⚡ Power Boost</Text></View>
+            )}
+          </Animated.View>
+        </Animated.View>
+      )}
+
+      {/* Captured payoff (Rev 7) — boss in its jar, no stars, holds until tapped.
+          The one battle overlay that does NOT auto-dismiss. */}
+      {captured && (() => {
+        const jar = getBossDisplay(boss.name)?.jar ?? boss.bossImage;
+        return (
+          <View style={b.captureScrim}>
+            <Animated.View style={{ alignItems: 'center', gap: scale(14), opacity: captureAnim, transform: [{ scale: captureAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }] }}>
+              <View style={[b.resultBanner, { backgroundColor: '#C5F215' }]}>
+                <Text style={b.resultBannerText}>CAPTURED!</Text>
+              </View>
+              {jar && <Image source={jar} style={{ width: scale(240), height: scale(240) }} resizeMode="contain" />}
+              <Text style={b.captureName}>{boss.name} is yours!</Text>
+              <TouchableOpacity onPress={() => onBattleEnd('captured', shardsUsed)} activeOpacity={0.85} style={b.captureBtn}>
+                <Text style={b.captureBtnText}>Continue →</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
+        );
+      })()}
 
       {/* HP bars — no cards, no avatars, straight on the bg */}
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, paddingHorizontal: 16, paddingTop: 40, paddingBottom: 8, flexDirection: 'row', gap: 12 }}>
@@ -4538,31 +4748,27 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
       {/* ── Action area ── */}
       <View style={{ flex:1 }}>
 
-        {/* Combo reveal */}
-        {phase === 'combo-reveal' && combo && (
-          <View style={{ flex:1, alignItems:'center', justifyContent:'center', gap: scale(8) }}>
-            <Text style={{ fontFamily:'FredokaOne_400Regular', fontSize: scale(44), color: combo.color, textAlign:'center' }}>{combo.label}</Text>
-            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color:'#FFFFFF' }}>{combo.score} pts</Text>
-          </View>
-        )}
+        {/* Per-hit result renders as a full-screen overlay above (Rev 7). */}
 
-        {/* Boss turn */}
+        {/* Boss turn — legible ink plate (Rev 7 banner pattern), danger accent */}
         {phase === 'boss-turn' && (
           <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}>
-            <Text style={{ fontSize: scale(28), fontFamily: 'Inter_900Black', color:'#FF6B6B' }}>⚔ Boss Attack!</Text>
+            <View style={b.mgTitlePlate}>
+              <Text style={b.mgTitleText}>⚔ BOSS <Text style={b.mgTitleDanger}>ATTACK!</Text></Text>
+            </View>
           </View>
         )}
 
         {/* ── Mini-games (all use activeCard for name + dmg) ── */}
-        {phase === 'zap-strike'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ZapStrikeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} zapZone={boss.zapZone} /></View>}
+        {phase === 'zap-strike'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ZapStrikeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} zapZone={boss.zapZone} title={activeCard.label} ease={ease} /></View>}
         {phase === 'frenzy'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FrenzyGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} onFlash={flashScreen} /></View>}
-        {phase === 'overcharge'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><OverchargeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
-        {phase === 'whack'         && activeCard && <View style={{ flex:1, justifyContent:'center' }}><WhackGame        onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
-        {phase === 'block-breaker' && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={false} /></View>}
-        {phase === 'power-slash'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><PowerSlashGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
-        {phase === 'earthquake'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><EarthquakeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
-        {phase === 'defuse'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><DefuseGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
-        {phase === 'combo-chain'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={true} /></View>}
+        {phase === 'overcharge'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><OverchargeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
+        {phase === 'whack'         && activeCard && <View style={{ flex:1, justifyContent:'center' }}><WhackGame        onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
+        {phase === 'block-breaker' && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={false} title={activeCard.label} /></View>}
+        {phase === 'power-slash'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><PowerSlashGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
+        {phase === 'earthquake'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><EarthquakeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
+        {phase === 'defuse'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><DefuseGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
+        {phase === 'combo-chain'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={true} title={activeCard.label} /></View>}
         {phase === 'shake-potion'  && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ShakePotionGame  onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
         {phase === 'slingshot'     && activeCard && <SlingshotGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} />}
         {phase === 'feed-boss'     && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FeedBossGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} onBossReact={t => showBubble(t, 2500)} /></View>}
@@ -4587,15 +4793,39 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
               ))}
             </View>
 
-            {/* Shard pip bar */}
-            <View style={b.coreRow}>
-              <Text style={b.coreLabel}>SHARDS</Text>
-              <View style={b.corePips}>
-                {Array.from({ length: Math.max(6, shards) }).map((_, i) => (
-                  <View key={i} style={[b.corePip, i < shards ? b.corePipOn : b.corePipOff]} />
-                ))}
+            {/* Bottom HUD — two-sided readout (MON-19 Rev 7):
+                left = shards count pill, right = earned-weapon slot. */}
+            <View style={b.hudRow}>
+              {/* Shards count pill */}
+              <View style={b.shardPill}>
+                <View style={b.shardGem}><Text style={b.shardGemText}>💎</Text></View>
+                <Text style={b.shardNum}>{shards}</Text>
+                <Text style={b.shardCap}>/{SHARD_CAP}</Text>
               </View>
-              <Text style={b.coreCount}>💎{shards}</Text>
+
+              {/* Earned-weapon slot — the discovered weakness (MON-82). Tappable to
+                  land a big hit, then consumed. Empty state when not earned. */}
+              {weaknessUnlocked ? (
+                <TouchableOpacity
+                  onPress={handleWeakness}
+                  disabled={weaknessUsed}
+                  activeOpacity={0.82}
+                  style={[b.weaponSlot, weaknessUsed && b.weaponSlotUsed]}
+                >
+                  <View style={b.weaponIcon}><Text style={{ fontSize: scale(16) }}>{boss.weakness.icon}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={b.weaponName} numberOfLines={1}>{boss.weakness.name}</Text>
+                  </View>
+                  <Text style={b.weaponReady}>{weaknessUsed ? 'USED' : 'READY'}</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={b.weaponSlotEmpty}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={b.weaponEmptyTitle}>No weapon</Text>
+                    <Text style={b.weaponEmptySub}>Earn by Sunday</Text>
+                  </View>
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -9871,6 +10101,8 @@ interface KidMonsterState {
   pendingCoopChest: PendingCoopChest | null;
   /** Consecutive boss wins with no escape in between — drives the Undefeated milestone. */
   battleWinStreak: number;
+  /** MON-82: true once this kid has discovered the boss weakness this week; reset Monday. */
+  weaknessDiscovered: boolean;
 }
 
 const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
@@ -9889,6 +10121,7 @@ const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
   weeklyShardsClaimed: false,
   pendingCoopChest: null,
   battleWinStreak: 0,
+  weaknessDiscovered: false,
 };
 
 function AppInner() {
@@ -9955,6 +10188,18 @@ function AppInner() {
   // reveal screen: did this win finish the family capture, or just wear the
   // boss down further (and how many fights remain)?
   const [coopWin, setCoopWin] = useState<{ familyCaptured: boolean; fightsLeft: number; totalFighters: number; bossName: string } | null>(null);
+  // Reward popups (weakness discovery + random shard drop) share ONE Modal host,
+  // driven by a queue. Two RN <Modal>s presented at once leave a ghost overlay
+  // that swallows touches — and a chore tap can fire both at once (the chore that
+  // crosses 75% triggers the weakness modal AND rolls the shard drop). A single
+  // queued Modal swaps content instead of presenting/dismissing two natives.
+  type RewardPopup =
+    | { kind: 'shard' }
+    | { kind: 'weakness'; bossName: string; weaknessName: string; weaknessIcon: string };
+  const [rewardQueue, setRewardQueue] = useState<RewardPopup[]>([]);
+  const reward = rewardQueue[0] ?? null;
+  const enqueueReward  = (p: RewardPopup) => setRewardQueue(q => [...q, p]);
+  const dismissReward  = () => setRewardQueue(q => q.slice(1));
   const [battleCoinBonusEnabled,    setBattleCoinBonusEnabled]    = useState(false);
   // Fraction of the base chore rate paid on a boss win (0.25 = 25%). Was a
   // multiple of the boss's capture value; now a % of base rate (one model,
@@ -10108,7 +10353,6 @@ function AppInner() {
   const lastChoreDate       = _km.lastChoreDate;
   const pendingEvolution    = _km.pendingEvolution;
   const shards              = _km.shards;
-  const weeklyShardsClaimed = _km.weeklyShardsClaimed;
   const pendingCoopChest    = _km.pendingCoopChest;
   const effectiveMonsterName = selectedMonsterName || fallbackNameForKid(currentKidName);
 
@@ -10618,6 +10862,24 @@ function AppInner() {
     ? BOSSES.find(b => b.name === householdBoss.bossName)
     : null) ?? pickHouseholdBoss(householdTier, debugDayOffset);
   const activeKidBoss: Boss = bossForKid(householdIdentity, monsterIdx);
+
+  // MON-82: surface the weakness-discovery modal the first time the current kid
+  // crosses the weekly chore threshold (once per kid per week — reset Monday).
+  // Discovery is kid-facing, so only fire in kid view: if a parent's approval
+  // pushes the kid over the line, it shows when the kid is back on their screen.
+  useEffect(() => {
+    if (viewMode !== 'kid' || !currentKidName) return;
+    const km = kidMonsterState[currentKidName];
+    if (!km || km.weaknessDiscovered) return;
+    const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
+    const target   = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
+    const done     = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
+    if (Math.min(100, Math.round((done / target) * 100)) < WEAKNESS_THRESHOLD_PCT) return;
+    const w = activeKidBoss.weakness;
+    enqueueReward({ kind: 'weakness', bossName: activeKidBoss.name, weaknessName: w.name, weaknessIcon: w.icon });
+    setKidMonsterState(prev => ({ ...prev, [currentKidName]: { ...prev[currentKidName], weaknessDiscovered: true } }));
+  }, [viewMode, currentKidName, managedChores, kidMonsterState, activeKidBoss.name]);
+
   // Shared-bar progress for the current household boss.
   const householdKidNames = setupChildren.map(c => c.name);
   const householdHpPct = householdBoss.hpPct;
@@ -10781,6 +11043,16 @@ function AppInner() {
     if (completedToday(chore, currentKidName, today)) return;
     const earnedCents = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
     log('chore.submit', { choreId: id, kidId: kidDbId, difficulty: chore.difficulty, earnedCents, requireApproval });
+
+    // MON-19 Shard Economy: completely-random shard drop on completing a chore.
+    // Banked per-kid (capped); surfaced via the reward modal. Fires for both the
+    // approval and auto-approve paths — it rewards the act of doing the chore.
+    const shardsNow = (kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).shards;
+    if (shardsNow < SHARD_CAP && Math.random() < SHARD_DROP_CHANCE) {
+      setKidMonster(currentKidName, s => ({ ...s, shards: Math.min(SHARD_CAP, s.shards + 1) }));
+      enqueueReward({ kind: 'shard' });
+    }
+
     if (requireApproval) {
       // Shared "first to finish" chores: the moment one kid submits, lock it for
       // the whole household. The submitter goes 'pending' (awaiting approval);
@@ -10936,6 +11208,7 @@ function AppInner() {
           done: {},
           battleResult: null,
           weeklyShardsClaimed: false,
+          weaknessDiscovered: false, // MON-82: re-discoverable each new week
           // MON-84: the household boss now CARRIES OVER until the family captures
           // it, so the shared HP bar and participant ledger (`householdBoss.hpPct`
           // / `participants`) persist across the week boundary — only the weekly
@@ -11392,10 +11665,10 @@ function AppInner() {
       pct = Math.min(100, Math.round((totalDone / totalTarget) * 100));
     }
     setKidMonster(currentKidName, s => {
-      // Bank unspent shards: the arena was seeded with the banked balance plus
-      // this week's grant (if not yet claimed), so persist what's left after
-      // spending — and mark the grant claimed so a re-entry can't re-farm it.
-      const entryShards = Math.min(SHARD_CAP, s.shards + (s.weeklyShardsClaimed ? 0 : calcWeeklyShards(pct)));
+      // Bank unspent shards. Shards now come ONLY from doing chores (the random
+      // per-chore drop), so the bank is just what's left after spending — no
+      // weekly completion grant is added here.
+      const entryShards = Math.min(SHARD_CAP, s.shards);
       return {
         ...s,
         battleResult: result,
@@ -11971,7 +12244,7 @@ function AppInner() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
           <>
-            {screen === 'home'     && <ErrorBoundary key={`home-${currentKidName}`}><HomeScreen   key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={getKidCoins(currentKidName)} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={requestParentMode} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} parentRole={parentRole} requireApproval={requireApproval} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={(name: string) => {
+            {screen === 'home'     && <ErrorBoundary key={`home-${currentKidName}`}><HomeScreen   key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={getKidCoins(currentKidName)} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={requestParentMode} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} parentRole={parentRole} requireApproval={requireApproval} debugDayOffset={debugDayOffset} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={(name: string) => {
                   setKidMonster(currentKidName, s => ({ ...s, selectedMonsterName: name }));
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
@@ -11996,9 +12269,9 @@ function AppInner() {
               const totalWeeklyDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
               const completionPct = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
               const totalPower = calcPowerRating(completionPct, monsterIdx, liveCurrentStreak);
-              // The weekly grant is claimed once per week (first battle entry);
-              // re-entering after an escape brings only the banked balance.
-              const battleShards = Math.min(SHARD_CAP, shards + (weeklyShardsClaimed ? 0 : calcWeeklyShards(completionPct)));
+              // Shards come only from doing chores (the random per-chore drop),
+              // banked per kid — the battle is seeded with that banked balance.
+              const battleShards = Math.min(SHARD_CAP, shards);
               // MON-82: weakness is discovered at the weekly chore threshold (75%),
               // replacing the old 50%-plus-5-day-streak gate.
               const weaknessUnlocked = completionPct >= WEAKNESS_THRESHOLD_PCT;
@@ -12178,6 +12451,20 @@ function AppInner() {
         }}
       />
     )}
+
+    {/* Single reward-popup host (weakness discovery + shard drop), queued so two
+        never present at once — see RewardPopup queue. */}
+    <RewardModal
+      visible={reward !== null}
+      icon={reward?.kind === 'weakness' ? reward.weaknessIcon : '💎'}
+      title={reward?.kind === 'weakness' ? 'Weakness discovered!' : 'Shard found!'}
+      onClose={dismissReward}
+      body={
+        reward?.kind === 'weakness'
+          ? <>{reward.bossName} is weak to <RewardModalStrong>{reward.weaknessName}</RewardModalStrong>.{'\n'}Use it in your next boss battle!</>
+          : <>You found a battle <RewardModalStrong>shard</RewardModalStrong>!{'\n'}Spend it on a special attack in your next battle.</>
+      }
+    />
 
     {/* Global debug overlay */}
     {debugOpen && renderDebugPanel()}
@@ -12424,6 +12711,28 @@ function AppInner() {
                     <Text style={s.debugSectionLabel}>WEAKNESS UNLOCKED</Text>
                     <Toggle value={dbgWeaknessUnlocked} onValueChange={setDbgWeaknessUnlocked} />
                   </View>
+
+                  {/* MON-82: preview the weakness-discovery modal for the picked boss */}
+                  <TouchableOpacity
+                    style={s.debugResetBtn}
+                    onPress={() => {
+                      const b = BOSSES[dbgBossIdx];
+                      enqueueReward({ kind: 'weakness', bossName: b.name, weaknessName: b.weakness.name, weaknessIcon: b.weakness.icon });
+                      setDebugOpen(false);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.debugResetTxt}>{BOSSES[dbgBossIdx].weakness.icon}  Weakness Discovered — {BOSSES[dbgBossIdx].weakness.name}</Text>
+                  </TouchableOpacity>
+
+                  {/* MON-19: preview the random shard-drop modal */}
+                  <TouchableOpacity
+                    style={s.debugResetBtn}
+                    onPress={() => { enqueueReward({ kind: 'shard' }); setDebugOpen(false); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.debugResetTxt}>💎  Shard Found — drop modal</Text>
+                  </TouchableOpacity>
 
                   {/* Computed preview */}
                   <View style={{ backgroundColor: '#1A1A1A', borderRadius: 10, padding: 12, gap: 4 }}>
@@ -13143,10 +13452,25 @@ const w = StyleSheet.create({
   },
   weaknessIcon: { fontSize: scale(16) },
   weaknessText: { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#8B6800' },
-  unlockArrow: {
-    width: 28, height: 28, borderRadius: 14, backgroundColor: '#3AB56A',
-    alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end', marginTop: 8,
+  // "WEAK TO" card (World boss-stats)
+  weakToLabel: { fontSize: scale(13), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: 1 },
+  weakIconSquare: {
+    width: scale(46), height: scale(46), borderRadius: 12, backgroundColor: '#FFFDF7',
+    borderWidth: 2.5, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center',
   },
+  weakIconCircle: {
+    width: scale(46), height: scale(46), borderRadius: scale(23), backgroundColor: '#E7DEFF',
+    borderWidth: 2.5, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center',
+  },
+  weakQ: { fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A' },
+  weakName: { fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A', flexShrink: 1 },
+  weakSub: { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: C.muted, lineHeight: scale(17) },
+  unlockArrow: {
+    width: scale(30), height: scale(30), borderRadius: scale(15), backgroundColor: '#C5F215',
+    borderWidth: 2, borderColor: '#1A1A1A',
+    alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end', marginTop: 'auto',
+  },
+  unlockArrowText: { color: '#1A1A1A', fontFamily: 'Inter_900Black', fontSize: scale(16), marginTop: -2 },
   threatPill: {
     alignSelf: 'flex-start', borderRadius: 100, paddingHorizontal: 16, paddingVertical: 4,
     borderWidth: 2, borderColor: '#1A1A1A',
@@ -13276,17 +13600,48 @@ const b = StyleSheet.create({
   spEmoji:         { fontSize: scale(18) },
   spLabel:         { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.text },
   spCost:          { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.muted },
-  coreRow:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  coreLabel:       { fontSize: scale(12), fontFamily: 'Inter_700Bold', letterSpacing: 1.5, color: '#6B35F0' },
-  corePips:        { flex: 1, flexDirection: 'row', gap: 4 },
-  corePip:         { flex: 1, height: 12, borderRadius: 3 },
-  corePipOn:       { backgroundColor: '#6B35F0' },
-  corePipOff:      { backgroundColor: C.border },
-  coreCount:       { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#6B35F0', minWidth: 20, textAlign: 'right' },
+  // ── Battle HUD: shards pill + earned-weapon slot (MON-19 Rev 7) ────────────
+  hudRow:          { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
+  shardPill:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FAF9F4', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: scale(8), paddingHorizontal: scale(12), ...SOLID_SHADOW },
+  shardGem:        { width: scale(26), height: scale(26), borderRadius: scale(8), backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
+  shardGemText:    { fontSize: scale(13) },
+  shardNum:        { fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' },
+  shardCap:        { fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#767676' },
+  weaponSlot:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFF9E6', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: scale(8), paddingHorizontal: scale(12), ...SOLID_SHADOW },
+  weaponSlotEmpty: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)', borderStyle: 'dashed', borderRadius: 14, paddingVertical: scale(8), paddingHorizontal: scale(12) },
+  weaponSlotUsed:  { opacity: 0.4 },
+  weaponIcon:      { width: scale(30), height: scale(30), borderRadius: scale(8), backgroundColor: '#fff', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
+  weaponName:      { fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' },
+  weaponReady:     { fontSize: scale(10), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: 0.5, backgroundColor: '#C5F215', borderWidth: 1.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(7), paddingVertical: scale(1), overflow: 'hidden' },
+  weaponEmptyTitle:{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: 'rgba(255,255,255,0.9)' },
+  weaponEmptySub:  { fontSize: scale(10), fontFamily: 'Inter_600SemiBold', color: 'rgba(255,255,255,0.6)' },
+
+  // ── Per-hit result: tier banner + stars + damage chip (MON-19 Rev 7) ───────
+  resultScrim:     { ...StyleSheet.absoluteFillObject, zIndex: 95, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.42)' },
+  resultBanner:    { paddingHorizontal: scale(22), paddingVertical: scale(10), borderRadius: 100, borderWidth: 3, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  resultBannerText:{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(34), color: '#1A1A1A', textAlign: 'center' },
+  resultStars:     { flexDirection: 'row', gap: scale(4) },
+  resultStar:      { fontSize: scale(30) },
+  resultChip:      { backgroundColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(18), paddingVertical: scale(6) },
+  resultChipText:  { fontFamily: 'Inter_900Black', fontSize: scale(18), color: '#fff' },
+  resultBoost:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(12), paddingVertical: scale(4) },
+  resultBoostText: { fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 0.3 },
+
+  // ── Captured payoff (boss-in-jar, holds until tapped) ──────────────────────
+  captureScrim:    { ...StyleSheet.absoluteFillObject, zIndex: 120, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.82)' },
+  captureName:     { fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), color: '#FFFFFF', textAlign: 'center' },
+  captureBtn:      { backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(36), paddingVertical: scale(14), marginTop: scale(4), ...SOLID_SHADOW },
+  captureBtnText:  { fontFamily: 'Inter_900Black', fontSize: scale(18), color: '#1A1A1A' },
 
   // ── Mini-game shared ──────────────────────────────────────────────────────
   mgTitle:    { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#767676', letterSpacing: 1.5 },
   mgInstr:    { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A', textAlign: 'center' },
+  mgTitlePlate: { backgroundColor: '#1A1A1A', borderRadius: 12, paddingHorizontal: scale(16), paddingVertical: scale(7), borderWidth: 2, borderColor: '#000' },
+  mgTitleText:  { fontFamily: 'FredokaOne_400Regular', fontSize: scale(20), color: '#FFFFFF', letterSpacing: 0.5, textAlign: 'center' },
+  mgTitleAccent:{ color: '#C5F215' },
+  mgTitleDanger:{ color: '#FF6B6B' },
+  mgInstrPill:  { backgroundColor: '#FFF9E6', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: scale(14), paddingVertical: scale(6), maxWidth: scale(320) },
+  mgInstrText:  { fontFamily: 'Inter_700Bold', fontSize: scale(13), color: '#1A1A1A', textAlign: 'center' },
   mgMainBtn:  { backgroundColor: '#6B35F0', borderRadius: 100, paddingHorizontal: scale(40), paddingVertical: scale(18), borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   mgMainBtnText: { color: '#fff', fontFamily: 'Inter_900Black', fontSize: scale(18) },
   mgBigTap:   { width: scale(130), height: scale(130), borderRadius: scale(65), backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
