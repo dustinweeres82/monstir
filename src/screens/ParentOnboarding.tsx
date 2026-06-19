@@ -190,7 +190,7 @@ const REWARD_TYPES = [
 // ─── Slider helpers ────────────────────────────────────────────────────────
 
 // Base pay range: $0.25 – $2.00 in $0.25 steps → 8 steps (index 0..7)
-const BASE_PAY_STEPS = [0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00];
+export const BASE_PAY_STEPS = [0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00];
 const MEDIUM_MULTIPLIER = 1.5;
 const HARD_MULTIPLIER   = 2.0;
 

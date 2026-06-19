@@ -15,7 +15,6 @@ export async function saveProfile(fields: {
   parent_role?: string;
   base_rate?: number;
   require_approval?: boolean;
-  weekly_cap_enabled?: boolean;
   battle_coin_bonus_enabled?: boolean;
   battle_coin_bonus_multiplier?: number;
   goals_json?: string;

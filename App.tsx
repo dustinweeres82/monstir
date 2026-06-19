@@ -28,7 +28,7 @@ import {
   signInWithGoogle, signInWithApple, type SocialUser,
 } from './src/lib/socialAuth';
 import { canonicalizeEmail } from './src/lib/email';
-import { ParentOnboarding } from './src/screens/ParentOnboarding';
+import { ParentOnboarding, BASE_PAY_STEPS } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
 import { obc, obText, cardShadow, DotGridBg, ObButton, StepDots as ObStepDots, Tag, InfoDot, CodeCells, Keypad, ScreenEnter, Rise } from './src/screens/onboarding/obkit';
 import { TrophyRoom } from './src/screens/TrophyRoom';
@@ -879,6 +879,21 @@ function frequencyToWeeklyTarget(frequency: string): number {
   }
 }
 
+/** A chore that recurs every single day. Daily chores are governed SOLELY by the
+ *  once-per-day lock (`completedToday`) — never by the weekly quota — because
+ *  their 7/week target equals the days in a week, so letting the quota gate them
+ *  lets unapproved backlog or shared-count accumulation wrongly hide them on a
+ *  given day. The once-per-day stamp (set on submit) already caps them at 1/day. */
+const isDailyChore = (chore: ManagedChore): boolean =>
+  chore.frequency === 'Every day' || chore.frequency === 'daily';
+
+/** Whether a kid has hit a chore's weekly quota (counting approved + pending +
+ *  backlog). Daily chores are exempt — they cap at one-per-day, not a weekly
+ *  total — so this only gates the sub-weekly frequencies (1×/2×/3× a week). This
+ *  is the single source of truth for "is this chore used up for the week". */
+const atWeeklyCap = (chore: ManagedChore, kidName: string): boolean =>
+  !isDailyChore(chore) && getClaimedCount(chore, kidName) >= frequencyToWeeklyTarget(chore.frequency);
+
 /** Returns today's date string, offset by `days` for debug simulation. */
 function getSimulatedToday(offsetDays: number = 0): string {
   if (offsetDays === 0) return new Date().toDateString();
@@ -934,7 +949,8 @@ function applyDailyReset(chores: ManagedChore[], today: string): ManagedChore[] 
     const independent = isIndependentChore(c);
     // Shared chores gate on the single household count — including anything still
     // awaiting approval — so the board doesn't reappear past the weekly target.
-    if (!independent) {
+    // Daily chores are exempt (once-per-day lock governs them, not the quota).
+    if (!independent && !isDailyChore(c)) {
       const sharedPending = Object.values(c.childPendingCount ?? {}).reduce((a, b) => a + b, 0)
         + Object.values(c.childStatus ?? {}).filter(s => s === 'pending').length;
       if ((c.weeklyCompletions ?? 0) + sharedPending >= target) return c;
@@ -957,7 +973,9 @@ function applyDailyReset(chores: ManagedChore[], today: string): ManagedChore[] 
         // Claimed = approved + backlog + today's pending (the one being rolled over).
         const approved = independent ? (c.childCompletions?.[kid] ?? 0) : (c.weeklyCompletions ?? 0);
         const claimed  = approved + (c.childPendingCount?.[kid] ?? 0) + (st === 'pending' ? 1 : 0);
-        const kidDone  = claimed >= target;
+        // Daily chores never hit a weekly "quota" — they reopen each day, gated
+        // only by the once-per-day lock below.
+        const kidDone  = !isDailyChore(c) && claimed >= target;
         // Any recurring chore stays locked for the rest of the day it was completed.
         const lockedToday = completedToday(c, kid, today);
         if (st === 'pending') {
@@ -1962,7 +1980,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const isDoneForNow = (c: ManagedChore) =>
     getChoreStatus(c, currentKidName) === 'approved' ||
     completedToday(c, currentKidName, choreToday) ||
-    getClaimedCount(c, currentKidName) >= frequencyToWeeklyTarget(c.frequency);
+    atWeeklyCap(c, currentKidName);
   const allDailyDone = allAssignedChores.length > 0 && allAssignedChores.every(isDoneForNow);
   // Only show not-yet-done chores in the list — done/locked/capped ones drop off.
   const dailyChores  = allAssignedChores.filter(c => !isDoneForNow(c));
@@ -3073,7 +3091,7 @@ const FRENZY_THRESHOLDS = [
   { count: 17, color: '#C5F215' },
 ];
 
-function FrenzyGame({ onScore }: { onScore: (s: number) => void; onFlash?: (color: string) => void }) {
+function FrenzyGame({ onScore, title = 'FRENZY' }: { onScore: (s: number) => void; title?: string; onFlash?: (color: string) => void }) {
   const TAP_GAIN   = 0.10;
   const DRAIN      = 0.012;
   const DURATION   = 3000;
@@ -3115,45 +3133,40 @@ function FrenzyGame({ onScore }: { onScore: (s: number) => void; onFlash?: (colo
   };
 
   return (
-    <View style={{ paddingHorizontal: scale(20) }}>
-      <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(24), gap: scale(20), ...SOLID_SHADOW }}>
+    <View style={{ alignItems: 'center', gap: scale(18), paddingHorizontal: scale(20) }}>
+      <MiniGameBanner title={title} instr="Tap fast to charge the meter before time runs out!" />
 
-        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
-          Tap the button to charge energy!
-        </Text>
-
-        {/* Meter row */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(10) }}>
-          <View style={{ width: scale(44), height: scale(44), borderRadius: scale(22), backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW }}>
-            <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(26), height: scale(26) }} resizeMode="contain" />
-          </View>
-          <View style={{ flex: 1, height: scale(28), borderRadius: scale(100), borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#ECECEC', overflow: 'hidden', padding: 4 }}>
-            <Animated.View style={{
-              width: fillAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) as any,
-              height: '100%',
-              borderRadius: scale(100),
-              borderWidth: 2,
-              borderColor: '#1A1A1A',
-              backgroundColor: fillAnim.interpolate({
-                inputRange: [0, 0.4, 0.7, 1],
-                outputRange: ['#F5C842', '#F5A023', '#E86020', '#D03020'],
-              }) as any,
-            }} />
-          </View>
+      {/* Meter row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(10), width: '100%' }}>
+        <View style={{ width: scale(44), height: scale(44), borderRadius: scale(22), backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW }}>
+          <Image source={require('./assets/icons/icon-lightning.png')} style={{ width: scale(26), height: scale(26) }} resizeMode="contain" />
         </View>
-
-        {/* Charge button */}
-        <TouchableOpacity
-          onPress={handleTap}
-          disabled={done}
-          activeOpacity={0.75}
-          style={{ backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
-        >
-          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
-            {done ? '⚡ Charged!' : `Charge!  ${Math.ceil(timeLeft / 1000)}s`}
-          </Text>
-        </TouchableOpacity>
+        <View style={{ flex: 1, height: scale(28), borderRadius: scale(100), borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#ECECEC', overflow: 'hidden', padding: 4 }}>
+          <Animated.View style={{
+            width: fillAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) as any,
+            height: '100%',
+            borderRadius: scale(100),
+            borderWidth: 2,
+            borderColor: '#1A1A1A',
+            backgroundColor: fillAnim.interpolate({
+              inputRange: [0, 0.4, 0.7, 1],
+              outputRange: ['#F5C842', '#F5A023', '#E86020', '#D03020'],
+            }) as any,
+          }} />
+        </View>
       </View>
+
+      {/* Charge button */}
+      <TouchableOpacity
+        onPress={handleTap}
+        disabled={done}
+        activeOpacity={0.75}
+        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+      >
+        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
+          {done ? '⚡ Charged!' : `Charge!  ${Math.ceil(timeLeft / 1000)}s`}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -3261,7 +3274,7 @@ const INGREDIENTS = [
   { key: 'yarn',     src: require('./assets/battleui/Ingredient=yarn.png')     },
 ];
 
-function ShakePotionGame({ onScore }: { onScore: (s: number) => void }) {
+function ShakePotionGame({ onScore, title = 'SHAKE POTION' }: { onScore: (s: number) => void; title?: string }) {
   const [phase,    setPhase]    = useState<'picking' | 'shaking'>('picking');
   const [selected, setSelected] = useState<string[]>([]);
   const [shown] = useState(() =>
@@ -3275,55 +3288,51 @@ function ShakePotionGame({ onScore }: { onScore: (s: number) => void }) {
       );
     };
     return (
-      <View style={{ paddingHorizontal: scale(20) }}>
-        <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(20), gap: scale(16), alignItems: 'center', ...SOLID_SHADOW }}>
-          <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
-            Choose three ingredients!
-          </Text>
+      <View style={{ alignItems: 'center', gap: scale(16), paddingHorizontal: scale(20) }}>
+        <MiniGameBanner title={title} instr="Choose three ingredients!" />
 
-          {/* Ingredient grid — 2 rows of 4 */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: scale(10) }}>
-            {shown.map(ing => {
-              const sel = selected.includes(ing.key);
-              return (
-                <TouchableOpacity
-                  key={ing.key}
-                  onPress={() => toggle(ing.key)}
-                  activeOpacity={0.75}
-                  style={{
-                    width: scale(64), height: scale(64),
-                    borderRadius: scale(32),
-                    backgroundColor: sel ? '#EAE4FF' : 'transparent',
-                    borderWidth: sel ? 2.5 : 0,
-                    borderColor: '#6B35F0',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <Image source={ing.src} style={{ width: scale(48), height: scale(48) }} resizeMode="contain" />
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <TouchableOpacity
-            onPress={() => { if (selected.length === 3) setPhase('shaking'); }}
-            disabled={selected.length < 3}
-            activeOpacity={0.75}
-            style={{ width: '100%', backgroundColor: selected.length === 3 ? '#C5F215' : '#D0CEC8', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
-          >
-            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
-              {selected.length === 3 ? 'Create the potion!' : `Pick ${3 - selected.length} more`}
-            </Text>
-          </TouchableOpacity>
+        {/* Ingredient grid — 2 rows of 4 */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: scale(10) }}>
+          {shown.map(ing => {
+            const sel = selected.includes(ing.key);
+            return (
+              <TouchableOpacity
+                key={ing.key}
+                onPress={() => toggle(ing.key)}
+                activeOpacity={0.75}
+                style={{
+                  width: scale(64), height: scale(64),
+                  borderRadius: scale(32),
+                  backgroundColor: sel ? '#EAE4FF' : 'transparent',
+                  borderWidth: sel ? 2.5 : 0,
+                  borderColor: '#6B35F0',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Image source={ing.src} style={{ width: scale(48), height: scale(48) }} resizeMode="contain" />
+              </TouchableOpacity>
+            );
+          })}
         </View>
+
+        <TouchableOpacity
+          onPress={() => { if (selected.length === 3) setPhase('shaking'); }}
+          disabled={selected.length < 3}
+          activeOpacity={0.75}
+          style={{ alignSelf: 'stretch', backgroundColor: selected.length === 3 ? '#C5F215' : '#D0CEC8', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+        >
+          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
+            {selected.length === 3 ? 'Create the potion!' : `Pick ${3 - selected.length} more`}
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  return <ShakePotionShake onScore={onScore} />;
+  return <ShakePotionShake onScore={onScore} title={title} />;
 }
 
-function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
+function ShakePotionShake({ onScore, title = 'SHAKE POTION' }: { onScore: (s: number) => void; title?: string }) {
   const DURATION  = 3000;
   const TARGET    = 30;   // taps for 100% score
   const tapsRef   = useRef(0);
@@ -3398,44 +3407,44 @@ function ShakePotionShake({ onScore }: { onScore: (s: number) => void }) {
   const rotateDeg = shakeRot.interpolate({ inputRange: [-360, 360], outputRange: ['-360deg', '360deg'] });
 
   return (
-    <View style={{ paddingHorizontal: scale(20) }}>
-      <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(24), gap: scale(20), alignItems: 'center', ...SOLID_SHADOW }}>
+    <View style={{ alignItems: 'center', gap: scale(18), paddingHorizontal: scale(20) }}>
+      <MiniGameBanner title={title} instr="Shake fast before time runs out!" />
 
-        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
-          Shake the potion!
+      {/* Potion image. (The animated colour overlay was removed — `mixBlendMode`
+          doesn't blend on native RN and rendered as a solid square behind the
+          jar; the potion art already shows the liquid.) */}
+      <Animated.View style={{ transform: [{ translateX: shakeX }, { rotate: rotateDeg }] }}>
+        <Image
+          source={require('./assets/battleui/potionicon.png')}
+          style={{ width: scale(120), height: scale(140) }}
+          resizeMode="contain"
+        />
+      </Animated.View>
+
+      {/* Shake button */}
+      <TouchableOpacity
+        onPress={handleTap}
+        disabled={done}
+        activeOpacity={0.7}
+        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+      >
+        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
+          {done ? '✨ Done!' : `Shake!  ${Math.ceil(timeLeft / 1000)}s`}
         </Text>
-
-        {/* Potion image. (The animated colour overlay was removed — `mixBlendMode`
-            doesn't blend on native RN and rendered as a solid square behind the
-            jar; the potion art already shows the liquid.) */}
-        <Animated.View style={{ transform: [{ translateX: shakeX }, { rotate: rotateDeg }] }}>
-          <Image
-            source={require('./assets/battleui/potionicon.png')}
-            style={{ width: scale(120), height: scale(140) }}
-            resizeMode="contain"
-          />
-        </Animated.View>
-
-        {/* Shake button */}
-        <TouchableOpacity
-          onPress={handleTap}
-          disabled={done}
-          activeOpacity={0.7}
-          style={{ width: '100%', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
-        >
-          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
-            {done ? '✨ Done!' : `Shake!  ${Math.ceil(timeLeft / 1000)}s`}
-          </Text>
-        </TouchableOpacity>
-
-      </View>
+      </TouchableOpacity>
     </View>
   );
 }
 
 // ── Mini-game: Slingshot ─────────────────────────────────────────────────────
-function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
+function SlingshotGame({ onScore, title = 'SLINGSHOT' }: { onScore: (s: number) => void; title?: string }) {
   const { width: SW, height: SH } = Dimensions.get('window');
+  // Move-name title split for the ink plate (lime accent on the last word),
+  // matching MiniGameBanner. Slingshot keeps its own contextual instruction pill,
+  // so it only needs the title plate, not the full banner.
+  const tParts = title.trim().split(/\s+/);
+  const tLast  = tParts.length > 1 ? tParts[tParts.length - 1] : null;
+  const tHead  = tLast ? tParts.slice(0, -1).join(' ') : title.trim();
   const SHOTS    = 3;
   const HANDLE_W = scale(200);
   const HANDLE_H = scale(200);
@@ -3571,6 +3580,18 @@ function SlingshotGame({ onScore }: { onScore: (s: number) => void }) {
   return (
     <View style={{ flex: 1 }} onLayout={e => setContainerH(e.nativeEvent.layout.height)} {...panResponder.panHandlers}>
 
+      {/* Move-name title plate — absolute so it never shifts the slingshot
+          coordinate math (which keys off containerH). */}
+      {!done && (
+        <View pointerEvents="none" style={{ position: 'absolute', top: scale(8), left: 0, right: 0, alignItems: 'center', zIndex: 4 }}>
+          <View style={b.mgTitlePlate}>
+            <Text style={b.mgTitleText}>
+              {tLast ? <>{tHead + ' '}<Text style={b.mgTitleAccent}>{tLast}</Text></> : <Text style={b.mgTitleAccent}>{tHead}</Text>}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* Hitzone ring — top centre of action area */}
       {!done && (
         <View style={{
@@ -3677,7 +3698,7 @@ const FEED_GROSS_QUIPS   = ["BLECH! AWFUL! 🤢", "You tricked me! 😤", "What 
 const FEED_MEDIUM_QUIPS  = ["Hmm... not bad.", "I've had worse.", "Could be grosser.", "Meh. 😐"];
 const FEED_YUMMY_QUIPS   = ["Mmm! Delicious! 😋", "PERFECT! More please!", "Now THAT'S a brew!", "Ooh yummy! 😍"];
 
-function FeedBossGame({ onScore, onBossReact }: { onScore: (s: number) => void; onBossReact: (text: string) => void }) {
+function FeedBossGame({ onScore, onBossReact, title = 'FEED BOSS' }: { onScore: (s: number) => void; onBossReact: (text: string) => void; title?: string }) {
   const NEEDED = 3;
   const { width: SW } = Dimensions.get('window');
 
@@ -3754,12 +3775,8 @@ function FeedBossGame({ onScore, onBossReact }: { onScore: (s: number) => void; 
   const liquidColor = grossSoFar > 70 ? '#2D4A1E' : grossSoFar > 40 ? '#4A2D6B' : '#6B35F0';
 
   return (
-    <View style={{ paddingHorizontal: scale(16) }}>
-      <View style={{ backgroundColor: '#FAF9F4', borderRadius: scale(20), borderWidth: 2.5, borderColor: '#1A1A1A', padding: scale(20), alignItems: 'center', gap: scale(16), ...SOLID_SHADOW }}>
-
-        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A', textAlign: 'center' }}>
-          Make the yuckiest brew!
-        </Text>
+    <View style={{ alignItems: 'center', gap: scale(16), paddingHorizontal: scale(16) }}>
+        <MiniGameBanner title={title} instr="Drag the grossest ingredients into the cauldron!" />
 
         {/* Cauldron */}
         <View ref={cauldronRef} onLayout={() => {
@@ -3810,7 +3827,6 @@ function FeedBossGame({ onScore, onBossReact }: { onScore: (s: number) => void; 
             Drag {NEEDED - dropped.length} more ingredient{NEEDED - dropped.length !== 1 ? 's' : ''} into the cauldron
           </Text>
         )}
-      </View>
     </View>
   );
 }
@@ -4225,15 +4241,32 @@ function DefuseGame({ onScore, title = 'DEFUSE', ease = 0 }: { onScore: (s: numb
 
   const timerPct = (timeLeft / ROUND_MS) * 100;
   const secs = Math.ceil(timeLeft / 1000);
+  const lowTime = timerPct <= 25;   // last quarter of the round — go red & spark the fuse
   return (
-    <View style={{ alignItems:'center', gap: scale(12), paddingHorizontal: scale(20) }}>
+    <View style={{ alignItems:'center', gap: scale(10), paddingHorizontal: scale(20) }}>
       <MiniGameBanner title={title} instr="Snip the safe wires — never the ⚠️ wire!" />
-      <View style={{ flexDirection:'row', alignItems:'center', gap: scale(12) }}>
-        <Text style={{ fontFamily:'Inter_900Black', fontSize: scale(30), color: timerPct > 25 ? '#1A1A1A' : '#FF3B55', letterSpacing: 2 }}>
-          {`0:0${Math.min(9, secs)}`}
-        </Text>
-        <Text style={{ fontFamily:'Inter_800ExtraBold', fontSize: scale(13), color:'#767676' }}>Round {round}/{DEFUSE_MAXROUNDS}</Text>
+      {/* The bomb itself: a round body with a fuse and a digital countdown readout
+          (MON-19 Rev 7 defuse spec — "bomb with a digital 0:03 countdown"). */}
+      <View style={{ alignItems:'center' }}>
+        {/* Fuse + spark poking out the top */}
+        <View style={{ flexDirection:'row', alignItems:'flex-end', marginBottom: -scale(5), zIndex: 2 }}>
+          <View style={{ width: scale(4), height: scale(15), borderRadius: 2, backgroundColor:'#8A6D3B', transform:[{ rotate:'20deg' }] }} />
+          <Text style={{ fontSize: scale(15), marginLeft: -scale(3), marginBottom: scale(5) }}>{lowTime ? '🔥' : '✨'}</Text>
+        </View>
+        {/* Bomb body */}
+        <View style={{ width: scale(110), height: scale(110), borderRadius: scale(55), backgroundColor:'#1A1A1A', borderWidth: 3, borderColor:'#000', alignItems:'center', justifyContent:'center', ...SOLID_SHADOW }}>
+          {/* glossy highlight */}
+          <View style={{ position:'absolute', top: scale(18), left: scale(24), width: scale(18), height: scale(18), borderRadius: scale(9), backgroundColor:'rgba(255,255,255,0.18)' }} />
+          {/* digital LED readout */}
+          <View style={{ backgroundColor:'#0A0A0A', borderRadius: scale(8), paddingHorizontal: scale(11), paddingVertical: scale(4), borderWidth: 1.5, borderColor: lowTime ? '#FF3B55' : '#C5F215' }}>
+            <Text style={{ fontFamily:'Inter_900Black', fontSize: scale(28), color: lowTime ? '#FF3B55' : '#C5F215', letterSpacing: 3 }}>
+              {`0:0${Math.min(9, secs)}`}
+            </Text>
+          </View>
+        </View>
       </View>
+      <Text style={{ fontFamily:'Inter_800ExtraBold', fontSize: scale(13), color:'#767676' }}>Round {round}/{DEFUSE_MAXROUNDS}</Text>
+      {/* Burning-fuse timer bar */}
       <View style={{ width: scale(240), height: scale(10), borderRadius: scale(6), backgroundColor:'#ECEAE4', borderWidth:1.5, borderColor:'#1A1A1A', overflow:'hidden' }}>
         <View style={{ width:`${timerPct}%`, height:'100%', borderRadius: scale(6), backgroundColor: timerPct > 50 ? '#C5F215' : timerPct > 25 ? '#F59E0B' : '#FF3B55' }} />
       </View>
@@ -4762,7 +4795,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
 
         {/* ── Mini-games (all use activeCard for name + dmg) ── */}
         {phase === 'zap-strike'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ZapStrikeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} zapZone={boss.zapZone} title={activeCard.label} ease={ease} /></View>}
-        {phase === 'frenzy'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FrenzyGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} onFlash={flashScreen} /></View>}
+        {phase === 'frenzy'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FrenzyGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} onFlash={flashScreen} /></View>}
         {phase === 'overcharge'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><OverchargeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
         {phase === 'whack'         && activeCard && <View style={{ flex:1, justifyContent:'center' }}><WhackGame        onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
         {phase === 'block-breaker' && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={false} title={activeCard.label} /></View>}
@@ -4770,9 +4803,9 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
         {phase === 'earthquake'    && activeCard && <View style={{ flex:1, justifyContent:'center' }}><EarthquakeGame   onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
         {phase === 'defuse'        && activeCard && <View style={{ flex:1, justifyContent:'center' }}><DefuseGame       onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} ease={ease} /></View>}
         {phase === 'combo-chain'   && activeCard && <View style={{ flex:1, justifyContent:'center' }}><SequenceGame     onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} fast={true} title={activeCard.label} /></View>}
-        {phase === 'shake-potion'  && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ShakePotionGame  onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} /></View>}
-        {phase === 'slingshot'     && activeCard && <SlingshotGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} />}
-        {phase === 'feed-boss'     && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FeedBossGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} onBossReact={t => showBubble(t, 2500)} /></View>}
+        {phase === 'shake-potion'  && activeCard && <View style={{ flex:1, justifyContent:'center' }}><ShakePotionGame  onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} /></View>}
+        {phase === 'slingshot'     && activeCard && <SlingshotGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} />}
+        {phase === 'feed-boss'     && activeCard && <View style={{ flex:1, justifyContent:'center' }}><FeedBossGame onScore={s => handleScore(activeCard.label, activeCard.baseDmg, s, activeCard.shardCost)} title={activeCard.label} onBossReact={t => showBubble(t, 2500)} /></View>}
 
         {/* ── Card hand (choosing phase) ── */}
         {phase === 'choosing' && (
@@ -5793,6 +5826,107 @@ function MoneyScreen({
   const avatarColor = (name: string, idx: number) =>
     kidProfiles.find(k => k.name === name)?.avatarColor ?? AVATAR_COLORS[idx % AVATAR_COLORS.length];
 
+  // One kid's earnings card. `fullWidth` is used when a single card is shown on
+  // its own (one kid, or the tab-selected kid) rather than in the scrolling row.
+  const renderKidCard = (slice: (typeof ledger.perKid)[number], i: number, fullWidth = false) => {
+    const kid = kidProfiles[i];
+    const balance = slice.owedCents;
+    // A zero balance reads "Paid ✓" only if the kid has actually earned or been
+    // paid before. A brand-new kid who's never earned anything hasn't been
+    // "paid" — they've been paid nothing — so show a neutral "Nothing yet".
+    const everActive = choreHistory.some(e => e.kidName === kid.name) || payoutLog.some(p => p.kidName === kid.name);
+    const isPaid      = balance === 0 && everActive;
+    const neverEarned = balance === 0 && !everActive;
+    return (
+      <View
+        key={`${kid.name}-${i}`}
+        style={{
+          width: fullWidth ? '100%' : 120,
+          borderRadius: 14,
+          backgroundColor: '#FFFFFF',
+          borderWidth: 2,
+          borderColor: '#1A1A1A',
+          padding: 12,
+          alignItems: 'center',
+          ...shadows.soft,
+        }}
+      >
+        {/* Avatar circle */}
+        <View style={{
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: avatarColor(kid.name, i),
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 2,
+          borderColor: '#1A1A1A',
+          marginBottom: 8,
+        }}>
+          <Image
+            source={getAvatarImage(kid.avatarIdx)}
+            style={{ width: 36, height: 36, borderRadius: 18 }}
+            resizeMode="cover"
+          />
+        </View>
+        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 4 }} numberOfLines={1}>
+          {kid.name}
+        </Text>
+        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>
+          This Week
+        </Text>
+        {/* Earned is neutral ink — green is reserved for the settled/paid state
+            only (MON-75 Rev 6), so the row doesn't scan "all done". */}
+        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 8 }}>
+          {fmtDollars(slice.earnedThisWeekCents)}
+        </Text>
+        {neverEarned ? (
+          <View style={{
+            borderRadius: 6,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            backgroundColor: '#F2F1ED',
+            borderWidth: 1,
+            borderColor: '#C9C7C0',
+          }}>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#767676' }}>Nothing yet</Text>
+          </View>
+        ) : isPaid ? (
+          <View style={{
+            borderRadius: 6,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            backgroundColor: '#F0F7F0',
+            borderWidth: 1,
+            borderColor: '#27AE60',
+          }}>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#27AE60' }}>Paid ✓</Text>
+          </View>
+        ) : (
+          /* Pay action lives in the card itself when money is owed
+             (opens the per-child breakdown sheet). */
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setPayoutSheetKid(kid.name)}
+            style={{
+              alignSelf: 'stretch',
+              borderRadius: 8,
+              paddingVertical: 8,
+              alignItems: 'center',
+              backgroundColor: '#C5F215',
+              borderWidth: 2,
+              borderColor: '#1A1A1A',
+            }}
+          >
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A' }}>
+              Pay {fmtDollars(balance)}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: '#F7F6F2' }}>
       <ScrollView
@@ -5923,88 +6057,7 @@ function MoneyScreen({
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-            {ledger.perKid.map((slice, i) => {
-              const kid = kidProfiles[i];
-              const balance = slice.owedCents;
-              const isPaid = balance === 0;
-              return (
-                <View
-                  key={`${kid.name}-${i}`}
-                  style={{
-                    width: 120,
-                    borderRadius: 14,
-                    backgroundColor: '#FFFFFF',
-                    borderWidth: 2,
-                    borderColor: '#1A1A1A',
-                    padding: 12,
-                    alignItems: 'center',
-                    ...shadows.soft,
-                  }}
-                >
-                  {/* Avatar circle */}
-                  <View style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 22,
-                    backgroundColor: avatarColor(kid.name, i),
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderWidth: 2,
-                    borderColor: '#1A1A1A',
-                    marginBottom: 8,
-                  }}>
-                    <Image
-                      source={getAvatarImage(kid.avatarIdx)}
-                      style={{ width: 36, height: 36, borderRadius: 18 }}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 4 }} numberOfLines={1}>
-                    {kid.name}
-                  </Text>
-                  <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>
-                    This Week
-                  </Text>
-                  {/* Earned is neutral ink — green is reserved for the settled/paid
-                      state only (MON-75 Rev 6), so the row doesn't scan "all done". */}
-                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 8 }}>
-                    {fmtDollars(slice.earnedThisWeekCents)}
-                  </Text>
-                  {isPaid ? (
-                    <View style={{
-                      borderRadius: 6,
-                      paddingHorizontal: 8,
-                      paddingVertical: 4,
-                      backgroundColor: '#F0F7F0',
-                      borderWidth: 1,
-                      borderColor: '#27AE60',
-                    }}>
-                      <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#27AE60' }}>Paid ✓</Text>
-                    </View>
-                  ) : (
-                    /* Pay action lives in the card itself when money is owed
-                       (opens the per-child breakdown sheet). */
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => setPayoutSheetKid(kid.name)}
-                      style={{
-                        alignSelf: 'stretch',
-                        borderRadius: 8,
-                        paddingVertical: 8,
-                        alignItems: 'center',
-                        backgroundColor: '#C5F215',
-                        borderWidth: 2,
-                        borderColor: '#1A1A1A',
-                      }}
-                    >
-                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A' }}>
-                        Pay {fmtDollars(balance)}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })}
+            {ledger.perKid.map((slice, i) => renderKidCard(slice, i))}
           </ScrollView>
         </View>
 
@@ -6873,6 +6926,9 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
 }) {
   const [activeTab, setActiveTab] = useState<'today' | 'history'>('today');
+  // "Today" tab kid filter — when there's more than one kid, pills separate them
+  // so the parent reviews one kid at a time instead of a long stacked list.
+  const [choreKidFilter, setChoreKidFilter] = useState<string | null>(null);
   const [reviewingChore, setReviewingChore] = useState<{ chore: ManagedChore; kidName: string } | null>(null);
   const [toastMsg, setToastMsg]     = useState<string | null>(null);
   const [toastBg, setToastBg]       = useState<string | undefined>(undefined);
@@ -6914,6 +6970,17 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
   const unassignedGroup = kidNames.length === 0 && chores.length > 0
     ? [{ name: 'Everyone', profile: undefined, chores: chores.filter(c => c.assignedTo.length === 0) }]
     : [];
+
+  // With more than one kid we show kid-filter pills and one kid's chores at a
+  // time. `selectedChoreKid` falls back to the first kid if the filter is unset
+  // or stale (e.g. the selected kid was removed).
+  const multiKid = choresByKid.length > 1;
+  const selectedChoreKid = choreKidFilter && choresByKid.some(g => g.name === choreKidFilter)
+    ? choreKidFilter
+    : choresByKid[0]?.name;
+  const todayGroups = multiKid
+    ? choresByKid.filter(g => g.name === selectedChoreKid)
+    : [...choresByKid, ...unassignedGroup];
 
   // Stat counts use per-child status so shared chores count separately per kid
   const approvedCount = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => getChoreStatus(c, g.name) === 'approved').length, 0);
@@ -7031,7 +7098,26 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
               <Text style={{ fontSize: scale(12), color: C.muted, textAlign: 'center' }}>Go to Settings → Chore Library to add chores.</Text>
             </View>
           ) : (
-            [...choresByKid, ...unassignedGroup].map((group, gi) => {
+            <>
+              {/* Kid filter pills — separate kids instead of one long stacked list */}
+              {multiKid && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 16 }}>
+                  {choresByKid.map((g, ci) => {
+                    const isActive = g.name === selectedChoreKid;
+                    return (
+                      <TouchableOpacity
+                        key={`${g.name}-chip-${ci}`}
+                        onPress={() => setChoreKidFilter(g.name)}
+                        activeOpacity={0.75}
+                        style={{ borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: isActive ? '#1A1A1A' : '#FFFFFF', borderWidth: 1.5, borderColor: '#1A1A1A' }}
+                      >
+                        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: isActive ? '#FFFFFF' : '#1A1A1A' }} numberOfLines={1}>{g.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+              {todayGroups.map((group, gi) => {
               const groupApproved = group.chores.filter(c => getChoreStatus(c, group.name) === 'approved').length;
               const groupToReview = group.chores.reduce((s, c) => s + getPendingCount(c, group.name), 0);
               return (
@@ -7129,7 +7215,8 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                   </View>
                 </View>
               );
-            })
+            })}
+            </>
           )
         ) : (
           // History tab
@@ -8166,7 +8253,7 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, onRotateCode, kidProf
             ))}
           </View>
           {onAddKid && (
-            <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
+            <View style={{ paddingHorizontal: 16, marginTop: 24 }}>
               <Button label="+ Add kid" onPress={onAddKid} />
             </View>
           )}
@@ -8211,24 +8298,39 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, onRotateCode, kidProf
   );
 }
 
+// Pretty-print a bonus multiplier: 1.5 → "1.5×", 1 → "1×", 0.25 → "0.25×".
+const fmtMult = (m: number) => `${parseFloat(m.toFixed(2))}×`;
+
+// The bonus is a multiplier on the base rate (per-win = base × multiplier), not
+// a percentage. The slider spans 0×…BONUS_MAX_MULT in BONUS_MULT_STEP snaps.
+const BONUS_MAX_MULT  = 3;
+const BONUS_MULT_STEP = 0.25;
+
 function BonusSlider({ value, onChange, onDragging }: { value: number; onChange: (v: number) => void; onDragging?: (d: boolean) => void }) {
   const trackRef  = useRef<View>(null);
   const trackX    = useRef(0);
   const trackW    = useRef(1);
 
-  const pctFromPageX = (pageX: number) =>
-    Math.round(Math.max(0, Math.min(100, ((pageX - trackX.current) / trackW.current) * 100)));
+  // Map a touch x to a snapped multiplier within [0, BONUS_MAX_MULT].
+  const multFromPageX = (pageX: number) => {
+    const ratio = Math.max(0, Math.min(1, (pageX - trackX.current) / trackW.current));
+    return Math.round((ratio * BONUS_MAX_MULT) / BONUS_MULT_STEP) * BONUS_MULT_STEP;
+  };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder:  () => true,
-      onPanResponderGrant: (_e, gs) => { onDragging?.(true);  onChange(pctFromPageX(gs.x0)); },
-      onPanResponderMove:  (_e, gs) => { onChange(pctFromPageX(gs.moveX)); },
+      onPanResponderGrant: (_e, gs) => { onDragging?.(true);  onChange(multFromPageX(gs.x0)); },
+      onPanResponderMove:  (_e, gs) => { onChange(multFromPageX(gs.moveX)); },
       onPanResponderRelease:   () => { onDragging?.(false); },
       onPanResponderTerminate: () => { onDragging?.(false); },
     })
   ).current;
+
+  // Track fill / thumb position as a 0–100 ratio of the multiplier range, clamped
+  // so a stored value beyond the max can't render a fill wider than the track.
+  const pos = Math.max(0, Math.min(100, (value / BONUS_MAX_MULT) * 100));
 
   return (
     <View
@@ -8242,11 +8344,11 @@ function BonusSlider({ value, onChange, onDragging }: { value: number; onChange:
       }}
       {...panResponder.panHandlers}
     >
-      <View style={[ps.sliderFill, { width: `${value}%` as any }]} />
-      <View style={[ps.sliderThumb, { left: `${value}%` as any }]} />
+      <View style={[ps.sliderFill, { width: `${pos}%` as any }]} />
+      <View style={[ps.sliderThumb, { left: `${pos}%` as any }]} />
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
-        {[0, 25, 50, 75, 100].map(v => (
-          <Text key={v} style={[ps.sliderTickLabel, value === v && { color: '#6B35F0', fontFamily: 'Inter_700Bold' }]}>{v}%</Text>
+        {[0, 1, 2, 3].map(v => (
+          <Text key={v} style={[ps.sliderTickLabel, value === v && { color: '#6B35F0', fontFamily: 'Inter_700Bold' }]}>{v}×</Text>
         ))}
       </View>
     </View>
@@ -8264,14 +8366,13 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const captureRewards = ['Captured boss', 'Collectible relic'];
 
-  // The slider works in whole percent; the persisted value is a fraction.
+  // The bonus is a multiplier on the base rate (per-win = base × multiplier).
   const bonusEnabled   = battleCoinBonusEnabled;
   const setBonusEnabled = setBattleCoinBonusEnabled;
-  const bonusPct       = Math.round((battleCoinBonusMultiplier || 0) * 100);
-  const setBonusPct    = (pct: number) => setBattleCoinBonusMultiplier(pct / 100);
+  const bonusMult      = battleCoinBonusMultiplier || 0;
 
   const base = parseFloat(baseRate) || 0;
-  const bonusAmount = (base * bonusPct / 100).toFixed(2);
+  const bonusAmount = (base * bonusMult).toFixed(2);
 
   return (
     <CreamBg>
@@ -8314,7 +8415,7 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
                 <Text style={ps.impactArrow}>×</Text>
                 <View style={ps.impactCell}>
                   <Text style={ps.impactLabel}>Bonus</Text>
-                  <Text style={[ps.impactValue, { color: '#6B35F0' }]}>{bonusPct}%</Text>
+                  <Text style={[ps.impactValue, { color: '#6B35F0' }]}>{fmtMult(bonusMult)}</Text>
                 </View>
                 <Text style={ps.impactArrow}>=</Text>
                 <View style={[ps.impactCell, ps.impactCellHighlight]}>
@@ -8324,7 +8425,7 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
               </View>
 
               {/* Slider */}
-              <BonusSlider value={bonusPct} onChange={setBonusPct} onDragging={(d) => setScrollEnabled(!d)} />
+              <BonusSlider value={bonusMult} onChange={setBattleCoinBonusMultiplier} onDragging={(d) => setScrollEnabled(!d)} />
             </View>
           )}
         </View>
@@ -10238,6 +10339,11 @@ function AppInner() {
   // the currently signed-in parent without threading auth state through the
   // logger. Set in the bootstrap on session restore/login; cleared on sign-out.
   const familyIdRef = useRef<string | null>(null);
+  // Bumped each time the app returns to the foreground, so the daily/weekly chore
+  // reset effects re-check the date. Without this they run ONLY on a cold start,
+  // so backgrounding the app and reopening it the next day would keep yesterday's
+  // board (daily chores completed yesterday stuck hidden) until a full restart.
+  const [foregroundTick, setForegroundTick] = useState(0);
   useEffect(() => {
     initDebugLog({
       client: supabase,
@@ -10247,6 +10353,9 @@ function AppInner() {
     const sub = AppState.addEventListener('change', (next) => {
       log('app.state', { next });
       if (next === 'background') flushNow('session.background');
+      // Re-run the chore resets on resume. Each self-guards on its own date
+      // marker (lastResetDate / lastWeekReset), so a same-day resume is a no-op.
+      if (next === 'active') setForegroundTick(t => t + 1);
     });
     return () => sub.remove();
   }, []);
@@ -11116,7 +11225,24 @@ function AppInner() {
       }
       return prev;
     });
-  }, [appDataLoaded, debugDayOffset]); // runs once chores are loaded, then on each day change
+  }, [appDataLoaded, debugDayOffset, foregroundTick]); // cold start, day change, and on app resume
+
+  // Across-midnight guard: a resume event fires the resets when the app is
+  // reopened, but if the app is left OPEN and foregrounded across midnight no
+  // such event arrives. Poll once a minute for a calendar-day flip and nudge the
+  // reset effects (which self-guard on their date markers) when it happens.
+  const lastSeenDayRef = useRef(getSimulatedToday(debugDayOffset));
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    const iv = setInterval(() => {
+      const today = getSimulatedToday(debugDayOffset);
+      if (today !== lastSeenDayRef.current) {
+        lastSeenDayRef.current = today;
+        setForegroundTick(t => t + 1);
+      }
+    }, 60_000);
+    return () => clearInterval(iv);
+  }, [appDataLoaded, debugDayOffset]);
 
   // ── Global debug state (dev only) ─────────────────────────────────────────
   const [debugOpen, setDebugOpen]             = useState(false);
@@ -11192,10 +11318,10 @@ function AppInner() {
     if (!chore) return;
     const choreStatus = getChoreStatus(chore, currentKidName);
     if (choreStatus !== 'active' && choreStatus !== 'rejected') return;
-    // Hard weekly cap: never let a kid claim a chore more than its recurrence
-    // target across all states (approved + pending). This is what keeps progress
-    // from exceeding 100%.
-    if (getClaimedCount(chore, currentKidName) >= frequencyToWeeklyTarget(chore.frequency)) return;
+    // Hard weekly cap for sub-weekly chores: never let a kid claim one more than
+    // its recurrence target across all states (approved + pending). Daily chores
+    // are exempt — the once-per-day lock below is their limiter.
+    if (atWeeklyCap(chore, currentKidName)) return;
     const kidDbId = getKidDbId(currentKidName);
     const today = getSimulatedToday(debugDayOffset);
     // Once-per-day lock for any recurring chore: even if the tile reopened (a
@@ -11381,7 +11507,7 @@ function AppInner() {
     });
     setWeekApprovalDays([]);
     setLastWeekReset(mondayKey);
-  }, [appDataLoaded, debugDayOffset, lastWeekReset]);
+  }, [appDataLoaded, debugDayOffset, lastWeekReset, foregroundTick]);
 
   // Persist the week-reset marker so a cold start mid-week doesn't wrongly wipe
   // chores that were already completed earlier in the same week.
@@ -12321,6 +12447,16 @@ function AppInner() {
             setKidApprovalSettings(Object.fromEntries(names.map(k => [k, true])));
             if (names.length > 0) setCurrentKidName(names[0]);
             if (setup.parentRole) setParentRole(setup.parentRole);
+
+            // Carry the base pay chosen on the onboarding slider into the app's
+            // baseRate. It's encoded as rewardType "payout:N" (N = BASE_PAY_STEPS
+            // index); without this the chosen rate was dropped and every chore /
+            // boss bonus fell back to the hardcoded $0.50 default.
+            const payMatch = setup.rewardType.match(/^payout:(\d+)$/);
+            if (payMatch) {
+              const idx = Math.min(parseInt(payMatch[1], 10), BASE_PAY_STEPS.length - 1);
+              setBaseRate(BASE_PAY_STEPS[idx].toFixed(2));
+            }
 
             // MON-85: one shared chore set for the whole family. Each selected
             // chore becomes a single row assigned to everyone (assignedTo: []),

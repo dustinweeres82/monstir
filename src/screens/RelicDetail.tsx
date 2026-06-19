@@ -7,7 +7,7 @@ import { useScaleAnimation } from '../design-system/hooks';
 import { MilestoneHero } from '../components/MilestoneHero';
 import { StatCard, SourceCard } from '../components/TrophyCards';
 import type { CollectibleEntry } from '../storage/collectibles';
-import type { Rarity } from '../data/collectibles';
+import type { Rarity, CollectibleDef } from '../data/collectibles';
 import { COLLECTIBLES } from '../data/collectibles';
 import type { BossCaptureEntry } from '../storage/bossCaptures';
 
@@ -25,10 +25,13 @@ const CARD_SHADOW = {
   elevation: 6,
 };
 
-function getLore(name: string, rarity: Rarity): string {
+function getLore(def: CollectibleDef | undefined, rarity: Rarity): string {
+  // Prefer the relic's own unique tagline; fall back to a rarity template only
+  // for any item that predates the per-relic taglines.
+  if (def?.tagline) return `"${def.tagline}"`;
   switch (rarity) {
-    case 'Legendary': return `"Nobody knows how the ${name} got so shiny. Nobody wants to know."`;
-    case 'Epic':      return `"The ${name} hums faintly. It might be alive. It might just be the vibes."`;
+    case 'Legendary': return `"Nobody knows how it got so shiny. Nobody wants to know."`;
+    case 'Epic':      return `"It hums faintly. It might be alive. It might just be the vibes."`;
     case 'Rare':      return `"Most kids drop it. The ones who keep it? They go far."`;
     default:          return `"Every great collection starts with something gross. This is yours."`;
   }
@@ -80,7 +83,7 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
   const recentStr     = relativeDate(mostRecent.earnedAt);
 
   const dropPct   = DROP_PCT[rarity] ?? '?%';
-  const lore      = getLore(displayName, rarity);
+  const lore      = getLore(def, rarity);
   const typePill  = `${rarity} Relic`;
 
   const dots = entries;
@@ -130,7 +133,7 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
             return {
               typePillLabel: `${r} Relic`,
               title: d?.name ?? e.itemName,
-              footerText: getLore(d?.name ?? e.itemName, r),
+              footerText: getLore(d, r),
               artSrc: d?.image,
             };
           })}
