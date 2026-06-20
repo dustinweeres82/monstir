@@ -11112,18 +11112,33 @@ function AppInner() {
   }, [appMode, pairedKidName, sessionUser, setupChildren]);
 
   // ── Live cross-device sync (MON-29) ────────────────────────────────────────
-  // Realtime on chore_completions: when a kid submits a chore on another device,
-  // patch this device's board so it shows up in the parent's approval queue
-  // immediately — no reload or notification tap needed. Board-only and
-  // idempotent, so it never disrupts navigation, and the existing save effect
-  // persists it. RLS ("owner read": auth.uid()=parent_id) scopes events to this
-  // household. Approvals/rejections still flow via push + the tap/launch refresh.
+  // Realtime on chore_completions keeps the household consistent across devices:
+  //  • a kid's SUBMIT (INSERT pending) → patch the board so it shows in the
+  //    parent's approval queue instantly (board-only, idempotent, no nav reset).
+  //  • an APPROVE/REJECT (UPDATE) → debounced full refresh on the *other* device
+  //    so its board flips, the history row appears, and the kid's coins/XP update
+  //    without tapping the push. The acting device skips its own echo via the
+  //    recent-local-write guard (localChoreWriteRef, set in approve/reject).
+  // RLS ("owner read": auth.uid()=parent_id) scopes events to this household.
   const setupChildrenRef = useRef(setupChildren);
   setupChildrenRef.current = setupChildren;
+  const localChoreWriteRef = useRef(0);
+  const pairedKidRef = useRef(pairedKidName);
+  pairedKidRef.current = pairedKidName;
   useEffect(() => {
     if (!appDataLoaded || !sessionUser) return;
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        // Skip self-echo: if THIS device just approved/rejected, its local state
+        // is already current and a reload would only cause a needless flash.
+        if (Date.now() - localChoreWriteRef.current < 5000) return;
+        loadUserDataFromSupabase({ pairedKid: pairedKidRef.current }).catch(() => {});
+      }, 1500);
+    };
     (async () => {
       const { data } = await supabase.auth.getUser();
       const userId = data.user?.id;
@@ -11132,27 +11147,31 @@ function AppInner() {
         .channel(`chore_completions:${userId}`)
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'chore_completions', filter: `parent_id=eq.${userId}` },
+          { event: '*', schema: 'public', table: 'chore_completions', filter: `parent_id=eq.${userId}` },
           (payload) => {
-            const row = payload.new as { chore_id?: string; kid_id?: string; status?: string };
-            if (!row?.chore_id || row.status !== 'pending') return;
-            const kidName = setupChildrenRef.current.find(c => c.id === row.kid_id)?.name;
-            if (!kidName) return;
-            setManagedChores(prev => prev.map(c => {
-              if (c.id !== row.chore_id) return c;
-              if (getChoreStatus(c, kidName) === 'pending') return c; // already shown — idempotent
-              return {
-                ...c,
-                childStatus:        { ...c.childStatus, [kidName]: 'pending' as ChoreStatus },
-                childSubmittedAt:   { ...c.childSubmittedAt, [kidName]: new Date().toISOString() },
-                childRejectionNote: { ...c.childRejectionNote, [kidName]: '' },
-              };
-            }));
+            const row = (payload.new ?? {}) as { chore_id?: string; kid_id?: string; status?: string };
+            if (payload.eventType === 'INSERT') {
+              if (!row.chore_id || row.status !== 'pending') return;
+              const kidName = setupChildrenRef.current.find(c => c.id === row.kid_id)?.name;
+              if (!kidName) return;
+              setManagedChores(prev => prev.map(c => {
+                if (c.id !== row.chore_id) return c;
+                if (getChoreStatus(c, kidName) === 'pending') return c; // already shown — idempotent
+                return {
+                  ...c,
+                  childStatus:        { ...c.childStatus, [kidName]: 'pending' as ChoreStatus },
+                  childSubmittedAt:   { ...c.childSubmittedAt, [kidName]: new Date().toISOString() },
+                  childRejectionNote: { ...c.childRejectionNote, [kidName]: '' },
+                };
+              }));
+            } else if (payload.eventType === 'UPDATE') {
+              if (row.status === 'approved' || row.status === 'rejected') scheduleReload();
+            }
           },
         )
         .subscribe();
     })();
-    return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
+    return () => { cancelled = true; if (reloadTimer) clearTimeout(reloadTimer); if (channel) supabase.removeChannel(channel); };
   }, [appDataLoaded, sessionUser]);
 
   const choresStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -11876,6 +11895,7 @@ function AppInner() {
   const grantChoreApproval = useCallback((id: string, kidName: string, unitIdx = 0) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
+    localChoreWriteRef.current = Date.now(); // suppress this device's own realtime echo
     const allKidNames = setupChildren.map(c => c.name);
     // Pay the amount snapshotted when the kid submitted; fall back to the
     // current rate for legacy submissions that predate the snapshot field.
@@ -11990,6 +12010,7 @@ function AppInner() {
   }, [managedChores, grantChoreApproval]);
 
   const rejectManagedChore = useCallback((id: string, note: string, kidName: string) => {
+    localChoreWriteRef.current = Date.now(); // suppress this device's own realtime echo
     // Reject one pending unit — backlog (oldest) first, else today's live pending.
     setManagedChores(prev => prev.map(c => {
       if (c.id !== id) return c;

@@ -257,7 +257,15 @@ function getWeekStart(): string {
   const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
   const monday = new Date(now);
   monday.setDate(now.getDate() + diff);
-  return monday.toISOString().slice(0, 10);
+  // Format from LOCAL components, NOT toISOString(): the Monday is computed in
+  // local time, but toISOString() converts to UTC, which shifts the date by one
+  // for evening submissions in negative-offset zones (9pm CT = 3am UTC next day)
+  // — producing an off-by-one week_start that splits the weekly cap and can make
+  // approval's week_start match miss the pending row.
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 /** How many times a chore may be completed per week, by frequency label.
@@ -292,10 +300,20 @@ export async function submitChoreCompletion(params: {
   // the DB is the backstop. (Mirrors the read-then-insert dedup of saveBossCaptureToDb.)
   const { data: chore } = await supabase
     .from('chores')
-    .select('frequency')
+    .select('frequency, completion_mode')
     .eq('id', params.choreId)
     .maybeSingle();
   const target = weeklyTarget(chore?.frequency);
+
+  // Shared ("first to finish") chores are one-per-household per period — the
+  // whole family shares a single completion. So scope the guards household-wide
+  // (parent_id) instead of per-kid (kid_id): once ANY kid has it pending/approved
+  // for the day/week, the rest are blocked. The client board enforces this on a
+  // single device, but kids on separate devices each have their own board, so the
+  // DB must be the backstop (this is the Feed Maxie double-submit fix).
+  const isShared = chore?.completion_mode === 'shared';
+  const scopeCol = isShared ? 'parent_id' : 'kid_id';
+  const scopeVal = isShared ? userId : params.kidId;
 
   // (1) Once per calendar day — a recurring chore can't be completed twice in a
   //     day; it must spread across days (daily, 2×, 3×, … all behave this way).
@@ -305,26 +323,27 @@ export async function submitChoreCompletion(params: {
     .from('chore_completions')
     .select('id')
     .eq('chore_id', params.choreId)
-    .eq('kid_id', params.kidId)
+    .eq(scopeCol, scopeVal)
     .gte('completed_at', dayStart.toISOString())
     .in('status', ['pending', 'approved'])
     .limit(1);
   if (sameDay && sameDay.length > 0) {
-    console.log('[DB] submitChoreCompletion skipped — already completed today');
+    console.log(`[DB] submitChoreCompletion skipped — already completed today${isShared ? ' (shared)' : ''}`);
     return;
   }
 
   // (2) Weekly cap — never more than the frequency target (2×/3×/…) per week,
   //     counting everything still standing (approved + awaiting approval).
+  //     Household-wide for shared chores.
   const { count: weekCount } = await supabase
     .from('chore_completions')
     .select('id', { count: 'exact', head: true })
     .eq('chore_id', params.choreId)
-    .eq('kid_id', params.kidId)
+    .eq(scopeCol, scopeVal)
     .eq('week_start', weekStart)
     .in('status', ['pending', 'approved']);
   if ((weekCount ?? 0) >= target) {
-    console.log(`[DB] submitChoreCompletion skipped — weekly cap reached (${weekCount}/${target})`);
+    console.log(`[DB] submitChoreCompletion skipped — weekly cap reached (${weekCount}/${target})${isShared ? ' (shared)' : ''}`);
     return;
   }
 
