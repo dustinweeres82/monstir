@@ -11111,6 +11111,50 @@ function AppInner() {
     }
   }, [appMode, pairedKidName, sessionUser, setupChildren]);
 
+  // ── Live cross-device sync (MON-29) ────────────────────────────────────────
+  // Realtime on chore_completions: when a kid submits a chore on another device,
+  // patch this device's board so it shows up in the parent's approval queue
+  // immediately — no reload or notification tap needed. Board-only and
+  // idempotent, so it never disrupts navigation, and the existing save effect
+  // persists it. RLS ("owner read": auth.uid()=parent_id) scopes events to this
+  // household. Approvals/rejections still flow via push + the tap/launch refresh.
+  const setupChildrenRef = useRef(setupChildren);
+  setupChildrenRef.current = setupChildren;
+  useEffect(() => {
+    if (!appDataLoaded || !sessionUser) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId || cancelled) return;
+      channel = supabase
+        .channel(`chore_completions:${userId}`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'chore_completions', filter: `parent_id=eq.${userId}` },
+          (payload) => {
+            const row = payload.new as { chore_id?: string; kid_id?: string; status?: string };
+            if (!row?.chore_id || row.status !== 'pending') return;
+            const kidName = setupChildrenRef.current.find(c => c.id === row.kid_id)?.name;
+            if (!kidName) return;
+            setManagedChores(prev => prev.map(c => {
+              if (c.id !== row.chore_id) return c;
+              if (getChoreStatus(c, kidName) === 'pending') return c; // already shown — idempotent
+              return {
+                ...c,
+                childStatus:        { ...c.childStatus, [kidName]: 'pending' as ChoreStatus },
+                childSubmittedAt:   { ...c.childSubmittedAt, [kidName]: new Date().toISOString() },
+                childRejectionNote: { ...c.childRejectionNote, [kidName]: '' },
+              };
+            }));
+          },
+        )
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
+  }, [appDataLoaded, sessionUser]);
+
   const choresStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!appDataLoaded) return;
