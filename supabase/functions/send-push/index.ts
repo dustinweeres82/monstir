@@ -9,14 +9,19 @@
 // webhook secret (verify_jwt is disabled). The function never trusts client
 // input beyond the event id: it re-reads current ledger state, resolves the
 // correct token set, and applies the guardrails (quiet hours 9pm–7am local,
-// max 2/day per device, per-event dedup) before sending via Expo Push.
+// per-event dedup, and a 2/day cap on reminder types only — approval pings are
+// exempt) before sending via Expo Push.
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.107.0";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const QUIET_START = 21; // 9pm
 const QUIET_END = 7; //    7am
-const DAILY_CAP = 2; //    max notifications/day per device, across all types
+const DAILY_CAP = 2; //    max REMINDER notifications/day per device (battle day, future digests)
 const DEFAULT_TZ = "UTC";
+// Action-required notifications are exempt from the daily cap: a parent needs a
+// ping for every chore awaiting approval, and a kid for every approval. The cap
+// only throttles reminder/digest types. (Quiet hours + dedup still apply to all.)
+const CAP_EXEMPT = new Set(["chore_submitted", "chore_approved"]);
 
 interface Send {
   parent_id: string;
@@ -202,20 +207,26 @@ async function applyGuardrails(supabase: SupabaseClient, candidates: Send[]): Pr
   // One query each for the day's counts and the already-sent dedup keys.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const [{ data: recent }, { data: existing }] = await Promise.all([
-    supabase.from("notification_log").select("expo_token").in("expo_token", tokens).gte("sent_at", since),
+    supabase.from("notification_log").select("expo_token, type").in("expo_token", tokens).gte("sent_at", since),
     supabase.from("notification_log").select("dedup_key").in("dedup_key", dedupKeys),
   ]);
 
+  // Only capped (non-exempt) types count toward the per-device daily cap.
   const counts = new Map<string, number>();
-  for (const r of recent ?? []) counts.set(r.expo_token, (counts.get(r.expo_token) ?? 0) + 1);
+  for (const r of recent ?? []) {
+    if (CAP_EXEMPT.has(r.type)) continue;
+    counts.set(r.expo_token, (counts.get(r.expo_token) ?? 0) + 1);
+  }
   const alreadySent = new Set((existing ?? []).map((r: { dedup_key: string }) => r.dedup_key));
 
   const out: Send[] = [];
   for (const s of awake) {
     if (alreadySent.has(s.dedup_key)) continue;
-    const used = counts.get(s.expo_token) ?? 0;
-    if (used >= DAILY_CAP) continue;
-    counts.set(s.expo_token, used + 1); // count this one toward the cap for siblings in this batch
+    if (!CAP_EXEMPT.has(s.type)) {
+      const used = counts.get(s.expo_token) ?? 0;
+      if (used >= DAILY_CAP) continue;
+      counts.set(s.expo_token, used + 1); // count this one toward the cap for siblings in this batch
+    }
     out.push(s);
   }
   return out;
