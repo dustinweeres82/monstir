@@ -19,9 +19,21 @@ import Constants from 'expo-constants';
 import { upsertPushToken } from './db';
 import type * as ExpoNotifications from 'expo-notifications';
 
+// Expo Go (SDK 53+) ships without the push native modules. Even `require`-ing
+// expo-notifications there triggers a native-module lookup that throws straight
+// to the global error handler (escaping a local try/catch in dev). So detect the
+// Expo Go runtime and never touch the package at all — push only works in dev /
+// standalone (TestFlight / App Store) builds.
+const isExpoGo =
+  Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
+
 let _notifs: typeof ExpoNotifications | null | undefined;
 function notifs(): typeof ExpoNotifications | null {
   if (_notifs !== undefined) return _notifs;
+  if (isExpoGo) {
+    _notifs = null;
+    return null;
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     _notifs = require('expo-notifications') as typeof ExpoNotifications;
