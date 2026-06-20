@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, fontSize, fontWeight, radii, spacing, scale, interFamily, textStyles } from '../design-system/tokens';
 import { obc, cardShadow, DotGridBg, ObButton as Button, Helper } from './onboarding/obkit';
+import { registerPushToken } from '../lib/push';
 
 const DRAFT_KEY = 'monstir:parent-onboarding-draft';
 
@@ -1073,6 +1074,17 @@ const NOTIF_ROWS = [
 ] as const;
 
 function StepNotifications({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+  const [busy, setBusy] = useState(false);
+  // "Turn on notifications" fires the real iOS/Android system permission dialog
+  // and registers this parent device's push token (MON-29). We never gate
+  // onboarding on the result — denial just means no token, and the prompt can be
+  // surfaced again later from parent home.
+  const enable = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await registerPushToken({ kidId: null, promptIfNeeded: true }); } catch {}
+    onNext();
+  };
   return (
     <DotGridBg>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
@@ -1094,7 +1106,7 @@ function StepNotifications({ onNext, onBack }: { onNext: () => void; onBack: () 
         </ScrollView>
 
         <View style={s.footer}>
-          <Button label="Turn on notifications" onPress={onNext} />
+          <Button label="Turn on notifications" onPress={enable} disabled={busy} />
           <Button label="Maybe later" onPress={onNext} variant="secondary" />
         </View>
       </SafeAreaView>
