@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, Platform, Image, TextInput, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
-  ActivityIndicator, LogBox, AccessibilityInfo, AppState, type LayoutChangeEvent,
+  ActivityIndicator, LogBox, AccessibilityInfo, AppState, Linking, type LayoutChangeEvent,
 } from 'react-native';
 
 // Suppress spurious dev-mode RN warning — not a real bug in this codebase
@@ -74,7 +74,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
 import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
-import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, type PushRoute } from './src/lib/push';
+import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, getPushPermission, type PushRoute } from './src/lib/push';
 import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
 
@@ -8748,10 +8748,46 @@ function AccountNotificationsScreen({ onBack }: { onBack: () => void }) {
       return next;
     });
   };
+
+  // OS-level permission state. When it's off, the toggles below can't actually
+  // deliver anything, so surface a banner: re-prompt if we still can, otherwise
+  // deep-link to the system Settings app (the only way back from a hard denial).
+  // Re-check on focus and whenever the app returns to foreground (they may have
+  // flipped it in iOS Settings and come back).
+  const [pushPerm, setPushPerm] = useState<{ granted: boolean; canAskAgain: boolean } | null>(null);
+  useEffect(() => {
+    const check = () => { getPushPermission().then(setPushPerm).catch(() => {}); };
+    check();
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') check(); });
+    return () => sub.remove();
+  }, []);
+  const fixPermission = async () => {
+    if (pushPerm && !pushPerm.granted && pushPerm.canAskAgain) {
+      await registerPushToken({ kidId: null, promptIfNeeded: true });
+      getPushPermission().then(setPushPerm).catch(() => {});
+    } else {
+      Linking.openSettings().catch(() => {});
+    }
+  };
+
   return (
     <CreamBg>
       <AccountSubHeader title="Notifications" onBack={onBack} />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        {pushPerm && !pushPerm.granted && (
+          <TouchableOpacity activeOpacity={0.85} onPress={fixPermission} style={ps.notifOffBanner}>
+            <Text style={{ fontSize: 22 }}>🔕</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={ps.notifOffTitle}>Notifications are off</Text>
+              <Text style={ps.notifOffSub}>
+                {pushPerm.canAskAgain
+                  ? 'Tap to turn on approval & battle-day alerts'
+                  : 'Open Settings to turn them back on'}
+              </Text>
+            </View>
+            <Text style={ps.notifOffCta}>{pushPerm.canAskAgain ? 'Turn on' : 'Settings'}</Text>
+          </TouchableOpacity>
+        )}
         <View style={[ps.group, { marginHorizontal: 0 }]}>
           <AccountToggleRow title="Approval requests" subtitle="When a chore needs your sign-off" value={prefs.approvals} onValueChange={set('approvals')} />
           <AccountToggleRow title="Battle day" subtitle="Sunday reminder that the boss battle is live" value={prefs.battle} onValueChange={set('battle')} divider />
@@ -13735,6 +13771,10 @@ const ps = StyleSheet.create({
   sectionLabel:   { fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   version:        { fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#ABABAB', textAlign: 'center', paddingTop: 20, paddingBottom: 8 },
   group:          { marginHorizontal: 16, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  notifOffBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF4D6', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 14, ...SOLID_SHADOW },
+  notifOffTitle:  { fontSize: scale(15), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
+  notifOffSub:    { fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#6B6B6B', marginTop: 2 },
+  notifOffCta:    { fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#1A1A1A', textDecorationLine: 'underline' },
   divider:        { height: 1, backgroundColor: '#F0EEE8', marginLeft: 68 },
   row:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, gap: 12 },
   rowIcon:        { width: 36, height: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },

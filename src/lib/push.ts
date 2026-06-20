@@ -96,6 +96,21 @@ export async function registerPushToken(opts: {
   }
 }
 
+/**
+ * Current OS notification permission for this device. `granted` false +
+ * `canAskAgain` false means the user denied it and we can no longer prompt — the
+ * only path back is the system Settings app.
+ */
+export async function getPushPermission(): Promise<{ granted: boolean; canAskAgain: boolean }> {
+  try {
+    if (Platform.OS === 'web') return { granted: false, canAskAgain: false };
+    const p = await Notifications.getPermissionsAsync();
+    return { granted: p.granted, canAskAgain: p.canAskAgain };
+  } catch {
+    return { granted: false, canAskAgain: true };
+  }
+}
+
 export interface PushRoute {
   screen?: string;
   completion_id?: string;
