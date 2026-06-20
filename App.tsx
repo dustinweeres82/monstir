@@ -73,7 +73,8 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
+import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, type PushRoute } from './src/lib/push';
 import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
 
@@ -8736,16 +8737,24 @@ function AccountEmailScreen({ onBack, email }: { onBack: () => void; email: stri
 }
 
 function AccountNotificationsScreen({ onBack }: { onBack: () => void }) {
-  const [prefs, setPrefs] = useState({ chores: true, approvals: true, summary: true, payouts: false });
-  const set = (key: keyof typeof prefs) => (v: boolean) => setPrefs(prev => ({ ...prev, [key]: v }));
+  // Backed by profiles.notification_prefs (MON-29). Persist each toggle; the
+  // send-push function reads these server-side to gate the matching type.
+  const [prefs, setPrefs] = useState<NotificationPrefs>({ approvals: true, battle: true, payouts: true });
+  useEffect(() => { loadNotificationPrefs().then(setPrefs).catch(() => {}); }, []);
+  const set = (key: keyof NotificationPrefs) => (v: boolean) => {
+    setPrefs(prev => {
+      const next = { ...prev, [key]: v };
+      saveNotificationPrefs(next).catch(e => console.warn('[DB] saveNotificationPrefs error:', e));
+      return next;
+    });
+  };
   return (
     <CreamBg>
       <AccountSubHeader title="Notifications" onBack={onBack} />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
         <View style={[ps.group, { marginHorizontal: 0 }]}>
-          <AccountToggleRow title="Chore completions" subtitle="When a kid marks a chore done" value={prefs.chores} onValueChange={set('chores')} />
-          <AccountToggleRow title="Approval requests" subtitle="When a chore needs your sign-off" value={prefs.approvals} onValueChange={set('approvals')} divider />
-          <AccountToggleRow title="Weekly summary" subtitle="A recap of the week's progress" value={prefs.summary} onValueChange={set('summary')} divider />
+          <AccountToggleRow title="Approval requests" subtitle="When a chore needs your sign-off" value={prefs.approvals} onValueChange={set('approvals')} />
+          <AccountToggleRow title="Battle day" subtitle="Sunday reminder that the boss battle is live" value={prefs.battle} onValueChange={set('battle')} divider />
           <AccountToggleRow title="Payout reminders" subtitle="When a kid has coins to cash out" value={prefs.payouts} onValueChange={set('payouts')} divider />
         </View>
       </ScrollView>
@@ -10993,6 +11002,28 @@ function AppInner() {
     bootstrap();
   }, []);
 
+  // ── Push: register this device's Expo token (MON-29) ───────────────────────
+  // Silent on launch (never prompts): a token only lands once permission is
+  // already granted. The OS prompt is primed at PRD moments — a parent reaching
+  // their home, a kid's first chore submission. On a paired kid device the token
+  // is tagged with that kid's id so server-side targeting pings the right child.
+  const kidPushPrimedRef    = useRef(false);
+  const parentPushPrimedRef = useRef(false);
+  useEffect(() => {
+    if (!appDataLoaded || !sessionUser) return;
+    const raw = pairedKidName ? setupChildren.find(c => c.name === pairedKidName)?.id : null;
+    const kidId = raw && isUUID(raw) ? raw : null;
+    registerPushToken({ kidId, promptIfNeeded: false });
+  }, [appDataLoaded, sessionUser, pairedKidName, setupChildren]);
+
+  // Parent device: prime the notification prompt once they enter parent view.
+  useEffect(() => {
+    if (viewMode === 'parent' && !pairedKidName && sessionUser && !parentPushPrimedRef.current) {
+      parentPushPrimedRef.current = true;
+      registerPushToken({ kidId: null, promptIfNeeded: true });
+    }
+  }, [viewMode, pairedKidName, sessionUser]);
+
   const choresStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!appDataLoaded) return;
@@ -11331,6 +11362,15 @@ function AppInner() {
     const earnedCents = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
     log('chore.submit', { choreId: id, kidId: kidDbId, difficulty: chore.difficulty, earnedCents, requireApproval });
 
+    // MON-29: a kid's first real submission is the PRD moment to ask for
+    // notification permission ("so you'll know when it's approved!"). Only on a
+    // paired kid device — a shared/parent device registers via the parent prime.
+    if (pairedKidName && !kidPushPrimedRef.current) {
+      kidPushPrimedRef.current = true;
+      const rawKid = setupChildren.find(c => c.name === pairedKidName)?.id;
+      registerPushToken({ kidId: rawKid && isUUID(rawKid) ? rawKid : null, promptIfNeeded: true });
+    }
+
     // MON-19 Shard Economy: completely-random shard drop on completing a chore.
     // Banked per-kid (capped); surfaced via the reward modal. Fires for both the
     // approval and auto-approve paths — it rewards the act of doing the chore.
@@ -11450,7 +11490,7 @@ function AppInner() {
         });
       }
     }
-  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb]);
+  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb, pairedKidName]);
 
   // ── Weekly reset (the chore board rolls over at the week boundary) ───────────
   // This is the ONLY place the chore board resets for a new week. It fires on the
@@ -12205,6 +12245,32 @@ function AppInner() {
     setParentPinEnabled(true);
     saveProfile({ parent_pin: pin, parent_pin_enabled: true }).catch(e => console.warn('[DB] saveParentPin error:', e));
   }, []);
+
+  // ── Push deep-linking (MON-29) ─────────────────────────────────────────────
+  // Tapping a notification routes to its surface: parent review (via the PIN
+  // gate if set), the kid's home, or the battle. Cold-start taps apply once;
+  // taps while the app is running route live.
+  const applyPushRoute = useCallback((route: PushRoute | null) => {
+    const target = route?.screen;
+    if (!target) return;
+    if (target === 'parentApprovals') {
+      if (!pairedKidName) { setParentScreen('parentHome'); requestParentMode(); }
+    } else if (target === 'kidHome') {
+      setViewMode('kid'); setTab('home'); setScreen('home');
+    } else if (target === 'battle') {
+      setViewMode('kid'); setTab('world'); setScreen('world');
+    }
+  }, [pairedKidName, requestParentMode]);
+
+  const coldPushHandledRef = useRef(false);
+  useEffect(() => {
+    if (!appDataLoaded) return;
+    if (!coldPushHandledRef.current) {
+      coldPushHandledRef.current = true;
+      getInitialNotificationRoute().then(r => { if (r) applyPushRoute(r); });
+    }
+    return addNotificationResponseListener(applyPushRoute);
+  }, [appDataLoaded, applyPushRoute]);
 
   const disableParentPin = useCallback(() => {
     setParentPin('');

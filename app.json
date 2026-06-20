@@ -39,6 +39,12 @@
       "expo-asset",
       "expo-apple-authentication",
       [
+        "expo-notifications",
+        {
+          "color": "#C5F215"
+        }
+      ],
+      [
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.570608100975-47t9kikfmkm6rjgb7hbqshbcgnla91c0"

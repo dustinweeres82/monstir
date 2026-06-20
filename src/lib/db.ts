@@ -565,6 +565,66 @@ export async function updateKidStats(kidId: string, delta: {
   console.log('[DB] updateKidStats data:', data, 'error:', error);
 }
 
+// ─── Push notifications (MON-29) ─────────────────────────────────────────────
+
+// Upsert this device's Expo push token. Keyed by expo_token (unique), so a
+// device re-registering — including after switching which kid it's paired to —
+// re-points cleanly. parent_id is always the signed-in household; kid_id marks a
+// paired kid device (null = the parent's own device).
+export async function upsertPushToken(params: {
+  expoToken: string;
+  kidId?: string | null;
+  platform: string;
+  timezone: string;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { error } = await supabase.from('push_tokens').upsert(
+    {
+      parent_id:  userId,
+      kid_id:     params.kidId ?? null,
+      expo_token: params.expoToken,
+      platform:   params.platform,
+      timezone:   params.timezone,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'expo_token' },
+  );
+  if (error) console.warn('[DB] upsertPushToken error:', error.message);
+}
+
+// Resolve a kid's UUID from their display name within the signed-in household.
+// Used to tag a paired kid device's push token with the right kid_id.
+export async function getKidIdByName(name: string): Promise<string | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+  const { data } = await supabase
+    .from('kids')
+    .select('id')
+    .eq('parent_id', userId)
+    .eq('name', name)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
+export type NotificationPrefs = { approvals: boolean; battle: boolean; payouts: boolean };
+
+const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = { approvals: true, battle: true, payouts: true };
+
+export async function loadNotificationPrefs(): Promise<NotificationPrefs> {
+  const userId = await getCurrentUserId();
+  if (!userId) return { ...DEFAULT_NOTIFICATION_PREFS };
+  const { data } = await supabase.from('profiles').select('notification_prefs').eq('id', userId).single();
+  return { ...DEFAULT_NOTIFICATION_PREFS, ...((data?.notification_prefs as Partial<NotificationPrefs>) ?? {}) };
+}
+
+export async function saveNotificationPrefs(prefs: NotificationPrefs): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { error } = await supabase.from('profiles').update({ notification_prefs: prefs }).eq('id', userId);
+  if (error) console.warn('[DB] saveNotificationPrefs error:', error.message);
+}
+
 // ─── Kid-device pairing (MON-85 Phase 2) ─────────────────────────────────────
 
 // Each kid has a standing 8-digit code (kids.pairing_code, auto-assigned on
