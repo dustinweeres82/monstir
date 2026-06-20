@@ -11100,6 +11100,17 @@ function AppInner() {
     }
   }, [viewMode, pairedKidName, sessionUser]);
 
+  // Paired kid device: prime as soon as it opens to the kid's home, so it
+  // registers proactively instead of waiting for the kid's first submission.
+  // (The submit-path prime below stays as a fallback; both share the ref.)
+  useEffect(() => {
+    if (appMode === 'app' && pairedKidName && sessionUser && !kidPushPrimedRef.current) {
+      kidPushPrimedRef.current = true;
+      const raw = setupChildren.find(c => c.name === pairedKidName)?.id;
+      registerPushToken({ kidId: raw && isUUID(raw) ? raw : null, promptIfNeeded: true });
+    }
+  }, [appMode, pairedKidName, sessionUser, setupChildren]);
+
   const choresStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!appDataLoaded) return;
@@ -12326,9 +12337,13 @@ function AppInner() {
   // Tapping a notification routes to its surface: parent review (via the PIN
   // gate if set), the kid's home, or the battle. Cold-start taps apply once;
   // taps while the app is running route live.
-  const applyPushRoute = useCallback((route: PushRoute | null) => {
+  const applyPushRoute = useCallback(async (route: PushRoute | null) => {
     const target = route?.screen;
     if (!target) return;
+    // The app may already be open with a stale board — the submitting/approving
+    // happened on another device and only landed server-side. Refresh first so
+    // the new pending chore (or updated wallet) actually shows, then navigate.
+    await loadUserDataFromSupabase({ pairedKid: pairedKidName }).catch(() => {});
     if (target === 'parentApprovals') {
       if (!pairedKidName) { setParentScreen('parentHome'); requestParentMode(); }
     } else if (target === 'kidHome') {
@@ -12336,7 +12351,7 @@ function AppInner() {
     } else if (target === 'battle') {
       setViewMode('kid'); setTab('world'); setScreen('world');
     }
-  }, [pairedKidName, requestParentMode]);
+  }, [pairedKidName, requestParentMode, loadUserDataFromSupabase]);
 
   const coldPushHandledRef = useRef(false);
   useEffect(() => {
