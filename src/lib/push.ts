@@ -103,10 +103,11 @@ export async function registerPushToken(opts: {
     if (Platform.OS === 'web') return false;
     const N = notifs();
     if (!N) return false;
-    if (!Constants.isDevice && Platform.OS === 'ios') {
-      // iOS Simulator can't obtain a remote push token; skip quietly.
-      return false;
-    }
+    // NB: no `Constants.isDevice` guard — that property was removed in SDK 54
+    // (it's `undefined`), so `!Constants.isDevice` was true on every iOS device
+    // and this function bailed before ever requesting permission. The native-
+    // module probe above already excludes Expo Go; on the iOS Simulator the
+    // token fetch below just throws and is caught, which is the correct skip.
 
     await ensureAndroidChannel(N);
 
