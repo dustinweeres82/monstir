@@ -137,6 +137,12 @@ type ChoreStatus = 'active' | 'pending' | 'approved' | 'rejected';
 interface ManagedChore {
   id: string; name: string; description: string;
   frequency: string; icon: string | number; bg: string;
+  /** ISO timestamp from the DB `chores.created_at` (when the chore started
+   *  existing). Used by the date-aware weekly denominator so a chore created
+   *  mid-week only counts from its creation day, not a full 7-day week.
+   *  Undefined for locally-created/legacy chores → treated as pre-week-start
+   *  (no proration), which is the safe no-op fallback. */
+  createdAt?: string;
   /** Global status (used for unassigned/everyone chores or as fallback) */
   status: ChoreStatus;
   rejectionNote?: string;
@@ -232,6 +238,15 @@ const isIndependentChore = (chore: ManagedChore): boolean =>
   chore.completionMode === 'independent' ||
   (chore.completionMode == null && chore.assignedTo.length > 1);
 
+/** A shared chore offered to the whole household (`assignedTo` empty, not independent).
+ *  For INDIVIDUAL battle readiness these count PER-DOER, instance-based: only the kid
+ *  who completed an instance gets it in their fraction (1/1); every non-doer has it in
+ *  NEITHER numerator nor denominator (it left their board when someone claimed it).
+ *  The household family-power bar still counts these once at the household level — a
+ *  separate question (did the family get its shared chores done). */
+const isSharedEveryoneChore = (chore: ManagedChore): boolean =>
+  chore.assignedTo.length === 0 && !isIndependentChore(chore);
+
 /** Effective weekly completion count for a chore, for a specific child. */
 const getChoreCompletions = (chore: ManagedChore, kidName: string): number =>
   isIndependentChore(chore)
@@ -301,7 +316,13 @@ function bumpCompletionCount(chore: ManagedChore, kidName: string): ManagedChore
   if (isIndependentChore(chore)) {
     return { ...chore, childCompletions: { ...chore.childCompletions, [kidName]: (chore.childCompletions?.[kidName] ?? 0) + 1 } };
   }
-  return { ...chore, weeklyCompletions: (chore.weeklyCompletions ?? 0) + 1 };
+  // Shared chore: bump the household count (board cap / family bar) AND record the
+  // DOER in childCompletions so individual readiness can credit only them.
+  return {
+    ...chore,
+    weeklyCompletions: (chore.weeklyCompletions ?? 0) + 1,
+    childCompletions: { ...chore.childCompletions, [kidName]: (chore.childCompletions?.[kidName] ?? 0) + 1 },
+  };
 }
 
 /** Drop the oldest snapshotted pending amounts (cents + XP) for a kid (no-op when empty). */
@@ -325,15 +346,31 @@ function decPendingBacklog(chore: ManagedChore, kidName: string): ManagedChore {
 
 /** Household-wide weekly chore totals. Independent chores count once per
  *  eligible kid (each must do their own); shared chores count once. */
-function householdChoreTotals(chores: ManagedChore[], allKidNames: string[]): { target: number; done: number } {
+function householdChoreTotals(
+  chores: ManagedChore[],
+  allKidNames: string[],
+  kidJoinDates?: Record<string, string>,
+  // METER window: full week through this Sunday (NOT days-elapsed), so the parent
+  // family-power + funnel bars match the kid readiness card to the digit and climb
+  // smoothly. Only the weakness gate uses days-elapsed (and never calls this).
+  windowEnd: Date = thisWeekSunday(),
+): { target: number; done: number } {
   let target = 0, done = 0;
   for (const c of chores) {
+    const rate = frequencyToWeeklyTarget(c.frequency);
     if (isIndependentChore(c)) {
       const kids = choreEligibleKids(c, allKidNames);
-      target += frequencyToWeeklyTarget(c.frequency) * kids.length;
+      // Each eligible kid does their own copy — prorate each slice by THAT kid's join date.
+      for (const k of kids) target += rate * (availableDaysThisWeek(c.createdAt, kidJoinDates?.[k], windowEnd) / 7);
       done   += kids.reduce((s, k) => s + (c.childCompletions?.[k] ?? 0), 0);
     } else {
-      target += frequencyToWeeklyTarget(c.frequency);
+      // Shared chore counts once — available since it existed AND the earliest-joined
+      // eligible kid could do it (most generous; never over-penalizes the household).
+      const earliestJoin = choreEligibleKids(c, allKidNames)
+        .map(k => kidJoinDates?.[k])
+        .filter((d): d is string => !!d)
+        .sort()[0];   // ISO timestamps sort chronologically; undefined if none known → full week
+      target += rate * (availableDaysThisWeek(c.createdAt, earliestJoin, windowEnd) / 7);
       done   += c.weeklyCompletions ?? 0;
     }
   }
@@ -356,10 +393,14 @@ function applyChoreCompletion(chore: ManagedChore, kidName: string, allKidNames:
   }
   const childStatus: Record<string, ChoreStatus> = { ...chore.childStatus };
   for (const k of choreEligibleKids(chore, allKidNames)) childStatus[k] = 'approved';
+  // Bump the household count (board lock / cap / family bar) AND record the DOER in
+  // childCompletions so individual readiness credits only them — every OTHER eligible
+  // kid is marked 'approved' for the board (locked out) but gets NO completion credit.
   return {
     ...chore,
     status: 'approved' as ChoreStatus,
     weeklyCompletions: (chore.weeklyCompletions ?? 0) + 1,
+    childCompletions: { ...chore.childCompletions, [kidName]: (chore.childCompletions?.[kidName] ?? 0) + 1 },
     childStatus,
   };
 }
@@ -670,6 +711,19 @@ function getWeekMondayKey(offsetDays = 0): string {
   return d.toDateString();
 }
 
+/** This week's Sunday (Monday + 6, local midnight) — the shared METER window end.
+ *  Every readiness/progress METER (kid readiness card, parent family-power bar,
+ *  per-kid funnel rows) prorates its denominator across the FULL week (through this
+ *  date), so the denominator is fixed for the week and the bar only climbs as
+ *  completions grow — never retreats overnight, and the kid and parent screens show
+ *  the same number for the same week. The weakness GATE / discovery toast / WEAK TO
+ *  reveal instead use today (days-elapsed); on Sunday the two coincide (avail=7). */
+function thisWeekSunday(): Date {
+  const d = new Date(getWeekMondayKey());
+  d.setDate(d.getDate() + 6);
+  return d;
+}
+
 /** Monday date-string (toDateString) for the week containing an arbitrary date. */
 function weekMondayKeyForDate(date: Date): string {
   const d = new Date(date);
@@ -878,6 +932,62 @@ function frequencyToWeeklyTarget(frequency: string): number {
     case 'As needed':        return 1;
     default:                 return 1;
   }
+}
+
+/** Days a chore was actually available to a kid in the CURRENT week — the span
+ *  from max(weekStart, kidJoinDate, choreCreatedAt) THROUGH today, inclusive of
+ *  both ends. Mon→Sun is 7 (not 6). Floored at 1 (a just-joined kid gets a gentle
+ *  one-day warm-up, never a 0/collapsed denominator) and capped at 7. Missing
+ *  join/creation dates fall back to weekStart, i.e. a full 7-day week — so an
+ *  unknown date can never wrongly lower the bar. This is the single primitive
+ *  the date-aware denominator is built on. */
+function availableDaysThisWeek(choreCreatedAt?: string | null, kidJoinDate?: string | null, today: Date = new Date()): number {
+  const dayFloor = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const end = dayFloor(today);
+  let start = dayFloor(new Date(getWeekMondayKey()));   // Monday 00:00 — matches the weekly completion reset
+  if (kidJoinDate)    { const j = dayFloor(new Date(kidJoinDate));    if (!isNaN(j.getTime()) && j > start) start = j; }
+  if (choreCreatedAt) { const c = dayFloor(new Date(choreCreatedAt)); if (!isNaN(c.getTime()) && c > start) start = c; }
+  const span = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;   // +1 = inclusive of both ends
+  return Math.max(1, Math.min(7, span));
+}
+
+/** THE single source of truth for a kid's weekly chore-completion percentage —
+ *  the weakness/readiness gate. Every kid-facing gate (battle weaknessUnlocked,
+ *  the discovery toast, the Home readiness card, the battle-end chest/capture
+ *  pct) calls this so they can never disagree.
+ *
+ *  Denominator change ONLY: each chore's weekly quota is prorated by how many
+ *  days it was available to this kid this week (availableDaysThisWeek). The
+ *  numerator (getChoreCompletions — this week's completions) is unchanged.
+ *
+ *  No-op for established families: a kid present the whole week with chores that
+ *  predate the week gets availDays === 7 for every chore, so expected ===
+ *  frequencyToWeeklyTarget(freq) exactly and the percentage is byte-identical to
+ *  the old flat lookup. Returns the pieces so the readiness card can show a
+ *  matching "done / target" without recomputing. */
+function weeklyCompletion(
+  chores: ManagedChore[],
+  kidName: string,
+  kidJoinDate?: string | null,
+  today: Date = new Date(),
+): { pct: number; done: number; expected: number } {
+  let expected = 0, done = 0;
+  for (const c of chores) {
+    if (isSharedEveryoneChore(c)) {
+      // Instance-based: this kid's OWN completions count in BOTH halves (1/1 each),
+      // and a shared chore they didn't do is in NEITHER (0/0) — so a sibling claiming
+      // it never credits NOR drags this kid. No prorated target: a first-come shared
+      // chore is "yours" only for the instances you actually took.
+      const mine = c.childCompletions?.[kidName] ?? 0;
+      expected += mine;
+      done     += mine;
+    } else {
+      expected += frequencyToWeeklyTarget(c.frequency) * (availableDaysThisWeek(c.createdAt, kidJoinDate, today) / 7);
+      done     += getChoreCompletions(c, kidName);
+    }
+  }
+  const pct = expected <= 0 ? 0 : Math.min(100, Math.round((done / expected) * 100));
+  return { pct, done, expected };
 }
 
 /** A chore that recurs every single day. Daily chores are governed SOLELY by the
@@ -2404,7 +2514,7 @@ function countdownParts(ms: number): [string, string, string, string] {
   return [pad(d), pad(h), pad(m), pad(s)];
 }
 
-function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays, parentRole = '', battleCoinBonusEnabled, battleBonusCoins, bossHpPct = 1, totalFighters = 1, battledThisWeek = false }: {
+function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays, parentRole = '', battleCoinBonusEnabled, battleBonusCoins, bossHpPct = 1, totalFighters = 1, battledThisWeek = false, kidJoinDate }: {
   monsterIdx: MonsterIdx; coins: number; xp: number; weeklyXp: number;
   done: Partial<Record<ChoreId, boolean>>; managedChores: ManagedChore[];
   onStartBattle: () => void;
@@ -2414,6 +2524,8 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   onSwitchToKid: (name: string) => void;
   currentKidName: string;
+  /** This kid's DB join date (kids.created_at, ISO) for the date-aware readiness denominator. */
+  kidJoinDate?: string;
   initialAvatarIdx: number;
   currentBoss: Boss;
   parentRole?: string;
@@ -2437,10 +2549,21 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   const dollars = (coins / 100).toFixed(2);
   const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
   const totalChores = myChores.length || 1;
-  const totalWeeklyTarget = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
-  const totalWeeklyDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
-  const doneCount   = totalWeeklyDone;   // this kid's completions this week (accounts for recurring chores)
-  const chorePct    = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
+  // ── Two denominators, deliberately split (see weeklyCompletion) ──────────────
+  // CARD METER (bar, done/target, win-odds forecast): the FULL-WEEK window — every
+  // chore's expected counts through THIS week's Sunday, not just today. The
+  // denominator is therefore fixed for the whole week, so the bar climbs only as
+  // `done` grows and never retreats overnight (warm-floor: a kid who did everything
+  // Monday must not watch Tuesday's bar shrink). Still join/creation-aware — the
+  // window starts at max(weekStart, join, chore-creation) — so a mid-week joiner is
+  // NOT re-graded against days before they existed (no return of the original bug).
+  const { pct: chorePct, done: doneCount, expected } = weeklyCompletion(myChores, currentKidName, kidJoinDate, thisWeekSunday());
+  const totalWeeklyTarget = Math.max(1, Math.round(expected));
+  // GATE value: the true days-elapsed prorated pct (today, not week-end). Drives the
+  // "WEAK TO" reveal below so the card's unlock state stays in lockstep with the
+  // discovery toast and the actual Sunday weaknessUnlocked. On Sunday today ===
+  // weekEnd, so this and chorePct converge and the avail=7 no-op holds.
+  const gateChorePct = weeklyCompletion(myChores, currentKidName, kidJoinDate).pct;
   const winOdds     = calcWinOdds(chorePct);
   const power       = weeklyXp;
   const bossVideoPlayer = useVideoPlayer(boss.video, p => { p.loop = true; p.muted = true; p.play(); });
@@ -2573,8 +2696,10 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
             <Text style={w.weakToLabel}>WEAK TO</Text>
             {/* MON-82: the weakness unlocks at the weekly chore threshold (75%),
                 not by day-of-week — keeps the "Do more chores to unlock" copy
-                honest and matches the battle's weaknessUnlocked gate. */}
-            {chorePct < WEAKNESS_THRESHOLD_PCT ? (
+                honest and matches the battle's weaknessUnlocked gate. Uses the
+                GATE pct (days-elapsed), NOT the card's full-week meter pct, so this
+                reveal fires the instant the discovery toast does. */}
+            {gateChorePct < WEAKNESS_THRESHOLD_PCT ? (
               <>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <View style={w.weakIconSquare}>
@@ -6264,7 +6389,7 @@ function MoneyScreen({
   );
 }
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays, debugDayOffset = 0, currentBossName = '', householdBossHpPct = 1, householdTotalFighters = 0 }: {
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays, kidJoinDates = {}, debugDayOffset = 0, currentBossName = '', householdBossHpPct = 1, householdTotalFighters = 0 }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: (name: string) => void;
   onAddKid: () => void;
@@ -6283,6 +6408,8 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   choreHistory: { id: string; choreName: string; kidName: string; earnedCents: number; approvedAt: string; icon: string | number; bg: string }[];
   payoutLog: { kidName: string; amount: number; paidAt: string }[];
   weekApprovalDays: string[];
+  /** Kid name → DB join date (ISO) for the date-aware funnel denominator. */
+  kidJoinDates?: Record<string, string>;
   debugDayOffset?: number;
   currentBossName?: string;
   // Cooperative shared HP (MON-84): the family's one boss bar (0–1) + household size.
@@ -6318,7 +6445,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
 
   const allKidNames = kidProfiles.map(k => k.name);
   // Independent "Everyone" chores count once per eligible kid toward the household total.
-  const { target: totalWeeklyTarget, done: totalCompleted } = householdChoreTotals(managedChores, allKidNames);
+  const { target: totalWeeklyTarget, done: totalCompleted } = householdChoreTotals(managedChores, allKidNames, kidJoinDates);
   const daysLeft = daysUntilSunday();
 
   // ── Per-kid stats ─────────────────────────────────────────────────────────
@@ -6332,8 +6459,11 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
 
   const kidStats: KidStats[] = kidProfiles.map(k => {
     const assignedChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(k.name));
-    const completed  = assignedChores.reduce((s, c) => s + getChoreCompletions(c, k.name), 0);
-    const target     = assignedChores.reduce((s, c) => s + frequencyToWeeklyTarget(c.frequency), 0);
+    // Individual readiness via the SAME helper as the kid's own card (full-week window),
+    // so the per-kid funnel row matches that kid's card to the digit — shared
+    // everyone-chores count per-doer, non-doers excluded from both halves.
+    const { done: completed, expected } = weeklyCompletion(assignedChores, k.name, kidJoinDates[k.name], thisWeekSunday());
+    const target     = Math.max(1, Math.round(expected));
     const pendingCount = assignedChores.reduce((s, c) => s + getPendingCount(c, k.name), 0);
     const earningsCents = assignedChores.reduce((s, c) => {
       const approved = getChoreCompletions(c, k.name);
@@ -6421,11 +6551,18 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                   </View>
                 </View>
 
-                {/* Statline — chore fraction is the focal stat; days-left right-aligned */}
+                {/* Statline — chore fraction is the focal stat; days-left right-aligned.
+                    The sub-label marks this as a HOUSEHOLD-completion metric (each shared
+                    chore counted once for the family), distinct from the per-kid
+                    individual readiness bars — so family-bar ≠ sum-of-kids never reads
+                    as a bug. */}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-                    <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(44), lineHeight: scale(60), color: LIME }}>{totalCompleted}</Text>
-                    <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), lineHeight: scale(33), color: '#D9C9FF' }}>/{totalWeeklyTarget} chores</Text>
+                  <View>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                      <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(44), lineHeight: scale(60), color: LIME }}>{totalCompleted}</Text>
+                      <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), lineHeight: scale(33), color: '#D9C9FF' }}>/{Math.round(totalWeeklyTarget)} chores</Text>
+                    </View>
+                    <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(11), color: MUTE, marginTop: 2 }}>family chores done this week</Text>
                   </View>
                   <Text style={{ fontFamily: 'SpaceMono_700Bold', fontSize: scale(12), color: LIME, paddingBottom: 8 }}>
                     {daysLeft} day{daysLeft === 1 ? '' : 's'} left
@@ -10479,6 +10616,10 @@ function AppInner() {
   const [parentRole, setParentRole]           = useState('');
   const [setupChildren, setSetupChildren]     = useState<import('./src/screens/ParentOnboarding').OnboardingChild[]>([]);
   const [kids, setKids]                       = useState<string[]>([]);
+  // Kid display-name → DB join date (kids.created_at, ISO). Feeds the date-aware
+  // weekly denominator so a mid-week joiner isn't graded against a full week.
+  // A missing entry → the helper falls back to a full week (safe no-op).
+  const [kidJoinDates, setKidJoinDates]       = useState<Record<string, string>>({});
   const [currentKidName, setCurrentKidName]   = useState('');
   // MON-85 Phase 2: when set, this is a kid-paired device ("device acts as the
   // household") locked into one kid's view. Persisted in AsyncStorage so the lock
@@ -10751,6 +10892,11 @@ function AppInner() {
         if (dbKids && dbKids.length > 0) {
           const names = dbKids.map((k: { name: string }) => k.name);
           setKids(names);
+          setKidJoinDates(Object.fromEntries(
+            (dbKids as { name: string; created_at?: string | null }[])
+              .filter(k => k.created_at)
+              .map(k => [k.name, k.created_at as string]),
+          ));
           setCurrentKidName(names[0]);
           setSetupChildren(dbKids.map((k: { id: string; name: string; avatar_color: string; avatar_idx: number; age_range: string; pairing_code?: string | null }) => ({
             id:               k.id,
@@ -10811,7 +10957,7 @@ function AppInner() {
           const kidIdToName: Record<string, string> = {};
           for (const k of (dbKids ?? [])) kidIdToName[k.id] = k.name;
 
-          const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null }) => ({
+          const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null; created_at?: string | null }) => ({
             id:                c.id,
             name:              c.name,
             description:       '',
@@ -10824,6 +10970,7 @@ function AppInner() {
             status:            'active' as const,
             weeklyCompletions: 0,
             completionMode:    c.completion_mode === 'independent' ? 'independent' : c.completion_mode === 'shared' ? 'shared' : undefined,
+            createdAt:         c.created_at ?? undefined,
           }));
           loadedChores = mapped;
 
@@ -11323,13 +11470,13 @@ function AppInner() {
     const km = kidMonsterState[currentKidName];
     if (!km || km.weaknessDiscovered) return;
     const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
-    const target   = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
-    const done     = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
-    if (Math.min(100, Math.round((done / target) * 100)) < WEAKNESS_THRESHOLD_PCT) return;
+    // Same date-aware helper as the battle gate, so the discovery toast and the
+    // weaknessUnlocked it announces fire at the exact same threshold.
+    if (weeklyCompletion(myChores, currentKidName, kidJoinDates[currentKidName]).pct < WEAKNESS_THRESHOLD_PCT) return;
     const w = activeKidBoss.weakness;
     enqueueReward({ kind: 'weakness', bossName: activeKidBoss.name, weaknessName: w.name, weaknessIcon: w.icon });
     setKidMonsterState(prev => ({ ...prev, [currentKidName]: { ...prev[currentKidName], weaknessDiscovered: true } }));
-  }, [viewMode, currentKidName, managedChores, kidMonsterState, activeKidBoss.name]);
+  }, [viewMode, currentKidName, managedChores, kidMonsterState, activeKidBoss.name, kidJoinDates]);
 
   // Shared-bar progress for the current household boss.
   const householdKidNames = setupChildren.map(c => c.name);
@@ -11837,6 +11984,11 @@ function AppInner() {
       const [cols, caps] = await Promise.all([getCollectibles(name), getBossCaptures(name)]);
 
       const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(name));
+      // INTENTIONALLY FLAT (not the date-aware weeklyCompletion helper): the
+      // "perfect week" milestone keeps the full-week 100% bar regardless of join
+      // date, so a mid-week joiner must complete a genuine full clean week to earn
+      // it rather than clearing a prorated short week. Divergence from the battle /
+      // readiness gate is deliberate — milestone economics stay conservative.
       const target = myChores.reduce((s, c) => s + frequencyToWeeklyTarget(c.frequency), 0);
       const doneThisWeek = myChores.reduce((s, c) => s + getChoreCompletions(c, name), 0);
       const weekTargetMet = target > 0 && doneThisWeek >= target;
@@ -12138,10 +12290,10 @@ function AppInner() {
     if (completionPctOverride !== undefined) {
       pct = completionPctOverride;
     } else {
+      // Same date-aware helper as the battle gate — keeps the chest tier / recorded
+      // completion_pct identical to the weaknessUnlocked the kid just fought under.
       const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
-      const totalTarget = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
-      const totalDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
-      pct = Math.min(100, Math.round((totalDone / totalTarget) * 100));
+      pct = weeklyCompletion(myChores, currentKidName, kidJoinDates[currentKidName]).pct;
     }
     setKidMonster(currentKidName, s => {
       // Bank unspent shards. Shards now come ONLY from doing chores (the random
@@ -12447,6 +12599,7 @@ function AppInner() {
     familyIdRef.current = null;   // stop tagging debug-log flushes with the signed-out parent
     setSetupChildren([]);
     setKids([]);
+    setKidJoinDates({});
     setManagedChores(DEFAULT_MANAGED_CHORES);
     setChoreHistory([]);
     setPayoutLog([]);
@@ -12798,7 +12951,7 @@ function AppInner() {
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
                 }} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
-            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} bossHpPct={householdHpPct} totalFighters={householdKidNames.length} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
+            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidJoinDate={kidJoinDates[currentKidName]} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} bossHpPct={householdHpPct} totalFighters={householdKidNames.length} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : activeKidBoss} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} /></ErrorBoundary>
             </Modal>
@@ -12814,9 +12967,9 @@ function AppInner() {
                 />;
               }
               const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
-              const totalWeeklyTarget = myChores.reduce((sum, c) => sum + frequencyToWeeklyTarget(c.frequency), 0) || 1;
-              const totalWeeklyDone   = myChores.reduce((sum, c) => sum + getChoreCompletions(c, currentKidName), 0);
-              const completionPct = Math.min(100, Math.round((totalWeeklyDone / totalWeeklyTarget) * 100));
+              // Date-aware denominator (shared helper) — prorates expected completions
+              // by the days each chore was available to this kid this week.
+              const completionPct = weeklyCompletion(myChores, currentKidName, kidJoinDates[currentKidName]).pct;
               const totalPower = calcPowerRating(completionPct, monsterIdx, liveCurrentStreak);
               // Shards come only from doing chores (the random per-chore drop),
               // banked per kid — the battle is seeded with that banked balance.
@@ -12888,7 +13041,7 @@ function AppInner() {
                     <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
                   </View>
                 </View>
-              } currentBossName={householdIdentity.name} {...(() => { const { target, done } = householdChoreTotals(managedChores, setupChildren.map(c => c.name)); return { familyPowerPct: Math.min(100, Math.round((done / (target || 1)) * 100)), choresLeft: Math.max(0, target - done) }; })()} daysLeft={daysUntilSunday(debugDayOffset)} onViewBoss={() => { setTab('world'); setScreen('world'); }} onBack={() => { setTab('wallet'); setScreen('wallet'); }} /></ErrorBoundary>}
+              } currentBossName={householdIdentity.name} {...(() => { const { target, done } = householdChoreTotals(managedChores, setupChildren.map(c => c.name), kidJoinDates); return { familyPowerPct: Math.min(100, Math.round((done / (target || 1)) * 100)), choresLeft: Math.max(0, Math.round(target - done)) }; })()} daysLeft={daysUntilSunday(debugDayOffset)} onViewBoss={() => { setTab('world'); setScreen('world'); }} onBack={() => { setTab('wallet'); setScreen('wallet'); }} /></ErrorBoundary>}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} onGoalCreated={addGoal} monsterName={effectiveMonsterName} />}
             {screen === 'kidPayout' && (() => { const lastPayout = payoutLog.find(p => p.kidName === currentKidName); const snap = payoutSnapshot[currentKidName]; return lastPayout ? <KidPayoutScreen amount={lastPayout.amount} completedCount={snap?.completedCount ?? 0} weeks={snap?.weeks ?? []} battleWon={snap?.battleWon ?? null} battleBonus={snap?.battleBonus ?? null} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setScreen('home'); setTab('home'); }} /> : null; })()}
             {showTabBar && <TabBar active={screen === 'trophyRoom' ? 'trophies' : tab} onNav={navTab} />}
@@ -12922,7 +13075,7 @@ function AppInner() {
               </TouchableOpacity>
             </View>
 
-            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} householdBossHpPct={householdHpPct} householdTotalFighters={householdKidNames.length} /></ErrorBoundary>}
+            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} kidJoinDates={kidJoinDates} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} householdBossHpPct={householdHpPct} householdTotalFighters={householdKidNames.length} /></ErrorBoundary>}
             {parentScreen === 'parentPayout' && <ErrorBoundary key="parentPayout"><ParentPayoutScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} payoutLog={payoutLog} onConfirm={confirmPayout} onBack={goBack} /></ErrorBoundary>}
             {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
             {parentScreen === 'choreLibrary' && <ErrorBoundary key="choreLibrary"><ChoreLibraryScreen chores={managedChores} onBack={goBack} onAdd={() => { setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore'); }} onEdit={(c) => { setPrevParentScreen('choreLibrary'); openEditChore(c); }} onDelete={deleteChore} baseRate={baseRate} /></ErrorBoundary>}
@@ -13374,7 +13527,7 @@ function AppInner() {
                           <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <View style={{ flex: 1 }}>
                               <Text style={{ color: '#FFFFFF', fontSize: scale(14), fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>{c.name}</Text>
-                              <Text style={{ color: '#B8B8B8', fontSize: scale(14) }}>{c.frequency} · {done}/{target} · {c.status}</Text>
+                              <Text style={{ color: '#B8B8B8', fontSize: scale(14) }}>{c.frequency} · {done}/{Math.round(target)} · {c.status}</Text>
                             </View>
                             <Text style={{ color: over ? '#FF5C5C' : done >= target ? '#C5F215' : '#AAAAAA', fontSize: scale(14), fontFamily: 'Inter_900Black', minWidth: 48, textAlign: 'right' }}>{over ? `⚠ ${pct}%` : `${pct}%`}</Text>
                           </View>
