@@ -10727,8 +10727,12 @@ function AppInner() {
         }
 
         // Chore history + week approval days — from Supabase profile JSON, fall back to AsyncStorage
-        if (profile?.chore_history_json)     { try { setChoreHistory(JSON.parse(profile.chore_history_json)); } catch {} }
-        else { const h = await AsyncStorage.getItem('monstir:choreHistory');       if (h) { try { setChoreHistory(JSON.parse(h)); } catch {} } }
+        // Captured into a local so the parent-milestone backfill (below) can derive
+        // from the same durable history without waiting for the setState to commit.
+        let loadedHistory: typeof choreHistory = [];
+        if (profile?.chore_history_json)     { try { loadedHistory = JSON.parse(profile.chore_history_json); } catch {} }
+        else { const h = await AsyncStorage.getItem('monstir:choreHistory');       if (h) { try { loadedHistory = JSON.parse(h); } catch {} } }
+        setChoreHistory(loadedHistory);
 
         if (profile?.week_approval_days_json) { try { setWeekApprovalDays(JSON.parse(profile.week_approval_days_json)); } catch {} }
         else { const w = await AsyncStorage.getItem('monstir:weekApprovalDays');   if (w) { try { setWeekApprovalDays(JSON.parse(w)); } catch {} } }
@@ -10798,6 +10802,10 @@ function AppInner() {
 
         const choresToMerge = profile?.chores_state_json ?? savedChores;
 
+        // Snapshot of the DB-derived board (assignedTo already name-mapped) for the
+        // parent-milestone backfill's every-kid-has-a-chore check.
+        let loadedChores: ManagedChore[] = [];
+
         if (dbChores && dbChores.length > 0) {
           // Build UUID → name map from the kids we just loaded
           const kidIdToName: Record<string, string> = {};
@@ -10817,6 +10825,7 @@ function AppInner() {
             weeklyCompletions: 0,
             completionMode:    c.completion_mode === 'independent' ? 'independent' : c.completion_mode === 'shared' ? 'shared' : undefined,
           }));
+          loadedChores = mapped;
 
           if (choresToMerge) {
             try {
@@ -10949,6 +10958,37 @@ function AppInner() {
             const parentMiles = JSON.parse(profile.parent_milestones_json) as EarnedMilestone[];
             if (Array.isArray(parentMiles)) await mergeMilestones(PARENT_OWNER, parentMiles);
           } catch {}
+        } else {
+          // Backfill (MON-77 follow-up): accounts that earned parent milestones
+          // before parent_milestones_json shipped (2026-06-10) have a null column,
+          // so a fresh install / re-login finds an empty local store and the
+          // milestone sweep + first-approval/payout events RE-FIRE their toasts.
+          // Derive every parent milestone that's deterministically provable from
+          // durable history and seed them silently here — before setAppDataLoaded,
+          // so the sweep finds them already earned and stays quiet. Then persist
+          // the seeded set so the column is no longer null going forward.
+          try {
+            const allKidNames = (dbKids ?? []).map((k: { name: string }) => k.name);
+            const entries = loadedHistory.map(e => ({ kidName: e.kidName, date: new Date(e.approvedAt).toDateString() }));
+            const lifetimePaidCents = (Array.isArray(dbPayouts) ? dbPayouts as { amount_cents?: number }[] : [])
+              .reduce((s, p) => s + (p.amount_cents ?? 0), 0);
+            const everyKidHasChore = allKidNames.length > 0 &&
+              allKidNames.every((n: string) => loadedChores.some(c => c.assignedTo.length === 0 || c.assignedTo.includes(n)));
+            const ids = new Set(evalParentMilestones({ entries, allKidNames, lifetimePaidCents, everyKidHasChore }));
+            // Event-only milestones the sweep can't recompute, but which are still
+            // provable from history (≥1 approval / ≥1 payout ever happened).
+            if (loadedHistory.length > 0)                         ids.add('parent-first-approval');
+            if (Array.isArray(dbPayouts) && dbPayouts.length > 0) ids.add('parent-first-payout');
+            if (ids.size > 0) {
+              const now = new Date().toISOString();
+              await mergeMilestones(PARENT_OWNER, [...ids].map(id => ({ id, earnedAt: now })));
+              const earned = await getEarnedMilestones(PARENT_OWNER);
+              saveAppState({ parent_milestones_json: JSON.stringify(earned) })
+                .catch(e => console.warn('[DB] saveAppState (parent milestone backfill) error:', e));
+            }
+          } catch (e) {
+            console.warn('[DB] parent milestone backfill failed:', e);
+          }
         }
 
         setAppDataLoaded(true);
