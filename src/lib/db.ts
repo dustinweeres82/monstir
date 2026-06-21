@@ -200,6 +200,28 @@ export async function loadWeekCompletions(): Promise<{ chore_id: string; kid_id:
   return (data ?? []) as { chore_id: string; kid_id: string; completed_at: string; status: string }[];
 }
 
+export type ChoreHistoryRow = { id: string; kid_name: string; chore_name: string; icon: string | null; earned_cents: number; approved_at: string };
+
+/**
+ * MON-92 / MON-91: load the parent's chore history from the append-only
+ * `chore_history` TABLE — the authoritative audit, written on every approval and
+ * auto-approval. This is the source for both the History tab and the money
+ * breakdown (earned-this-week / unpaid-weeks / past-due). It REPLACES reading the
+ * `chore_history_json` blob, which is saved whole-column last-writer-wins and so
+ * drifts/clobbers across devices (ghost completions, phantom owed amounts). The
+ * columns map 1:1 onto the in-app choreHistory row shape. Newest first.
+ */
+export async function loadChoreHistory(): Promise<ChoreHistoryRow[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+  const { data } = await supabase
+    .from('chore_history')
+    .select('id, kid_name, chore_name, icon, earned_cents, approved_at')
+    .eq('parent_id', userId)
+    .order('approved_at', { ascending: false });
+  return (data ?? []) as ChoreHistoryRow[];
+}
+
 export async function updateChore(choreId: string, fields: Record<string, unknown>) {
   const { data, error } = await supabase.from('chores').update(fields).eq('id', choreId);
   console.log('[DB] updateChore data:', data, 'error:', error);
@@ -605,6 +627,17 @@ export async function updateKidStats(kidId: string, delta: {
   if (delta.monster_name !== undefined)    updates.monster_name = delta.monster_name;
   const { data, error } = await supabase.from('kids').update(updates).eq('id', kidId);
   console.log('[DB] updateKidStats data:', data, 'error:', error);
+}
+
+// MON-92: atomic coin delta — the race-safe path for the parent-facing "owed"
+// balance. Award sites pass a positive delta; payout passes a negative one. Unlike
+// updateKidStats' absolute `coins` write (which is last-writer-wins and lost a
+// kid's pay when two devices approved at once), concurrent increments compose.
+// Caller must pass a resolved UUID (temp local ids are skipped upstream).
+export async function incrementKidCoins(kidId: string, delta: number): Promise<void> {
+  if (!kidId || delta === 0) return;
+  const { error } = await supabase.rpc('increment_kid_coins', { kid: kidId, delta });
+  if (error) console.warn('[DB] incrementKidCoins error:', error.message);
 }
 
 // ─── Push notifications (MON-29) ─────────────────────────────────────────────

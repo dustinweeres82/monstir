@@ -73,7 +73,7 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
 import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, getPushPermission, type PushRoute } from './src/lib/push';
 import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
@@ -10817,7 +10817,17 @@ function AppInner() {
   const addKidCoins  = useCallback((name: string, amount: number) => {
     if (!Number.isFinite(amount)) { console.warn(`[coins] ignored non-finite amount for ${name}:`, amount); return; }
     setKidCoins(prev => ({ ...prev, [name]: (Number.isFinite(prev[name]) ? prev[name] : 0) + amount }));
-  }, []);
+    // MON-92: persist the coin award as an ATOMIC delta, not via the debounced
+    // absolute kid-stats sync (which is last-writer-wins and lost a kid's pay when
+    // two devices approved at once). This is the single chokepoint for every coin
+    // award (chore approval, auto-approval, battle bonus), so none can clobber.
+    // Skipped for temp (non-UUID) ids — the increment lands once the UUID resolves
+    // and a later award fires; the headline owed self-corrects on the next reload.
+    const kidDbId = setupChildren.find(c => c.name === name)?.id;
+    if (kidDbId && isUUID(kidDbId) && amount !== 0) {
+      incrementKidCoins(kidDbId, amount).catch(e => logDbError('db.coins.increment', e));
+    }
+  }, [setupChildren]);
   const resetKidCoins = useCallback((name: string) => setKidCoins(prev => ({ ...prev, [name]: 0 })), []);
 
   // ── Per-kid monster state shortcuts for the active kid ────────────────────
@@ -10882,7 +10892,7 @@ function AppInner() {
           await AsyncStorage.setItem('monstir:lastUserId', session.user.id);
         } catch {}
 
-        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset, savedHouseholdBoss, weekCompletions] = await Promise.all([
+        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset, savedHouseholdBoss, weekCompletions, dbHistory] = await Promise.all([
           loadProfile(),
           loadKids(),
           loadChores(),
@@ -10895,6 +10905,7 @@ function AppInner() {
           AsyncStorage.getItem('monstir:lastWeekReset'),
           AsyncStorage.getItem('monstir:householdBoss'),
           loadWeekCompletions(),   // durable audit → rebuild board counters + lock (immune to blob clobber)
+          loadChoreHistory(),      // MON-92: History + money breakdown from the chore_history TABLE (not the drifting blob)
         ]);
         if (savedHouseholdBoss) {
           try {
@@ -10946,12 +10957,27 @@ function AppInner() {
           })));
         }
 
-        // Chore history + week approval days — from Supabase profile JSON, fall back to AsyncStorage
-        // Captured into a local so the parent-milestone backfill (below) can derive
-        // from the same durable history without waiting for the setState to commit.
-        let loadedHistory: typeof choreHistory = [];
-        if (profile?.chore_history_json)     { try { loadedHistory = JSON.parse(profile.chore_history_json); } catch {} }
-        else { const h = await AsyncStorage.getItem('monstir:choreHistory');       if (h) { try { loadedHistory = JSON.parse(h); } catch {} } }
+        // Chore history — MON-92/MON-91: derive from the append-only `chore_history`
+        // TABLE (authoritative; written on every approval/auto-approval), NOT the
+        // `chore_history_json` blob, which is saved whole-column last-writer-wins and
+        // drifts/clobbers across devices (ghost completions, phantom owed amounts).
+        // Columns map 1:1 onto the choreHistory row. Captured into a local so the
+        // parent-milestone backfill (below) derives from the same durable history
+        // without waiting for the setState to commit. Falls back to the local
+        // AsyncStorage cache only when the DB read is empty (offline / cold start).
+        let loadedHistory: typeof choreHistory = (dbHistory ?? []).map(r => ({
+          id:         r.id,
+          choreName:  r.chore_name,
+          kidName:    r.kid_name,
+          earnedCents: r.earned_cents,
+          approvedAt: r.approved_at,
+          icon:       resolveChoreIcon(r.icon ?? '', r.chore_name),
+          bg:         '#EAE4FF',
+        }));
+        if (loadedHistory.length === 0) {
+          const h = await AsyncStorage.getItem('monstir:choreHistory');
+          if (h) { try { loadedHistory = JSON.parse(h); } catch {} }
+        }
         setChoreHistory(loadedHistory);
 
         if (profile?.week_approval_days_json) { try { setWeekApprovalDays(JSON.parse(profile.week_approval_days_json)); } catch {} }
@@ -11452,14 +11478,14 @@ function AppInner() {
     }, 1000);
   }, [goalsByKid, appDataLoaded, setupChildren]);
 
-  const appStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!appDataLoaded) return;
+    // MON-92/MON-91: the `chore_history` TABLE is the master (written on approval).
+    // The `chore_history_json` blob is NO LONGER written — saving it whole-column
+    // last-writer-wins is exactly what drifted/clobbered it (ghost completions,
+    // phantom owed). We keep only a device-LOCAL AsyncStorage cache as an offline
+    // fallback for the next cold start; it's never trusted over the table.
     AsyncStorage.setItem('monstir:choreHistory', JSON.stringify(choreHistory)).catch(() => {});
-    if (appStateSyncTimer.current) clearTimeout(appStateSyncTimer.current);
-    appStateSyncTimer.current = setTimeout(() => {
-      saveAppState({ chore_history_json: JSON.stringify(choreHistory) }).catch(e => logDbError('db.history.save', e));
-    }, 2000);
   }, [choreHistory, appDataLoaded]);
 
   useEffect(() => {
@@ -11481,7 +11507,12 @@ function AppInner() {
         updateKidStats(kidDbId, {
           xp:              km.xp,
           weekly_xp:       km.weeklyXp,
-          coins:           kidCoins[name] ?? 0,
+          // MON-92: `coins` is NO LONGER written here. This effect pushes whole
+          // device-local state as ABSOLUTE values (last-writer-wins), which lost a
+          // kid's pay when two devices approved at once. Coins now persist only via
+          // the atomic increment in addKidCoins / the payout decrement. (xp /
+          // weekly_xp remain absolute for now — same pattern, lower stakes, and
+          // entangled with the Monday weekly_xp reset; tracked as a follow-up.)
           current_streak:  km.currentStreak,
           last_chore_date: km.lastChoreDate || undefined,
           monster_idx:     km.monsterIdx,
@@ -11492,7 +11523,7 @@ function AppInner() {
     return () => { if (kidSyncTimer.current) clearTimeout(kidSyncTimer.current); };
     // setupChildren is a dep so the sync re-fires when a kid's temporary local
     // id is replaced by its real Supabase UUID (otherwise stats never persist).
-  }, [kidMonsterState, kidCoins, appDataLoaded, setupChildren]);
+  }, [kidMonsterState, appDataLoaded, setupChildren]);
 
   // ── Flush queued kid-welcome writes once the kid's real UUID resolves ──────
   useEffect(() => {
@@ -12342,6 +12373,11 @@ function AppInner() {
     log('payout.confirm', { kidId: kidDbId, amountCents: amount, completedCount, weeks: weeks.length, battleBonus });
     if (kidDbId) {
       savePayoutToDb({ kidId: kidDbId, kidName, amountCents: amount }).catch(e => logDbError('db.payout.save', e));
+      // MON-92: decrement coins by the amount paid (atomic), instead of letting the
+      // debounced absolute sync push local 0. A decrement preserves any award that
+      // landed on another device between this read and the write, where an absolute
+      // 0 would wipe it.
+      if (amount !== 0) incrementKidCoins(kidDbId, -amount).catch(e => logDbError('db.coins.payout', e));
     }
   }, [kidCoins, resetKidCoins, choreHistory, payoutLog, managedChores, setupChildren, checkMilestone]);
 
