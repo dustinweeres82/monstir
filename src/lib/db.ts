@@ -332,9 +332,9 @@ export async function submitChoreCompletion(params: {
   kidId: string;
   requiresApproval: boolean;
   earnedCents?: number;
-}): Promise<void> {
+}): Promise<string | null> {
   const userId = await getCurrentUserId();
-  if (!userId) return;
+  if (!userId) return null;
 
   const weekStart = getWeekStart();
   const now = new Date().toISOString();
@@ -374,7 +374,7 @@ export async function submitChoreCompletion(params: {
     .limit(1);
   if (sameDay && sameDay.length > 0) {
     console.log(`[DB] submitChoreCompletion skipped — already completed today${isShared ? ' (shared)' : ''}`);
-    return;
+    return null;
   }
 
   // (2) Weekly cap — never more than the frequency target (2×/3×/…) per week,
@@ -389,7 +389,7 @@ export async function submitChoreCompletion(params: {
     .in('status', ['pending', 'approved']);
   if ((weekCount ?? 0) >= target) {
     console.log(`[DB] submitChoreCompletion skipped — weekly cap reached (${weekCount}/${target})${isShared ? ' (shared)' : ''}`);
-    return;
+    return null;
   }
 
   const { data, error } = await supabase.from('chore_completions').insert({
@@ -401,10 +401,48 @@ export async function submitChoreCompletion(params: {
     completed_at: now,
     approved_at:  params.requiresApproval ? null : now,
     earned_cents: params.requiresApproval ? null : params.earnedCents,
-  });
+  }).select('id').single();
   console.log('[DB] submitChoreCompletion data:', data, 'error:', error);
+  return data?.id ?? null;
 }
 
+// Idempotent approval award (MON-92 follow-up). Writes the chore_history feed row
+// keyed to its completion and credits the kid's coins EXACTLY ONCE, no matter how
+// many devices / retries / realtime echoes call it for the same completion — the
+// DB dedups on chore_history.completion_id and only credits coins on first insert.
+// This is the single chokepoint that persists chore-approval money + history; the
+// client only does an optimistic local coin bump (addKidCoins with persist:false).
+export async function recordChoreApproval(params: {
+  completionId: string;
+  kidId: string;
+  kidName: string;
+  choreName: string;
+  earnedCents: number;
+  icon: string;
+}): Promise<void> {
+  const { error } = await supabase.rpc('record_chore_approval', {
+    p_completion_id: params.completionId,
+    p_kid_id:        params.kidId,
+    p_kid_name:      params.kidName,
+    p_chore_name:    params.choreName,
+    p_icon:          params.icon,
+    p_earned_cents:  params.earnedCents,
+  });
+  if (error) console.warn('[DB] recordChoreApproval error:', error.message);
+}
+
+// MON-94 (Phase 1 of MON-92): approval is now a single race-safe, backlog-aware
+// RPC (approve_chore_unit) that makes chore_completions the PRIMARY, guarded write.
+// It claims the oldest still-pending unit for (chore, kid) — ANY week, so backlog
+// is claimable — FOR UPDATE SKIP LOCKED, so a Sunday batch or a second device each
+// flip a DISTINCT row, then writes history + credits coins idempotently keyed to
+// that completion. The old path scoped the claim to the CURRENT week_start at a
+// fixed unitIdx, which dropped backlog/raced approvals (live: Millie −$1.50).
+//
+// Returns `awarded`: true when a unit was claimed + paid, false when there was
+// NOTHING claimable. Option 2 (claim-or-revert): on false the caller must roll
+// back its optimistic credit so coins / history / blob never move without a
+// committed chore_completions row.
 export async function approveChoreCompletion(params: {
   choreId: string;
   kidId: string;
@@ -412,34 +450,24 @@ export async function approveChoreCompletion(params: {
   choreName: string;
   kidName: string;
   icon: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const userId = await getCurrentUserId();
-  if (!userId) return;
+  if (!userId) return true; // not signed in: can't confirm — keep optimistic, guardrail catches drift
 
-  const weekStart = getWeekStart();
-  const now = new Date().toISOString();
-
-  // Update chore_completion to approved
-  const { data: updateData, error: updateError } = await supabase
-    .from('chore_completions')
-    .update({ status: 'approved', approved_at: now, earned_cents: params.earnedCents })
-    .eq('chore_id', params.choreId)
-    .eq('kid_id', params.kidId)
-    .eq('week_start', weekStart)
-    .eq('status', 'pending');
-  console.log('[DB] approveChoreCompletion update data:', updateData, 'error:', updateError);
-
-  // Write to chore_history audit log
-  const { data: histData, error: histError } = await supabase.from('chore_history').insert({
-    parent_id:    userId,
-    kid_id:       params.kidId,
-    kid_name:     params.kidName,
-    chore_name:   params.choreName,
-    icon:         params.icon,
-    earned_cents: params.earnedCents,
-    approved_at:  now,
+  const { data, error } = await supabase.rpc('approve_chore_unit', {
+    p_chore_id:     params.choreId,
+    p_kid_id:       params.kidId,
+    p_kid_name:     params.kidName,
+    p_chore_name:   params.choreName,
+    p_icon:         params.icon,
+    p_earned_cents: params.earnedCents,
   });
-  console.log('[DB] approveChoreCompletion history data:', histData, 'error:', histError);
+  if (error) {
+    console.warn('[DB] approveChoreCompletion error:', error.message);
+    return true; // ambiguous (network/RPC error): keep optimistic, don't strand a real award
+  }
+  // null = nothing claimable (caller reverts); a number = cents awarded.
+  return data != null;
 }
 
 export async function rejectChoreCompletion(params: {

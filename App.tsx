@@ -73,9 +73,9 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, recordChoreApproval, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
 import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, getPushPermission, type PushRoute } from './src/lib/push';
-import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
+import { initDebugLog, log, logWarn, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
 
 const APP_VERSION = Constants.expoConfig?.version ?? null;
@@ -10814,13 +10814,18 @@ function AppInner() {
   const getKidCoins  = useCallback((name: string) => kidCoins[name] ?? 0, [kidCoins]);
   // Guard against NaN/Infinity: one bad amount would poison the stored balance
   // (and sync the corruption to Supabase via the debounced kid-stats sync).
-  const addKidCoins  = useCallback((name: string, amount: number) => {
+  const addKidCoins  = useCallback((name: string, amount: number, opts?: { persist?: boolean }) => {
     if (!Number.isFinite(amount)) { console.warn(`[coins] ignored non-finite amount for ${name}:`, amount); return; }
     setKidCoins(prev => ({ ...prev, [name]: (Number.isFinite(prev[name]) ? prev[name] : 0) + amount }));
     // MON-92: persist the coin award as an ATOMIC delta, not via the debounced
     // absolute kid-stats sync (which is last-writer-wins and lost a kid's pay when
-    // two devices approved at once). This is the single chokepoint for every coin
-    // award (chore approval, auto-approval, battle bonus), so none can clobber.
+    // two devices approved at once).
+    // MON-92 follow-up: CHORE approvals pass { persist:false } — their coin credit
+    // is now persisted atomically AND idempotently inside record_chore_approval
+    // (gated on the completion row), so a cross-device double-approve can't
+    // double-pay. Those callers only need the optimistic local bump above; the DB
+    // truth reconciles on reload. Battle/other awards still persist their delta here.
+    if (opts?.persist === false) return;
     // Skipped for temp (non-UUID) ids — the increment lands once the UUID resolves
     // and a later award fires; the headline owed self-corrects on the next reload.
     const kidDbId = setupChildren.find(c => c.name === name)?.id;
@@ -11849,7 +11854,7 @@ function AppInner() {
         : c));
       // ── XP with streak bonus ──────────────────────────────────────────────────
       const earnedCoins = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
-      addKidCoins(currentKidName, earnedCoins);
+      addKidCoins(currentKidName, earnedCoins, { persist: false });
       // Log to history so "earned this week" counts auto-approved chores too
       // (mirrors the parent-approval path; no-approval households relied on this).
       setChoreHistory(prev => [{
@@ -11892,13 +11897,17 @@ function AppInner() {
           ],
         } : g);
       });
-      // Save to Supabase (auto-approved)
+      // Save to Supabase (auto-approved). The completion is inserted already-approved,
+      // so there's no pending state to flip — record the history + coin credit keyed
+      // to that exact completion row so a retry/echo can't double it.
       if (kidDbId) {
-        ensureChoreInDb(id).then(realId => {
+        ensureChoreInDb(id).then(async realId => {
           if (!realId) return;
-          submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents }).catch(e => logDbError('db.chore.submit', e));
-          approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => logDbError('db.chore.approve', e));
-        });
+          const completionId = await submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents });
+          if (completionId) {
+            await recordChoreApproval({ completionId, kidId: kidDbId, kidName: currentKidName, choreName: chore.name, earnedCents, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+          }
+        }).catch(e => logDbError('db.chore.submit', e));
       }
     }
   }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb, pairedKidName]);
@@ -12201,7 +12210,7 @@ function AppInner() {
       icon: chore.icon,
       bg: chore.bg,
     }, ...prev]);
-    addKidCoins(kidName, earnedCoins);
+    addKidCoins(kidName, earnedCoins, { persist: false });
     setKidMonster(kidName, s => {
       // The streak already advanced when the kid submitted, so approval only
       // pays out the snapshotted XP/coins. Updaters must stay pure: crossing
@@ -12250,12 +12259,20 @@ function AppInner() {
       checkMilestone('grudging-respect', kidName);
     }
 
-    // Save to Supabase
+    // Save to Supabase — MON-94: approval is now the race-safe, backlog-aware
+    // approve_chore_unit RPC (chore_completions is the primary, guarded write). It
+    // returns awarded=false when there was no pending unit to claim — i.e. the
+    // optimistic credit above moved coins/history/blob without a committed
+    // completion row (the exact drift this PR closes). We log that signal precisely;
+    // the Option-2 client rollback that consumes it lands with the submit-path
+    // pending-row hardening (gated on the Step 1 device repro).
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
-      ensureChoreInDb(id).then(realId => {
-        if (realId) approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => logDbError('db.chore.approve', e));
-      });
+      ensureChoreInDb(id).then(async realId => {
+        if (!realId) return;
+        const awarded = await approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+        if (!awarded) logWarn('chore.approve.no_completion_row', { choreId: realId, kidId: kidDbId });
+      }).catch(e => logDbError('db.chore.approve', e));
     }
   }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, ensureChoreInDb]);
 
