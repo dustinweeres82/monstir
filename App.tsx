@@ -73,7 +73,7 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
 import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, getPushPermission, type PushRoute } from './src/lib/push';
 import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
@@ -932,6 +932,84 @@ function frequencyToWeeklyTarget(frequency: string): number {
     case 'As needed':        return 1;
     default:                 return 1;
   }
+}
+
+/** Rebuild a chore's per-kid counters AND once-per-day lock from the durable
+ *  chore_completions audit — THE source of truth — overwriting whatever the
+ *  clobberable chores_state_json blob held. Closes the cross-device class where a
+ *  device that didn't make the change saves a stale board and clobbers a field
+ *  (childCompletions, then childLastDoneDate → the reopen → phantom pending →
+ *  double-pay chain). Rules applied against the audit, not naive row counts:
+ *    - childCompletions / weeklyCompletions from APPROVED rows (distinct local days,
+ *      per-day cap, weekly-target cap, CURRENT assignment, doer attribution)
+ *    - childLastDoneDate from the latest PENDING-or-APPROVED day (the lock is stamped
+ *      at submit, so a pending submission locks the day too); shared chores lock the
+ *      whole eligible household (mirrors stampDoneDate)
+ *  Transient state (childStatus, childPendingCount/Cents/Xp, childSubmittedAt) is
+ *  preserved from the board — only the three derived fields are replaced. */
+function reconstructBoardFromAudit(
+  board: ManagedChore[],
+  completions: { chore_id: string; kid_id: string; completed_at: string; status: string }[],
+  kidIdToName: Record<string, string>,
+  allKidNames: string[],
+): ManagedChore[] {
+  const dayOf = (iso: string) => new Date(iso).toDateString();
+  const today = new Date().toDateString();
+  type Agg = { approvedDays: Set<string>; latestTs: number; latestDay: string; approvedToday: boolean; pendingToday: boolean };
+  const byChore = new Map<string, Map<string, Agg>>();
+  for (const r of completions) {
+    const name = kidIdToName[r.kid_id];
+    if (!name) continue;
+    let kids = byChore.get(r.chore_id);
+    if (!kids) { kids = new Map(); byChore.set(r.chore_id, kids); }
+    let agg = kids.get(name);
+    if (!agg) { agg = { approvedDays: new Set(), latestTs: 0, latestDay: '', approvedToday: false, pendingToday: false }; kids.set(name, agg); }
+    const day = dayOf(r.completed_at);
+    const ts  = new Date(r.completed_at).getTime();          // compare timestamps, NOT toDateString (sorts wrong)
+    if (ts > agg.latestTs) { agg.latestTs = ts; agg.latestDay = day; }
+    if (r.status === 'approved') { agg.approvedDays.add(day); if (day === today) agg.approvedToday = true; }
+    else if (r.status === 'pending' && day === today) agg.pendingToday = true;
+  }
+  return board.map(c => {
+    const target   = frequencyToWeeklyTarget(c.frequency);
+    const eligible = c.assignedTo.length ? c.assignedTo : allKidNames;   // CURRENT assignment
+    const perKid   = byChore.get(c.id);
+    const childCompletions: Record<string, number> = {};
+    const childLastDoneDate: Record<string, string> = {};               // fresh from audit, immune to blob clobber
+    // childStatus: PRESERVE the blob by default — a kid's ABSENCE from the audit does
+    // NOT mean "active" (a rejected chore and a shared-chore board-lock both have no
+    // row and must stay put, or the shared double-do bug returns). Only override for a
+    // kid with a TODAY row: approved-today → 'approved' (so getPendingCount is 0 and the
+    // parent can't re-approve), else pending-today → 'pending'.
+    const childStatus: Record<string, ChoreStatus> = { ...c.childStatus };
+    const householdApprovedDays = new Set<string>();
+    let householdLatestTs = 0, householdLatestDay = '';
+    if (perKid) {
+      for (const [name, agg] of perKid) {
+        if (!eligible.includes(name)) continue;                          // reassigned away → drop
+        if (agg.approvedDays.size) childCompletions[name] = Math.min(target, agg.approvedDays.size);
+        for (const d of agg.approvedDays) householdApprovedDays.add(d);
+        if (isIndependentChore(c)) {
+          if (agg.latestDay) childLastDoneDate[name] = agg.latestDay;    // per-kid lock
+        } else if (agg.latestTs > householdLatestTs) {
+          householdLatestTs = agg.latestTs; householdLatestDay = agg.latestDay;   // shared: household-wide
+        }
+        if (agg.approvedToday)     childStatus[name] = 'approved';       // closes the parent re-approve path
+        else if (agg.pendingToday) childStatus[name] = 'pending';
+        // no today row → leave childStatus[name] as the preserved blob value
+      }
+    }
+    if (!isIndependentChore(c) && householdLatestDay) {
+      for (const name of eligible) childLastDoneDate[name] = householdLatestDay;  // shared lock = whole household
+    }
+    return {
+      ...c,
+      weeklyCompletions: isIndependentChore(c) ? 0 : Math.min(target, householdApprovedDays.size),
+      childCompletions,
+      childStatus,
+      childLastDoneDate,
+    };
+  });
 }
 
 /** Days a chore was actually available to a kid in the CURRENT week — the span
@@ -10804,7 +10882,7 @@ function AppInner() {
           await AsyncStorage.setItem('monstir:lastUserId', session.user.id);
         } catch {}
 
-        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset, savedHouseholdBoss] = await Promise.all([
+        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset, savedHouseholdBoss, weekCompletions] = await Promise.all([
           loadProfile(),
           loadKids(),
           loadChores(),
@@ -10816,6 +10894,7 @@ function AppInner() {
           AsyncStorage.getItem('monstir:goalsByKid'),
           AsyncStorage.getItem('monstir:lastWeekReset'),
           AsyncStorage.getItem('monstir:householdBoss'),
+          loadWeekCompletions(),   // durable audit → rebuild board counters + lock (immune to blob clobber)
         ]);
         if (savedHouseholdBoss) {
           try {
@@ -10956,6 +11035,10 @@ function AppInner() {
           // Build UUID → name map from the kids we just loaded
           const kidIdToName: Record<string, string> = {};
           for (const k of (dbKids ?? [])) kidIdToName[k.id] = k.name;
+          // Rebuild per-kid counters + the once-per-day lock from the durable
+          // chore_completions audit, overwriting whatever the (clobberable) blob held.
+          const reconKidNames = (dbKids ?? []).map((k: { name: string }) => k.name);
+          const reconcile = (b: ManagedChore[]) => reconstructBoardFromAudit(b, weekCompletions, kidIdToName, reconKidNames);
 
           const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null; created_at?: string | null }) => ({
             id:                c.id,
@@ -11011,15 +11094,15 @@ function AppInner() {
               // vanish on reload — a parent's chore disappearing after a restart.
               // ensureChoreInDb upgrades their '_' ids lazily on next completion.
               const localOnly = local.filter(l => !mapped.some(db => db.id === l.id || db.name === l.name));
-              const full = [...merged, ...localOnly];
+              const full = reconcile([...merged, ...localOnly]);
               setManagedChores(full);
               if (migrated || localOnly.length > 0) {
                 saveAppState({ chores_state_json: JSON.stringify(full) })
                   .catch(e => console.warn('[DB] migrate chore IDs error:', e));
               }
-            } catch { setManagedChores(mapped); }
+            } catch { setManagedChores(reconcile(mapped)); }
           } else {
-            setManagedChores(mapped);
+            setManagedChores(reconcile(mapped));
           }
         } else if (choresToMerge) {
           // No DB chores yet — migrate non-UUID IDs in saved state and restore

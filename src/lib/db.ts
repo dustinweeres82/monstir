@@ -177,6 +177,29 @@ export async function loadChores() {
   return data ?? [];
 }
 
+/**
+ * This week's chore completions (pending + approved) — the durable, append-only,
+ * server-guarded source for reconstructing per-kid board state. `chore_completions`
+ * is the ONE source of truth (its once-per-day + household-scope guards keep it
+ * correct where the chores_state_json blob gets clobbered cross-device). On load we
+ * rebuild from this instead of trusting the blob:
+ *   - APPROVED rows  → childCompletions / weeklyCompletions (the readiness counters)
+ *   - PENDING+APPROVED `completed_at` → childLastDoneDate (the once-per-day lock, which
+ *     is stamped at SUBMIT, so pending counts toward the lock too)
+ * Scoped to the current week_start (out-of-week / debug-scrub buckets are ignored).
+ */
+export async function loadWeekCompletions(): Promise<{ chore_id: string; kid_id: string; completed_at: string; status: string }[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+  const { data } = await supabase
+    .from('chore_completions')
+    .select('chore_id, kid_id, completed_at, status')
+    .eq('parent_id', userId)
+    .eq('week_start', getWeekStart())
+    .in('status', ['pending', 'approved']);
+  return (data ?? []) as { chore_id: string; kid_id: string; completed_at: string; status: string }[];
+}
+
 export async function updateChore(choreId: string, fields: Record<string, unknown>) {
   const { data, error } = await supabase.from('chores').update(fields).eq('id', choreId);
   console.log('[DB] updateChore data:', data, 'error:', error);

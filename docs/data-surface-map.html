@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monstir — DB ↔ UI Surface Map</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e14;
+    --surface: #16161f;
+    --surface2: #1c1c28;
+    --border: #2a2a3a;
+    --text: #e8e8f0;
+    --muted: #8a8aa6;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --grey: #6b7280;
+    --purple: #8b5cf6;
+    --teal: #14b8a6;
+    --red: #ef4444;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.5;
+    padding: 0 0 80px;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(14,14,20,0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 28px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; }
+  header .sub { font-size: 12.5px; color: var(--muted); }
+  header .spacer { flex: 1; }
+  header a.back {
+    font-size: 12.5px; color: var(--text); text-decoration: none;
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px;
+    background: var(--surface);
+  }
+  header a.back:hover { border-color: var(--purple); color: var(--purple); }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 28px 0; }
+
+  .intro {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 26px;
+    font-size: 13.5px;
+    color: #d6d6e6;
+  }
+  .intro b { color: var(--text); }
+
+  /* summary stat strip */
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 30px; }
+  .stat {
+    flex: 1; min-width: 150px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .stat .n { font-size: 26px; font-weight: 800; }
+  .stat .l { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+  .stat.green  { border-top: 3px solid var(--green); }
+  .stat.amber  { border-top: 3px solid var(--amber); }
+  .stat.grey   { border-top: 3px solid var(--grey); }
+  .stat.purple { border-top: 3px solid var(--purple); }
+
+  .group { margin-bottom: 38px; }
+  .group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .group-head .swatch { width: 14px; height: 14px; border-radius: 4px; }
+  .group-head h2 { font-size: 16px; font-weight: 800; }
+  .group-desc { font-size: 13px; color: var(--muted); margin: 0 0 16px 24px; max-width: 880px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    border-top-width: 3px;
+  }
+  .card.green  { border-top-color: var(--green); }
+  .card.amber  { border-top-color: var(--amber); }
+  .card.grey   { border-top-color: var(--grey); }
+  .card.purple { border-top-color: var(--purple); }
+
+  .card .tbl { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 14px; font-weight: 700; }
+  .card .rows { font-size: 11px; color: var(--muted); float: right; }
+  .card .badge {
+    display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 2px 8px; border-radius: 20px; margin-top: 8px;
+  }
+  .badge.green  { background: #05230f; color: #86efac; border: 1px solid #166534; }
+  .badge.amber  { background: #2a1c05; color: #fcd34d; border: 1px solid #92590a; }
+  .badge.grey   { background: #1b1b22; color: #b8b8c8; border: 1px solid #3a3a4a; }
+  .badge.purple { background: #1a0e2e; color: #ddd6fe; border: 1px solid #6d28d9; }
+
+  .card ul.cols { list-style: none; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 5px; }
+  .card ul.cols li {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11px; color: #c8c8da;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px 7px;
+  }
+  .card ul.cols li.key { color: var(--teal); border-color: #0d544c; }
+
+  .card .surfaced, .card .truth {
+    font-size: 12.5px; margin-top: 12px; padding: 8px 10px; border-radius: 8px;
+  }
+  .card .surfaced { background: #061d12; border: 1px solid #14532d; color: #bbf7d0; }
+  .card .surfaced::before { content: '👁  '; }
+  .card .truth { background: #2a1c05; border: 1px solid #6b4209; color: #fde68a; }
+  .card .truth::before { content: '⚠  '; }
+  .card .nosurface { background: #15151c; border: 1px solid var(--border); color: var(--muted); font-size: 12.5px; margin-top: 12px; padding: 8px 10px; border-radius: 8px; }
+  .card .nosurface::before { content: '🚫  '; }
+
+  /* blob callout */
+  .blob {
+    background: var(--surface);
+    border: 1px solid var(--amber);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 38px;
+  }
+  .blob h2 { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
+  .blob p { font-size: 13px; color: var(--muted); margin-bottom: 14px; max-width: 880px; }
+  .blob table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .blob th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .blob td { padding: 7px 10px; border-bottom: 1px solid #20202c; vertical-align: top; }
+  .blob td.col { font-family: ui-monospace, 'SF Mono', Menlo, monospace; color: var(--amber); white-space: nowrap; }
+  .blob tr:last-child td { border-bottom: none; }
+
+  footer { max-width: 1180px; margin: 0 auto; padding: 20px 28px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); }
+  code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🗄️ Monstir — DB ↔ UI Surface Map</h1>
+  <span class="sub">15 Supabase tables · what's stored vs. what the user actually sees · 2026-06-20</span>
+  <span class="spacer"></span>
+  <a class="back" href="architecture.html">← Architecture map</a>
+</header>
+
+<div class="wrap">
+
+  <div class="intro">
+    Not everything in the database reaches the screen, and a lot of what the user sees doesn't come from the
+    table you'd expect. Monstir keeps its <b>real source of truth for the chore board, history, OWED, approval
+    calendar and savings goals in JSON blobs</b> on <code>profiles</code> and <code>kids</code> — several
+    normalized tables that look authoritative are actually <b>write-only shadows</b> or <b>orphaned</b>. This map
+    sorts every table by whether it is surfaced to the user, and notes where the real data lives when it isn't.
+  </div>
+
+  <div class="stats">
+    <div class="stat green"><div class="n">8</div><div class="l">Surfaced &amp; read back</div></div>
+    <div class="stat amber"><div class="n">1</div><div class="l">Write-only shadow</div></div>
+    <div class="stat grey"><div class="n">2</div><div class="l">Orphaned / not wired</div></div>
+    <div class="stat purple"><div class="n">4</div><div class="l">Server-side / internal</div></div>
+  </div>
+
+  <!-- ── SURFACED ──────────────────────────────────────────────────────── -->
+  <div class="group">
+    <div class="group-head"><div class="swatch" style="background:#22c55e"></div><h2>Surfaced &amp; read back</h2></div>
+    <p class="group-desc">Hydrated into app state on login/bootstrap and rendered directly. These are the tables whose rows the user actually sees.</p>
+    <div class="cards">
+
+      <div class="card green">
+        <span class="rows">5 rows</span><span class="tbl">profiles</span>
+        <div><span class="badge green">surfaced (+ blobs)</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>name</li><li>parent_role</li><li>base_rate</li><li>require_approval</li>
+          <li>parent_pin</li><li>parent_pin_enabled</li><li>battle_coin_bonus_*</li><li>notification_prefs</li>
+        </ul>
+        <div class="surfaced">Loaded by <code>loadProfile()</code> → Parent Settings, Pay Rates, approval gate, Notifications toggles.</div>
+        <div class="truth">Most of the board/history/OWED data the user sees comes from this row's <b>*_json blobs</b>, not normalized tables — see the blob table below.</div>
+      </div>
+
+      <div class="card green">
+        <span class="rows">8 rows</span><span class="tbl">kids</span>
+        <div><span class="badge green">surfaced (+ blobs)</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>parent_id</li><li>name</li><li>avatar_*</li><li>age_range</li>
+          <li>monster_*</li><li>xp</li><li>weekly_xp</li><li>coins</li><li>current_streak</li>
+          <li>shards</li><li>weekly_shards_claimed</li><li>pairing_code</li>
+        </ul>
+        <div class="surfaced">Loaded by <code>loadKids()</code> → Kid Home, monster, XP/coins/streak, Wallet, battle resources.</div>
+        <div class="truth">Savings goals &amp; carry-over boss HP live in this row's <code>goals_json</code> / <code>wounded_boss_hp_json</code> blobs.</div>
+      </div>
+
+      <div class="card green">
+        <span class="rows">22 rows</span><span class="tbl">chores</span>
+        <div><span class="badge green">surfaced</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>parent_id</li><li>name</li><li>icon</li><li>frequency</li>
+          <li>difficulty</li><li>assigned_to[]</li><li>completion_mode</li>
+        </ul>
+        <div class="surfaced">Loaded by <code>loadChores()</code> → Parent Chores list and the kid/parent chore board.</div>
+      </div>
+
+      <div class="card green">
+        <span class="rows">65 rows</span><span class="tbl">chore_completions</span>
+        <div><span class="badge green">surfaced · live-synced</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>chore_id</li><li>kid_id</li><li>parent_id</li><li>status</li>
+          <li>week_start</li><li>earned_cents</li><li>rejection_note</li><li>completed_at</li><li>approved_at</li>
+        </ul>
+        <div class="surfaced"><code>loadWeekCompletions()</code> + Supabase Realtime → this week's board status &amp; the parent approval queue, live across devices.</div>
+      </div>
+
+      <div class="card green">
+        <span class="rows">2 rows</span><span class="tbl">payouts</span>
+        <div><span class="badge green">surfaced</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>parent_id</li><li>kid_id</li><li>kid_name</li><li>amount_cents</li><li>paid_at</li>
+        </ul>
+        <div class="surfaced">Loaded by <code>loadPayoutLog()</code> on bootstrap → Parent Payout history.</div>
+      </div>
+
+      <div class="card green">
+        <span class="rows">0 rows</span><span class="tbl">boss_captures</span>
+        <div><span class="badge green">surfaced</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>kid_id</li><li>parent_id</li><li>boss_name</li><li>xp_earned</li>
+          <li>coins_earned</li><li>completion_pct</li><li>week_start</li><li>captured_at</li>
+        </ul>
+        <div class="surfaced">Loaded by <code>loadBossCaptures()</code> → Trophy Room → Boss Detail. Threat/weakness come from the in-app bossLookup.</div>
+      </div>
+
+      <div class="card green">
+        <span class="rows">0 rows</span><span class="tbl">collectibles</span>
+        <div><span class="badge green">surfaced</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>kid_id</li><li>parent_id</li><li>collectible_id</li><li>rarity</li><li>week_start</li><li>earned_at</li>
+        </ul>
+        <div class="surfaced">Loaded by <code>loadCollectibles()</code> → Trophy Room → Relic Detail. Names come from the COLLECTIBLES catalogue.</div>
+      </div>
+
+      <div class="card green">
+        <span class="rows">23 rows</span><span class="tbl">milestones</span>
+        <div><span class="badge green">surfaced</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>kid_id</li><li>parent_id</li><li>milestone_id</li><li>earned_at</li>
+        </ul>
+        <div class="surfaced">Loaded by <code>loadMilestones()</code> → Trophy Room → Milestone Detail. (Parent milestones live in <code>profiles.parent_milestones_json</code>.)</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── SOURCE-OF-TRUTH BLOBS ────────────────────────────────────────── -->
+  <div class="blob">
+    <h2>⚠ The JSON-blob source of truth</h2>
+    <p>These columns are plain <code>text</code> holding serialized JSON. They — not the normalized tables — back most of what the user sees. This is the single biggest "DB ≠ what's on screen" gap, and the main drift risk.</p>
+    <table>
+      <thead><tr><th>Column</th><th>Holds</th><th>Surfaced as</th></tr></thead>
+      <tbody>
+        <tr><td class="col">profiles.chores_state_json</td><td>Live chore board state</td><td>Kid &amp; parent chore board</td></tr>
+        <tr><td class="col">profiles.chore_history_json</td><td>Approval ledger</td><td>History feed &amp; OWED totals <em>(not <code>chore_history</code> table)</em></td></tr>
+        <tr><td class="col">profiles.week_approval_days_json</td><td>Per-day approval marks</td><td>Weekly approval calendar / readiness</td></tr>
+        <tr><td class="col">profiles.kid_approval_settings_json</td><td>Per-kid approval map</td><td>Settings approval toggles</td></tr>
+        <tr><td class="col">profiles.managed_chores_json</td><td>Chore definitions mirror</td><td>Offline/fallback board build</td></tr>
+        <tr><td class="col">profiles.parent_milestones_json</td><td>Parent-audience milestones</td><td>Parent milestone toasts</td></tr>
+        <tr><td class="col">kids.goals_json</td><td>Savings goals</td><td>Kid Wallet goals <em>(not <code>savings_goals</code> table)</em></td></tr>
+        <tr><td class="col">kids.wounded_boss_hp_json</td><td>Carry-over boss HP</td><td>Battle Arena (wounded boss)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── WRITE-ONLY SHADOW ────────────────────────────────────────────── -->
+  <div class="group">
+    <div class="group-head"><div class="swatch" style="background:#f59e0b"></div><h2>Write-only shadow</h2></div>
+    <p class="group-desc">Rows are written, but no code ever reads them back — the UI derives the same data from a JSON blob instead. Kept in sync as a future normalization target (MON-92).</p>
+    <div class="cards">
+      <div class="card amber">
+        <span class="rows">47 rows</span><span class="tbl">chore_history</span>
+        <div><span class="badge amber">write-only</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>parent_id</li><li>kid_id</li><li>kid_name</li><li>chore_name</li><li>icon</li><li>earned_cents</li><li>approved_at</li>
+        </ul>
+        <div class="nosurface">Inserted on every approval, kid_name patched on rename — but never <code>SELECT</code>ed.</div>
+        <div class="truth">History + OWED actually render from <code>profiles.chore_history_json</code>. Drift between the two is possible.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ORPHANED ─────────────────────────────────────────────────────── -->
+  <div class="group">
+    <div class="group-head"><div class="swatch" style="background:#6b7280"></div><h2>Orphaned / not wired</h2></div>
+    <p class="group-desc">The table exists in the schema but no code path writes or reads it (0 rows in production). The feature persists somewhere else today; these are reserved for a future migration.</p>
+    <div class="cards">
+      <div class="card grey">
+        <span class="rows">0 rows</span><span class="tbl">savings_goals</span>
+        <div><span class="badge grey">orphaned</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>kid_id</li><li>parent_id</li><li>name</li><li>target_cents</li><li>saved_cents</li><li>category</li><li>color</li><li>icon</li>
+        </ul>
+        <div class="nosurface">No code path touches it.</div>
+        <div class="truth">Savings goals live in <code>kids.goals_json</code> instead.</div>
+      </div>
+      <div class="card grey">
+        <span class="rows">0 rows</span><span class="tbl">battle_state</span>
+        <div><span class="badge grey">orphaned</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>kid_id</li><li>parent_id</li><li>week_start</li><li>boss_name</li><li>boss_hp_remaining</li><li>battle_result</li><li>shards_used</li><li>bonus_coins</li><li>chore_pct_at_battle</li><li>pending_evolution</li>
+        </ul>
+        <div class="nosurface">No code path touches it.</div>
+        <div class="truth">Battle persistence rides on the <code>kids</code> row (<code>wounded_boss_hp_json</code>, <code>weekly_shards_claimed</code>).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SERVER-SIDE ──────────────────────────────────────────────────── -->
+  <div class="group">
+    <div class="group-head"><div class="swatch" style="background:#8b5cf6"></div><h2>Server-side / internal</h2></div>
+    <p class="group-desc">Written by the app or server pipeline but never rendered in the app UI. You read these (when you need to) from the Supabase dashboard.</p>
+    <div class="cards">
+      <div class="card purple">
+        <span class="rows">4 rows</span><span class="tbl">push_tokens</span>
+        <div><span class="badge purple">internal</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>parent_id</li><li>kid_id</li><li>expo_token</li><li>platform</li><li>timezone</li>
+        </ul>
+        <div class="nosurface">Device registration. <code>kid_id</code> null = the parent's own device. The send-push pipeline resolves recipients from here.</div>
+      </div>
+      <div class="card purple">
+        <span class="rows">21 rows</span><span class="tbl">notification_log</span>
+        <div><span class="badge purple">internal</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>parent_id</li><li>kid_id</li><li>expo_token</li><li>type</li><li>dedup_key</li><li>title</li><li>body</li><li>data</li><li>sent_at</li>
+        </ul>
+        <div class="nosurface">Every push send. Backs the 30-day history, the 2/day cap, and per-event dedup (<code>dedup_key</code> unique). Dashboard-read only.</div>
+      </div>
+      <div class="card purple">
+        <span class="rows">1 row</span><span class="tbl">pairing_attempts</span>
+        <div><span class="badge purple">internal</span></div>
+        <ul class="cols"><li class="key">id</li><li>ip</li><li>created_at</li></ul>
+        <div class="nosurface">IP throttle ledger for the <code>redeem-pairing-code</code> Edge Function (rate-limits kid pairing-code guessing).</div>
+      </div>
+      <div class="card purple">
+        <span class="rows">117 rows</span><span class="tbl">debug_logs</span>
+        <div><span class="badge purple">internal · write-only</span></div>
+        <ul class="cols">
+          <li class="key">id</li><li>created_at</li><li>family_id</li><li>platform</li><li>app_version</li><li>error_message</li><li>logs</li><li>context</li>
+        </ul>
+        <div class="nosurface">Crash/error ring-buffer dumps (long-press Settings version to flush). No client SELECT policy — read from the dashboard.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  Generated from the live Supabase schema (project <code>vxdoxtbuwfoghlugfpjp</code>) + <code>src/lib/db.ts</code> load paths.
+  Row counts are a 2026-06-20 snapshot. Sibling view: <a href="architecture.html" style="color:var(--purple)">Architecture + DB call map →</a>
+</footer>
+
+</body>
+</html>
