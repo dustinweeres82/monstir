@@ -10662,7 +10662,8 @@ function AppInner() {
   // queued Modal swaps content instead of presenting/dismissing two natives.
   type RewardPopup =
     | { kind: 'shard' }
-    | { kind: 'weakness'; bossName: string; weaknessName: string; weaknessIcon: string };
+    | { kind: 'weakness'; bossName: string; weaknessName: string; weaknessIcon: string }
+    | { kind: 'sharedClaimed'; byName: string };
   const [rewardQueue, setRewardQueue] = useState<RewardPopup[]>([]);
   const reward = rewardQueue[0] ?? null;
   const enqueueReward  = (p: RewardPopup) => setRewardQueue(q => [...q, p]);
@@ -11760,6 +11761,32 @@ function AppInner() {
     return p;
   }, [managedChores, setupChildren]);
 
+  // Undo ONE optimistically-added pending unit for (choreId, kidName) when a submit does
+  // not land as its own fresh row. Per-unit (pops one matching cents+xp entry), NOT a
+  // snapshot restore — so a Sunday batch of submits each undo exactly their own unit
+  // without racing on the shared per-kid arrays the approval flow consumes. `emptyStatus`
+  // is what the tile becomes once this kid has no pending units left: 'active' to revert a
+  // genuine fail, 'approved' to settle a shared chore a sibling already finished, 'pending'
+  // to leave a self re-tap on its surviving original claim.
+  const reduceSubmitUnit = useCallback((choreId: string, kidName: string, cents: number, xp: number, emptyStatus: ChoreStatus) => {
+    setManagedChores(prev => prev.map(c => {
+      if (c.id !== choreId) return c;
+      const cents0 = c.childPendingCents?.[kidName] ?? [];
+      const xp0    = c.childPendingXp?.[kidName]    ?? [];
+      const ci = cents0.indexOf(cents);
+      const xi = xp0.indexOf(xp);
+      const cents1 = ci >= 0 ? cents0.filter((_, i) => i !== ci) : cents0;
+      const xp1    = xi >= 0 ? xp0.filter((_, i) => i !== xi)    : xp0;
+      const nextStatus = cents1.length > 0 ? (c.childStatus?.[kidName] ?? emptyStatus) : emptyStatus;
+      return {
+        ...c,
+        childStatus:       { ...(c.childStatus ?? {}), [kidName]: nextStatus },
+        childPendingCents: { ...c.childPendingCents, [kidName]: cents1 },
+        childPendingXp:    { ...c.childPendingXp,    [kidName]: xp1 },
+      };
+    }));
+  }, []);
+
   const submitManagedChore = useCallback((id: string) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
@@ -11840,11 +11867,27 @@ function AppInner() {
           ? s
           : { ...s, currentStreak: nextStreak(s.currentStreak, s.lastChoreDate, today), lastChoreDate: today }
       );
-      // Save to Supabase
+      // Save to Supabase via the atomic claim. The optimistic board already moved; the
+      // claim result tells us how to reconcile THIS unit (per-unit, never a snapshot).
       if (kidDbId) {
-        ensureChoreInDb(id).then(realId => {
-          if (realId) submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: true }).catch(e => logDbError('db.chore.submit', e));
-        });
+        ensureChoreInDb(id).then(async realId => {
+          // realId null here = resolution FAILED (addChore returned null / chore gone),
+          // not in-flight — the temp-id window lives inside ensureChoreInDb's promise, so
+          // we only reach here once it has settled. Safe to revert.
+          if (!realId) { reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'active'); return; }
+          const res = await submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: true });
+          if (res.claimedId || !res.ok) return;                  // won the slot, or transient error → keep optimistic
+          if (res.blockedByKid) {
+            if (res.blockedByKid === kidDbId) {
+              reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'pending');   // self re-tap: drop the dup, original claim stands
+            } else {
+              reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'approved');  // a sibling finished it → settle done-by-household
+              enqueueReward({ kind: 'sharedClaimed', byName: res.blockedByName ?? 'Someone' });
+            }
+            return;
+          }
+          reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'active');         // genuine no-claim (chore gone / weekly cap) → revert
+        }).catch(e => logDbError('db.chore.submit', e));
       }
     } else {
       const allKidNames = setupChildren.map(c => c.name);
@@ -11903,14 +11946,18 @@ function AppInner() {
       if (kidDbId) {
         ensureChoreInDb(id).then(async realId => {
           if (!realId) return;
-          const completionId = await submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents });
-          if (completionId) {
-            await recordChoreApproval({ completionId, kidId: kidDbId, kidName: currentKidName, choreName: chore.name, earnedCents, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+          const res = await submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents });
+          if (res.claimedId) {
+            await recordChoreApproval({ completionId: res.claimedId, kidId: kidDbId, kidName: currentKidName, choreName: chore.name, earnedCents, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+          } else if (res.ok && res.blockedByKid && res.blockedByKid !== kidDbId) {
+            // a sibling finished this shared chore first — credit them. The optimistic
+            // coins/history reconcile from the authoritative tables on next board load.
+            enqueueReward({ kind: 'sharedClaimed', byName: res.blockedByName ?? 'Someone' });
           }
         }).catch(e => logDbError('db.chore.submit', e));
       }
     }
-  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb, pairedKidName]);
+  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb, pairedKidName, enqueueReward, reduceSubmitUnit]);
 
   // ── Weekly reset (the chore board rolls over at the week boundary) ───────────
   // This is the ONLY place the chore board resets for a new week. It fires on the
@@ -13294,12 +13341,14 @@ function AppInner() {
         never present at once — see RewardPopup queue. */}
     <RewardModal
       visible={reward !== null}
-      icon={reward?.kind === 'weakness' ? reward.weaknessIcon : '💎'}
-      title={reward?.kind === 'weakness' ? 'Weakness discovered!' : 'Shard found!'}
+      icon={reward?.kind === 'weakness' ? reward.weaknessIcon : reward?.kind === 'sharedClaimed' ? '🤝' : '💎'}
+      title={reward?.kind === 'weakness' ? 'Weakness discovered!' : reward?.kind === 'sharedClaimed' ? 'Teamwork!' : 'Shard found!'}
       onClose={dismissReward}
       body={
         reward?.kind === 'weakness'
           ? <>{reward.bossName} is weak to <RewardModalStrong>{reward.weaknessName}</RewardModalStrong>.{'\n'}Use it in your next boss battle!</>
+          : reward?.kind === 'sharedClaimed'
+          ? <><RewardModalStrong>{reward.byName}</RewardModalStrong> finished this one first!{'\n'}Nice teamwork — your family got it done. 🎉</>
           : <>You found a battle <RewardModalStrong>shard</RewardModalStrong>!{'\n'}Spend it on a special attack in your next battle.</>
       }
     />
