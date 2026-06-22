@@ -11069,7 +11069,15 @@ function AppInner() {
           for (const k of (dbKids ?? [])) kidIdToName[k.id] = k.name;
           // Rebuild per-kid counters + the once-per-day lock from the durable
           // chore_completions audit, overwriting whatever the (clobberable) blob held.
-          const reconKidNames = (dbKids ?? []).map((k: { name: string }) => k.name);
+          // Only ONBOARDED kids are eligible for the shared-chore household lock the
+          // rebuild re-stamps (childLastDoneDate, line ~1003). Without this filter,
+          // every reload re-added a phantom done-date for a not-yet-onboarded sibling
+          // even after the blob was cleaned — making a freshly-created kid look like
+          // they'd done shared chores. Non-onboarded kids never have audit rows, so
+          // narrowing this list has no effect on real completion attribution.
+          const reconKidNames = (dbKids ?? [])
+            .filter((k: { kid_onboarding_done?: boolean }) => k.kid_onboarding_done)
+            .map((k: { name: string }) => k.name);
           const reconcile = (b: ManagedChore[]) => reconstructBoardFromAudit(b, weekCompletions, kidIdToName, reconKidNames);
 
           const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null; created_at?: string | null }) => ({
@@ -11823,6 +11831,17 @@ function AppInner() {
       enqueueReward({ kind: 'shard' });
     }
 
+    // The shared "first to finish" board-lock must only ever touch kids who've
+    // actually onboarded. A freshly-created sibling who hasn't picked a monster
+    // yet has no board and must never be stamped 'approved'/done for a chore they
+    // never saw — that's what made a not-yet-set-up kid read as having "completed"
+    // chores. The household day-lock still holds via the doer's stamped date
+    // (completedToday checks ANY eligible kid's date for shared chores). The doer
+    // is always kept (they're submitting right now, so they're onboarded).
+    const lockKidNames = setupChildren
+      .map(c => c.name)
+      .filter(n => n === currentKidName || kidOnboardingDone[n]);
+
     if (requireApproval) {
       // Shared "first to finish" chores: the moment one kid submits, lock it for
       // the whole household. The submitter goes 'pending' (awaiting approval);
@@ -11832,7 +11851,7 @@ function AppInner() {
       // weekly-cap race: with the others locked out, the shared counter can't be
       // bumped past target by a second submission. (Independent chores stay per-kid.)
       const shared = !isIndependentChore(chore);
-      const eligible = shared ? choreEligibleKids(chore, setupChildren.map(c => c.name)) : [];
+      const eligible = shared ? choreEligibleKids(chore, lockKidNames) : [];
       // Snapshot the XP this submission will pay on approval. The streak bonus
       // applies only to the first chore of a new day — the same rule as the
       // auto-approve path — so approval timing/batching can't multiply it.
@@ -11853,7 +11872,7 @@ function AppInner() {
           childRejectionNote: { ...c.childRejectionNote, [currentKidName]: '' },
           childSubmittedAt: { ...c.childSubmittedAt, [currentKidName]: new Date().toISOString() },
           // Stamp the done-date so a daily chore stays locked for the rest of today.
-          childLastDoneDate: stampDoneDate(c, currentKidName, today, setupChildren.map(x => x.name)),
+          childLastDoneDate: stampDoneDate(c, currentKidName, today, lockKidNames),
           // Pin this submission's pay/XP to the rate and streak in effect right now.
           childPendingCents: { ...c.childPendingCents, [currentKidName]: [...(c.childPendingCents?.[currentKidName] ?? []), earnedCents] },
           childPendingXp:    { ...c.childPendingXp,    [currentKidName]: [...(c.childPendingXp?.[currentKidName] ?? []), pendingXp] },
@@ -11890,7 +11909,7 @@ function AppInner() {
         }).catch(e => logDbError('db.chore.submit', e));
       }
     } else {
-      const allKidNames = setupChildren.map(c => c.name);
+      const allKidNames = lockKidNames;
       setManagedChores(prev => prev.map(c => c.id === id
         // Stamp the done-date so a daily chore stays locked for the rest of today.
         ? { ...applyChoreCompletion(c, currentKidName, allKidNames), childLastDoneDate: stampDoneDate(c, currentKidName, today, allKidNames) }
@@ -11957,7 +11976,7 @@ function AppInner() {
         }).catch(e => logDbError('db.chore.submit', e));
       }
     }
-  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb, pairedKidName, enqueueReward, reduceSubmitUnit]);
+  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidOnboardingDone, kidMonsterState, ensureChoreInDb, pairedKidName, enqueueReward, reduceSubmitUnit]);
 
   // ── Weekly reset (the chore board rolls over at the week boundary) ───────────
   // This is the ONLY place the chore board resets for a new week. It fires on the
@@ -12218,7 +12237,12 @@ function AppInner() {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
     localChoreWriteRef.current = Date.now(); // suppress this device's own realtime echo
-    const allKidNames = setupChildren.map(c => c.name);
+    // Same onboarding guard as submit: only the shared "first to finish" board-lock
+    // is stamped onto kids who've onboarded (plus the kid being approved). Keeps a
+    // not-yet-set-up sibling from reading as having completed the chore.
+    const allKidNames = setupChildren
+      .map(c => c.name)
+      .filter(n => n === kidName || kidOnboardingDone[n]);
     // Pay the amount snapshotted when the kid submitted; fall back to the
     // current rate for legacy submissions that predate the snapshot field.
     const earnedCents = chore.childPendingCents?.[kidName]?.[unitIdx]
@@ -12321,7 +12345,7 @@ function AppInner() {
         if (!awarded) logWarn('chore.approve.no_completion_row', { choreId: realId, kidId: kidDbId });
       }).catch(e => logDbError('db.chore.approve', e));
     }
-  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, ensureChoreInDb]);
+  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, kidOnboardingDone, ensureChoreInDb]);
 
   // Approve a single day (the oldest pending submission).
   const approveManagedChore = useCallback((id: string, kidName: string) => {
