@@ -309,6 +309,31 @@ const getClaimedCount = (chore: ManagedChore, kidName: string): number => {
   return (chore.weeklyCompletions ?? 0) + sharedPending;
 };
 
+/** For a SHARED ("first to finish") chore, the single kid it is currently credited
+ *  to: whoever has it pending (the submitter awaiting review) or, once approved, the
+ *  DOER recorded in childCompletions. Returns null when no one has claimed it yet
+ *  (still up for grabs — e.g. reopened after a daily reset) or the chore isn't shared.
+ *
+ *  Why: on approval the board-lock marks EVERY eligible kid 'approved' (so nobody can
+ *  re-do it that day), but only the doer carries a completion credit. Without this,
+ *  the parent Chores list shows — and the tally counts — a shared chore under every
+ *  household kid, double-counting one completion. "Whoever did the chore gets the
+ *  credit": a claimed shared chore belongs to its doer and leaves everyone else's
+ *  board, mirroring individual readiness (see isSharedEveryoneChore). */
+const sharedChoreClaimant = (chore: ManagedChore, allKidNames: string[]): string | null => {
+  if (isIndependentChore(chore)) return null;               // each kid has their own copy
+  const eligible = choreEligibleKids(chore, allKidNames);
+  const pendingKid = eligible.find(k => getPendingCount(chore, k) > 0);
+  if (pendingKid) return pendingKid;                         // submitter owns the pending review
+  // Approved now: the board-lock approved every eligible kid, but credit follows the
+  // recorded doer. Only treat as claimed while it is approved — after the daily reset
+  // it reopens (active) and is claimable by anyone again. Missing doer (legacy rows
+  // with no childCompletions) → null, falling back to the old show-for-all behaviour.
+  if (eligible.some(k => getChoreStatus(chore, k) === 'approved'))
+    return eligible.find(k => (chore.childCompletions?.[k] ?? 0) > 0) ?? null;
+  return null;
+};
+
 /** Bumps a kid's weekly completion count by one WITHOUT touching their status.
  *  Used when approving a backlog item (a prior day's submission) so today's
  *  fresh instance is left untouched. */
@@ -7198,8 +7223,22 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
     ? choresByKid.filter(g => g.name === selectedChoreKid)
     : [...choresByKid, ...unassignedGroup];
 
-  // Stat counts use per-child status so shared chores count separately per kid
-  const approvedCount = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => getChoreStatus(c, g.name) === 'approved').length, 0);
+  // Credit attribution (MON-94: "whoever did the chore gets the credit"). A shared
+  // first-to-finish chore's board-lock marks EVERY eligible kid 'approved', but the
+  // completion is credited to one DOER — the kid recorded in childCompletions, which
+  // reconstructBoardFromAudit rebuilds by bucketing the chore_completions audit by
+  // kid_id (so it's the completion's kid_id, not the clobberable blob). It counts as
+  // approved ONLY under that kid, so one completion is counted once, not once per
+  // household kid. Non-doers still SEE the chore (labeled "done by <doer>") via
+  // sharedChoreClaimant in the tile, but it is excluded from their count here.
+  const approvedForKid = (c: ManagedChore, name: string): boolean => {
+    if (getChoreStatus(c, name) !== 'approved') return false;
+    const claimant = sharedChoreClaimant(c, kidNames);
+    return !claimant || claimant === name;
+  };
+  // Stat counts: 'approved' is credit-attributed (each completion counted once, under
+  // its doer); to-review/to-do stay per-kid (pending is already keyed to the submitter).
+  const approvedCount = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => approvedForKid(c, g.name)).length, 0);
   const pendingCount  = choresByKid.reduce((acc, g) => acc + g.chores.reduce((s, c) => s + getPendingCount(c, g.name), 0), 0);
   const todoCount     = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => { const s = getChoreStatus(c, g.name); return s === 'active' || s === 'rejected'; }).length, 0);
 
@@ -7334,7 +7373,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                 </ScrollView>
               )}
               {todayGroups.map((group, gi) => {
-              const groupApproved = group.chores.filter(c => getChoreStatus(c, group.name) === 'approved').length;
+              const groupApproved = group.chores.filter(c => approvedForKid(c, group.name)).length;
               const groupToReview = group.chores.reduce((s, c) => s + getPendingCount(c, group.name), 0);
               return (
                 <View key={`${group.name}-${gi}`} style={{ marginBottom: 20 }}>
@@ -7368,6 +7407,11 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                       const rejNote    = getChoreRejectionNote(chore, group.name);
                       const hasNote    = isRejected && !!rejNote;
                       const earnAmt    = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty] / 100).toFixed(2);
+                      // Shared first-to-finish chore credited to a DIFFERENT kid: show it
+                      // here as "done by <doer>" (so this kid knows it's handled) but it is
+                      // NOT this kid's credit — excluded from the count by approvedForKid.
+                      const claimedBy        = sharedChoreClaimant(chore, kidNames);
+                      const creditedToOther  = !!claimedBy && claimedBy !== group.name;
                       return (
                         <View key={chore.id} style={[s.homeQuestCard, reviewable && s.homeQuestCardPending, reviewable && { borderWidth: 2.5, borderColor: '#E6A817', backgroundColor: '#FBF1DC' }, { flexDirection: 'column', overflow: 'hidden', marginBottom: 0 }]}>
                           {isApproved && <View style={s.homeQuestSweep} />}
@@ -7386,6 +7430,8 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                                   </Text>
                                   <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginTop: 4 }}>${earnAmt}</Text>
                                 </>
+                              ) : creditedToOther ? (
+                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676', marginTop: 4 }}>{claimedBy} did this one</Text>
                               ) : (
                                 <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676', marginTop: 4 }}>${earnAmt}</Text>
                               )}
@@ -7404,9 +7450,15 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                                 )}
                               </TouchableOpacity>
                             ) : isApproved ? (
-                              <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#27AE60', backgroundColor: '#FFFFFF' }}>
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#27AE60' }}>✓ Approved</Text>
-                              </View>
+                              creditedToOther ? (
+                                <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#ABABAB', backgroundColor: '#FFFFFF' }}>
+                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676' }}>✓ Done</Text>
+                                </View>
+                              ) : (
+                                <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#27AE60', backgroundColor: '#FFFFFF' }}>
+                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#27AE60' }}>✓ Approved</Text>
+                                </View>
+                              )
                             ) : hasNote ? (
                               <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#E6A817', backgroundColor: '#FFFFFF' }}>
                                 <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>💬 Note</Text>
