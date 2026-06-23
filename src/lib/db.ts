@@ -327,84 +327,96 @@ function weeklyTarget(frequency: string | null | undefined): number {
   }
 }
 
+export type SubmitClaimResult = {
+  ok: boolean;                    // false only on a transient RPC/network error → caller keeps optimistic, no revert
+  claimedId: string | null;      // new completion id when this submit won the slot
+  blockedByKid: string | null;   // holder's kid_id when the slot was already taken (self vs sibling lives here)
+  blockedByName: string | null;  // holder's display name (for the sibling-credited message)
+};
+
+// Submit a chore completion through the atomic-claim RPC (submit_chore_claim). This is
+// the ONLY app path that inserts chore_completions, and the only writer of completed_date
+// / completion_mode (the partial unique indexes key on them). The RPC enforces
+// once-per-day + weekly-cap (shared scoped household-wide, individual per-kid) and is
+// race-safe via the unique index: concurrent submits can't double a first-to-finish
+// chore, and a stale second device gets a clean "blocked" (with the holder's id) instead
+// of a dropped row. The caller decides the kid-facing outcome from the result —
+// claimed / self re-tap (settle quietly) / sibling won (settle + "X beat you to it") /
+// transient error (keep optimistic) / genuine fail (revert).
 export async function submitChoreCompletion(params: {
   choreId: string;
   kidId: string;
   requiresApproval: boolean;
   earnedCents?: number;
-}): Promise<void> {
+}): Promise<SubmitClaimResult> {
   const userId = await getCurrentUserId();
-  if (!userId) return;
+  if (!userId) return { ok: false, claimedId: null, blockedByKid: null, blockedByName: null };
 
-  const weekStart = getWeekStart();
-  const now = new Date().toISOString();
-  const status = params.requiresApproval ? 'pending' : 'approved';
-
-  // Server-side completion guards for every recurring chore. The client enforces
-  // these too, but a stale or second device can submit against a reopened tile, so
-  // the DB is the backstop. (Mirrors the read-then-insert dedup of saveBossCaptureToDb.)
-  const { data: chore } = await supabase
-    .from('chores')
-    .select('frequency, completion_mode')
-    .eq('id', params.choreId)
-    .maybeSingle();
-  const target = weeklyTarget(chore?.frequency);
-
-  // Shared ("first to finish") chores are one-per-household per period — the
-  // whole family shares a single completion. So scope the guards household-wide
-  // (parent_id) instead of per-kid (kid_id): once ANY kid has it pending/approved
-  // for the day/week, the rest are blocked. The client board enforces this on a
-  // single device, but kids on separate devices each have their own board, so the
-  // DB must be the backstop (this is the Feed Maxie double-submit fix).
-  const isShared = chore?.completion_mode === 'shared';
-  const scopeCol = isShared ? 'parent_id' : 'kid_id';
-  const scopeVal = isShared ? userId : params.kidId;
-
-  // (1) Once per calendar day — a recurring chore can't be completed twice in a
-  //     day; it must spread across days (daily, 2×, 3×, … all behave this way).
+  // Device-local calendar day + midnight instant — the same "today" boundary the old
+  // client guard used (local, not UTC, so an evening submission buckets to the right day).
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
-  const { data: sameDay } = await supabase
-    .from('chore_completions')
-    .select('id')
-    .eq('chore_id', params.choreId)
-    .eq(scopeCol, scopeVal)
-    .gte('completed_at', dayStart.toISOString())
-    .in('status', ['pending', 'approved'])
-    .limit(1);
-  if (sameDay && sameDay.length > 0) {
-    console.log(`[DB] submitChoreCompletion skipped — already completed today${isShared ? ' (shared)' : ''}`);
-    return;
-  }
+  const localDate = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`;
 
-  // (2) Weekly cap — never more than the frequency target (2×/3×/…) per week,
-  //     counting everything still standing (approved + awaiting approval).
-  //     Household-wide for shared chores.
-  const { count: weekCount } = await supabase
-    .from('chore_completions')
-    .select('id', { count: 'exact', head: true })
-    .eq('chore_id', params.choreId)
-    .eq(scopeCol, scopeVal)
-    .eq('week_start', weekStart)
-    .in('status', ['pending', 'approved']);
-  if ((weekCount ?? 0) >= target) {
-    console.log(`[DB] submitChoreCompletion skipped — weekly cap reached (${weekCount}/${target})${isShared ? ' (shared)' : ''}`);
-    return;
-  }
-
-  const { data, error } = await supabase.from('chore_completions').insert({
-    chore_id:     params.choreId,
-    kid_id:       params.kidId,
-    parent_id:    userId,
-    status,
-    week_start:   weekStart,
-    completed_at: now,
-    approved_at:  params.requiresApproval ? null : now,
-    earned_cents: params.requiresApproval ? null : params.earnedCents,
+  const { data, error } = await supabase.rpc('submit_chore_claim', {
+    p_chore_id: params.choreId,
+    p_kid_id: params.kidId,
+    p_local_date: localDate,
+    p_day_start: dayStart.toISOString(),
+    p_requires_approval: params.requiresApproval,
+    p_earned_cents: params.earnedCents ?? null,
   });
-  console.log('[DB] submitChoreCompletion data:', data, 'error:', error);
+  if (error) {
+    console.warn('[DB] submit_chore_claim error:', error.message);
+    return { ok: false, claimedId: null, blockedByKid: null, blockedByName: null };
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  console.log('[DB] submit_chore_claim:', row);
+  return {
+    ok: true,
+    claimedId: row?.claimed_id ?? null,
+    blockedByKid: row?.blocked_by_kid ?? null,
+    blockedByName: row?.blocked_by_name ?? null,
+  };
 }
 
+// Idempotent approval award (MON-92 follow-up). Writes the chore_history feed row
+// keyed to its completion and credits the kid's coins EXACTLY ONCE, no matter how
+// many devices / retries / realtime echoes call it for the same completion — the
+// DB dedups on chore_history.completion_id and only credits coins on first insert.
+// This is the single chokepoint that persists chore-approval money + history; the
+// client only does an optimistic local coin bump (addKidCoins with persist:false).
+export async function recordChoreApproval(params: {
+  completionId: string;
+  kidId: string;
+  kidName: string;
+  choreName: string;
+  earnedCents: number;
+  icon: string;
+}): Promise<void> {
+  const { error } = await supabase.rpc('record_chore_approval', {
+    p_completion_id: params.completionId,
+    p_kid_id:        params.kidId,
+    p_kid_name:      params.kidName,
+    p_chore_name:    params.choreName,
+    p_icon:          params.icon,
+    p_earned_cents:  params.earnedCents,
+  });
+  if (error) console.warn('[DB] recordChoreApproval error:', error.message);
+}
+
+// MON-94 (Phase 1 of MON-92): approval is now a single race-safe, backlog-aware
+// RPC (approve_chore_unit) that makes chore_completions the PRIMARY, guarded write.
+// It claims the oldest still-pending unit for (chore, kid) — ANY week, so backlog
+// is claimable — FOR UPDATE SKIP LOCKED, so a Sunday batch or a second device each
+// flip a DISTINCT row, then writes history + credits coins idempotently keyed to
+// that completion. The old path scoped the claim to the CURRENT week_start at a
+// fixed unitIdx, which dropped backlog/raced approvals (live: Millie −$1.50).
+//
+// Returns `awarded`: true when a unit was claimed + paid, false when there was
+// NOTHING claimable. Option 2 (claim-or-revert): on false the caller must roll
+// back its optimistic credit so coins / history / blob never move without a
+// committed chore_completions row.
 export async function approveChoreCompletion(params: {
   choreId: string;
   kidId: string;
@@ -412,34 +424,24 @@ export async function approveChoreCompletion(params: {
   choreName: string;
   kidName: string;
   icon: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const userId = await getCurrentUserId();
-  if (!userId) return;
+  if (!userId) return true; // not signed in: can't confirm — keep optimistic, guardrail catches drift
 
-  const weekStart = getWeekStart();
-  const now = new Date().toISOString();
-
-  // Update chore_completion to approved
-  const { data: updateData, error: updateError } = await supabase
-    .from('chore_completions')
-    .update({ status: 'approved', approved_at: now, earned_cents: params.earnedCents })
-    .eq('chore_id', params.choreId)
-    .eq('kid_id', params.kidId)
-    .eq('week_start', weekStart)
-    .eq('status', 'pending');
-  console.log('[DB] approveChoreCompletion update data:', updateData, 'error:', updateError);
-
-  // Write to chore_history audit log
-  const { data: histData, error: histError } = await supabase.from('chore_history').insert({
-    parent_id:    userId,
-    kid_id:       params.kidId,
-    kid_name:     params.kidName,
-    chore_name:   params.choreName,
-    icon:         params.icon,
-    earned_cents: params.earnedCents,
-    approved_at:  now,
+  const { data, error } = await supabase.rpc('approve_chore_unit', {
+    p_chore_id:     params.choreId,
+    p_kid_id:       params.kidId,
+    p_kid_name:     params.kidName,
+    p_chore_name:   params.choreName,
+    p_icon:         params.icon,
+    p_earned_cents: params.earnedCents,
   });
-  console.log('[DB] approveChoreCompletion history data:', histData, 'error:', histError);
+  if (error) {
+    console.warn('[DB] approveChoreCompletion error:', error.message);
+    return true; // ambiguous (network/RPC error): keep optimistic, don't strand a real award
+  }
+  // null = nothing claimable (caller reverts); a number = cents awarded.
+  return data != null;
 }
 
 export async function rejectChoreCompletion(params: {

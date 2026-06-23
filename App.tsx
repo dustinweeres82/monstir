@@ -73,9 +73,9 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, recordChoreApproval, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
 import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, getPushPermission, type PushRoute } from './src/lib/push';
-import { initDebugLog, log, logError, logDbError, flushNow } from './src/lib/debugLog';
+import { initDebugLog, log, logWarn, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
 
 const APP_VERSION = Constants.expoConfig?.version ?? null;
@@ -307,6 +307,31 @@ const getClaimedCount = (chore: ManagedChore, kidName: string): number => {
   const sharedPending = Object.values(chore.childPendingCount ?? {}).reduce((a, b) => a + b, 0)
     + Object.values(chore.childStatus ?? {}).filter(s => s === 'pending').length;
   return (chore.weeklyCompletions ?? 0) + sharedPending;
+};
+
+/** For a SHARED ("first to finish") chore, the single kid it is currently credited
+ *  to: whoever has it pending (the submitter awaiting review) or, once approved, the
+ *  DOER recorded in childCompletions. Returns null when no one has claimed it yet
+ *  (still up for grabs — e.g. reopened after a daily reset) or the chore isn't shared.
+ *
+ *  Why: on approval the board-lock marks EVERY eligible kid 'approved' (so nobody can
+ *  re-do it that day), but only the doer carries a completion credit. Without this,
+ *  the parent Chores list shows — and the tally counts — a shared chore under every
+ *  household kid, double-counting one completion. "Whoever did the chore gets the
+ *  credit": a claimed shared chore belongs to its doer and leaves everyone else's
+ *  board, mirroring individual readiness (see isSharedEveryoneChore). */
+const sharedChoreClaimant = (chore: ManagedChore, allKidNames: string[]): string | null => {
+  if (isIndependentChore(chore)) return null;               // each kid has their own copy
+  const eligible = choreEligibleKids(chore, allKidNames);
+  const pendingKid = eligible.find(k => getPendingCount(chore, k) > 0);
+  if (pendingKid) return pendingKid;                         // submitter owns the pending review
+  // Approved now: the board-lock approved every eligible kid, but credit follows the
+  // recorded doer. Only treat as claimed while it is approved — after the daily reset
+  // it reopens (active) and is claimable by anyone again. Missing doer (legacy rows
+  // with no childCompletions) → null, falling back to the old show-for-all behaviour.
+  if (eligible.some(k => getChoreStatus(chore, k) === 'approved'))
+    return eligible.find(k => (chore.childCompletions?.[k] ?? 0) > 0) ?? null;
+  return null;
 };
 
 /** Bumps a kid's weekly completion count by one WITHOUT touching their status.
@@ -7198,8 +7223,22 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
     ? choresByKid.filter(g => g.name === selectedChoreKid)
     : [...choresByKid, ...unassignedGroup];
 
-  // Stat counts use per-child status so shared chores count separately per kid
-  const approvedCount = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => getChoreStatus(c, g.name) === 'approved').length, 0);
+  // Credit attribution (MON-94: "whoever did the chore gets the credit"). A shared
+  // first-to-finish chore's board-lock marks EVERY eligible kid 'approved', but the
+  // completion is credited to one DOER — the kid recorded in childCompletions, which
+  // reconstructBoardFromAudit rebuilds by bucketing the chore_completions audit by
+  // kid_id (so it's the completion's kid_id, not the clobberable blob). It counts as
+  // approved ONLY under that kid, so one completion is counted once, not once per
+  // household kid. Non-doers still SEE the chore (labeled "done by <doer>") via
+  // sharedChoreClaimant in the tile, but it is excluded from their count here.
+  const approvedForKid = (c: ManagedChore, name: string): boolean => {
+    if (getChoreStatus(c, name) !== 'approved') return false;
+    const claimant = sharedChoreClaimant(c, kidNames);
+    return !claimant || claimant === name;
+  };
+  // Stat counts: 'approved' is credit-attributed (each completion counted once, under
+  // its doer); to-review/to-do stay per-kid (pending is already keyed to the submitter).
+  const approvedCount = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => approvedForKid(c, g.name)).length, 0);
   const pendingCount  = choresByKid.reduce((acc, g) => acc + g.chores.reduce((s, c) => s + getPendingCount(c, g.name), 0), 0);
   const todoCount     = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => { const s = getChoreStatus(c, g.name); return s === 'active' || s === 'rejected'; }).length, 0);
 
@@ -7334,7 +7373,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                 </ScrollView>
               )}
               {todayGroups.map((group, gi) => {
-              const groupApproved = group.chores.filter(c => getChoreStatus(c, group.name) === 'approved').length;
+              const groupApproved = group.chores.filter(c => approvedForKid(c, group.name)).length;
               const groupToReview = group.chores.reduce((s, c) => s + getPendingCount(c, group.name), 0);
               return (
                 <View key={`${group.name}-${gi}`} style={{ marginBottom: 20 }}>
@@ -7368,6 +7407,11 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                       const rejNote    = getChoreRejectionNote(chore, group.name);
                       const hasNote    = isRejected && !!rejNote;
                       const earnAmt    = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty] / 100).toFixed(2);
+                      // Shared first-to-finish chore credited to a DIFFERENT kid: show it
+                      // here as "done by <doer>" (so this kid knows it's handled) but it is
+                      // NOT this kid's credit — excluded from the count by approvedForKid.
+                      const claimedBy        = sharedChoreClaimant(chore, kidNames);
+                      const creditedToOther  = !!claimedBy && claimedBy !== group.name;
                       return (
                         <View key={chore.id} style={[s.homeQuestCard, reviewable && s.homeQuestCardPending, reviewable && { borderWidth: 2.5, borderColor: '#E6A817', backgroundColor: '#FBF1DC' }, { flexDirection: 'column', overflow: 'hidden', marginBottom: 0 }]}>
                           {isApproved && <View style={s.homeQuestSweep} />}
@@ -7386,6 +7430,8 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                                   </Text>
                                   <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginTop: 4 }}>${earnAmt}</Text>
                                 </>
+                              ) : creditedToOther ? (
+                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676', marginTop: 4 }}>{claimedBy} did this one</Text>
                               ) : (
                                 <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676', marginTop: 4 }}>${earnAmt}</Text>
                               )}
@@ -7404,9 +7450,15 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                                 )}
                               </TouchableOpacity>
                             ) : isApproved ? (
-                              <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#27AE60', backgroundColor: '#FFFFFF' }}>
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#27AE60' }}>✓ Approved</Text>
-                              </View>
+                              creditedToOther ? (
+                                <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#ABABAB', backgroundColor: '#FFFFFF' }}>
+                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676' }}>✓ Done</Text>
+                                </View>
+                              ) : (
+                                <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#27AE60', backgroundColor: '#FFFFFF' }}>
+                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#27AE60' }}>✓ Approved</Text>
+                                </View>
+                              )
                             ) : hasNote ? (
                               <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#E6A817', backgroundColor: '#FFFFFF' }}>
                                 <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>💬 Note</Text>
@@ -10662,7 +10714,8 @@ function AppInner() {
   // queued Modal swaps content instead of presenting/dismissing two natives.
   type RewardPopup =
     | { kind: 'shard' }
-    | { kind: 'weakness'; bossName: string; weaknessName: string; weaknessIcon: string };
+    | { kind: 'weakness'; bossName: string; weaknessName: string; weaknessIcon: string }
+    | { kind: 'sharedClaimed'; byName: string };
   const [rewardQueue, setRewardQueue] = useState<RewardPopup[]>([]);
   const reward = rewardQueue[0] ?? null;
   const enqueueReward  = (p: RewardPopup) => setRewardQueue(q => [...q, p]);
@@ -10814,13 +10867,18 @@ function AppInner() {
   const getKidCoins  = useCallback((name: string) => kidCoins[name] ?? 0, [kidCoins]);
   // Guard against NaN/Infinity: one bad amount would poison the stored balance
   // (and sync the corruption to Supabase via the debounced kid-stats sync).
-  const addKidCoins  = useCallback((name: string, amount: number) => {
+  const addKidCoins  = useCallback((name: string, amount: number, opts?: { persist?: boolean }) => {
     if (!Number.isFinite(amount)) { console.warn(`[coins] ignored non-finite amount for ${name}:`, amount); return; }
     setKidCoins(prev => ({ ...prev, [name]: (Number.isFinite(prev[name]) ? prev[name] : 0) + amount }));
     // MON-92: persist the coin award as an ATOMIC delta, not via the debounced
     // absolute kid-stats sync (which is last-writer-wins and lost a kid's pay when
-    // two devices approved at once). This is the single chokepoint for every coin
-    // award (chore approval, auto-approval, battle bonus), so none can clobber.
+    // two devices approved at once).
+    // MON-92 follow-up: CHORE approvals pass { persist:false } — their coin credit
+    // is now persisted atomically AND idempotently inside record_chore_approval
+    // (gated on the completion row), so a cross-device double-approve can't
+    // double-pay. Those callers only need the optimistic local bump above; the DB
+    // truth reconciles on reload. Battle/other awards still persist their delta here.
+    if (opts?.persist === false) return;
     // Skipped for temp (non-UUID) ids — the increment lands once the UUID resolves
     // and a later award fires; the headline owed self-corrects on the next reload.
     const kidDbId = setupChildren.find(c => c.name === name)?.id;
@@ -11063,7 +11121,15 @@ function AppInner() {
           for (const k of (dbKids ?? [])) kidIdToName[k.id] = k.name;
           // Rebuild per-kid counters + the once-per-day lock from the durable
           // chore_completions audit, overwriting whatever the (clobberable) blob held.
-          const reconKidNames = (dbKids ?? []).map((k: { name: string }) => k.name);
+          // Only ONBOARDED kids are eligible for the shared-chore household lock the
+          // rebuild re-stamps (childLastDoneDate, line ~1003). Without this filter,
+          // every reload re-added a phantom done-date for a not-yet-onboarded sibling
+          // even after the blob was cleaned — making a freshly-created kid look like
+          // they'd done shared chores. Non-onboarded kids never have audit rows, so
+          // narrowing this list has no effect on real completion attribution.
+          const reconKidNames = (dbKids ?? [])
+            .filter((k: { kid_onboarding_done?: boolean }) => k.kid_onboarding_done)
+            .map((k: { name: string }) => k.name);
           const reconcile = (b: ManagedChore[]) => reconstructBoardFromAudit(b, weekCompletions, kidIdToName, reconKidNames);
 
           const mapped: ManagedChore[] = dbChores.map((c: { id: string; name: string; icon: string; frequency: string; difficulty: number; assigned_to: string[]; completion_mode?: string | null; created_at?: string | null }) => ({
@@ -11755,6 +11821,32 @@ function AppInner() {
     return p;
   }, [managedChores, setupChildren]);
 
+  // Undo ONE optimistically-added pending unit for (choreId, kidName) when a submit does
+  // not land as its own fresh row. Per-unit (pops one matching cents+xp entry), NOT a
+  // snapshot restore — so a Sunday batch of submits each undo exactly their own unit
+  // without racing on the shared per-kid arrays the approval flow consumes. `emptyStatus`
+  // is what the tile becomes once this kid has no pending units left: 'active' to revert a
+  // genuine fail, 'approved' to settle a shared chore a sibling already finished, 'pending'
+  // to leave a self re-tap on its surviving original claim.
+  const reduceSubmitUnit = useCallback((choreId: string, kidName: string, cents: number, xp: number, emptyStatus: ChoreStatus) => {
+    setManagedChores(prev => prev.map(c => {
+      if (c.id !== choreId) return c;
+      const cents0 = c.childPendingCents?.[kidName] ?? [];
+      const xp0    = c.childPendingXp?.[kidName]    ?? [];
+      const ci = cents0.indexOf(cents);
+      const xi = xp0.indexOf(xp);
+      const cents1 = ci >= 0 ? cents0.filter((_, i) => i !== ci) : cents0;
+      const xp1    = xi >= 0 ? xp0.filter((_, i) => i !== xi)    : xp0;
+      const nextStatus = cents1.length > 0 ? (c.childStatus?.[kidName] ?? emptyStatus) : emptyStatus;
+      return {
+        ...c,
+        childStatus:       { ...(c.childStatus ?? {}), [kidName]: nextStatus },
+        childPendingCents: { ...c.childPendingCents, [kidName]: cents1 },
+        childPendingXp:    { ...c.childPendingXp,    [kidName]: xp1 },
+      };
+    }));
+  }, []);
+
   const submitManagedChore = useCallback((id: string) => {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
@@ -11791,6 +11883,17 @@ function AppInner() {
       enqueueReward({ kind: 'shard' });
     }
 
+    // The shared "first to finish" board-lock must only ever touch kids who've
+    // actually onboarded. A freshly-created sibling who hasn't picked a monster
+    // yet has no board and must never be stamped 'approved'/done for a chore they
+    // never saw — that's what made a not-yet-set-up kid read as having "completed"
+    // chores. The household day-lock still holds via the doer's stamped date
+    // (completedToday checks ANY eligible kid's date for shared chores). The doer
+    // is always kept (they're submitting right now, so they're onboarded).
+    const lockKidNames = setupChildren
+      .map(c => c.name)
+      .filter(n => n === currentKidName || kidOnboardingDone[n]);
+
     if (requireApproval) {
       // Shared "first to finish" chores: the moment one kid submits, lock it for
       // the whole household. The submitter goes 'pending' (awaiting approval);
@@ -11800,7 +11903,7 @@ function AppInner() {
       // weekly-cap race: with the others locked out, the shared counter can't be
       // bumped past target by a second submission. (Independent chores stay per-kid.)
       const shared = !isIndependentChore(chore);
-      const eligible = shared ? choreEligibleKids(chore, setupChildren.map(c => c.name)) : [];
+      const eligible = shared ? choreEligibleKids(chore, lockKidNames) : [];
       // Snapshot the XP this submission will pay on approval. The streak bonus
       // applies only to the first chore of a new day — the same rule as the
       // auto-approve path — so approval timing/batching can't multiply it.
@@ -11821,7 +11924,7 @@ function AppInner() {
           childRejectionNote: { ...c.childRejectionNote, [currentKidName]: '' },
           childSubmittedAt: { ...c.childSubmittedAt, [currentKidName]: new Date().toISOString() },
           // Stamp the done-date so a daily chore stays locked for the rest of today.
-          childLastDoneDate: stampDoneDate(c, currentKidName, today, setupChildren.map(x => x.name)),
+          childLastDoneDate: stampDoneDate(c, currentKidName, today, lockKidNames),
           // Pin this submission's pay/XP to the rate and streak in effect right now.
           childPendingCents: { ...c.childPendingCents, [currentKidName]: [...(c.childPendingCents?.[currentKidName] ?? []), earnedCents] },
           childPendingXp:    { ...c.childPendingXp,    [currentKidName]: [...(c.childPendingXp?.[currentKidName] ?? []), pendingXp] },
@@ -11835,21 +11938,37 @@ function AppInner() {
           ? s
           : { ...s, currentStreak: nextStreak(s.currentStreak, s.lastChoreDate, today), lastChoreDate: today }
       );
-      // Save to Supabase
+      // Save to Supabase via the atomic claim. The optimistic board already moved; the
+      // claim result tells us how to reconcile THIS unit (per-unit, never a snapshot).
       if (kidDbId) {
-        ensureChoreInDb(id).then(realId => {
-          if (realId) submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: true }).catch(e => logDbError('db.chore.submit', e));
-        });
+        ensureChoreInDb(id).then(async realId => {
+          // realId null here = resolution FAILED (addChore returned null / chore gone),
+          // not in-flight — the temp-id window lives inside ensureChoreInDb's promise, so
+          // we only reach here once it has settled. Safe to revert.
+          if (!realId) { reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'active'); return; }
+          const res = await submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: true });
+          if (res.claimedId || !res.ok) return;                  // won the slot, or transient error → keep optimistic
+          if (res.blockedByKid) {
+            if (res.blockedByKid === kidDbId) {
+              reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'pending');   // self re-tap: drop the dup, original claim stands
+            } else {
+              reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'approved');  // a sibling finished it → settle done-by-household
+              enqueueReward({ kind: 'sharedClaimed', byName: res.blockedByName ?? 'Someone' });
+            }
+            return;
+          }
+          reduceSubmitUnit(id, currentKidName, earnedCents, pendingXp, 'active');         // genuine no-claim (chore gone / weekly cap) → revert
+        }).catch(e => logDbError('db.chore.submit', e));
       }
     } else {
-      const allKidNames = setupChildren.map(c => c.name);
+      const allKidNames = lockKidNames;
       setManagedChores(prev => prev.map(c => c.id === id
         // Stamp the done-date so a daily chore stays locked for the rest of today.
         ? { ...applyChoreCompletion(c, currentKidName, allKidNames), childLastDoneDate: stampDoneDate(c, currentKidName, today, allKidNames) }
         : c));
       // ── XP with streak bonus ──────────────────────────────────────────────────
       const earnedCoins = Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty]);
-      addKidCoins(currentKidName, earnedCoins);
+      addKidCoins(currentKidName, earnedCoins, { persist: false });
       // Log to history so "earned this week" counts auto-approved chores too
       // (mirrors the parent-approval path; no-approval households relied on this).
       setChoreHistory(prev => [{
@@ -11892,16 +12011,24 @@ function AppInner() {
           ],
         } : g);
       });
-      // Save to Supabase (auto-approved)
+      // Save to Supabase (auto-approved). The completion is inserted already-approved,
+      // so there's no pending state to flip — record the history + coin credit keyed
+      // to that exact completion row so a retry/echo can't double it.
       if (kidDbId) {
-        ensureChoreInDb(id).then(realId => {
+        ensureChoreInDb(id).then(async realId => {
           if (!realId) return;
-          submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents }).catch(e => logDbError('db.chore.submit', e));
-          approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName: currentKidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => logDbError('db.chore.approve', e));
-        });
+          const res = await submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents });
+          if (res.claimedId) {
+            await recordChoreApproval({ completionId: res.claimedId, kidId: kidDbId, kidName: currentKidName, choreName: chore.name, earnedCents, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+          } else if (res.ok && res.blockedByKid && res.blockedByKid !== kidDbId) {
+            // a sibling finished this shared chore first — credit them. The optimistic
+            // coins/history reconcile from the authoritative tables on next board load.
+            enqueueReward({ kind: 'sharedClaimed', byName: res.blockedByName ?? 'Someone' });
+          }
+        }).catch(e => logDbError('db.chore.submit', e));
       }
     }
-  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidMonsterState, ensureChoreInDb, pairedKidName]);
+  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidOnboardingDone, kidMonsterState, ensureChoreInDb, pairedKidName, enqueueReward, reduceSubmitUnit]);
 
   // ── Weekly reset (the chore board rolls over at the week boundary) ───────────
   // This is the ONLY place the chore board resets for a new week. It fires on the
@@ -12162,7 +12289,12 @@ function AppInner() {
     const chore = managedChores.find(c => c.id === id);
     if (!chore) return;
     localChoreWriteRef.current = Date.now(); // suppress this device's own realtime echo
-    const allKidNames = setupChildren.map(c => c.name);
+    // Same onboarding guard as submit: only the shared "first to finish" board-lock
+    // is stamped onto kids who've onboarded (plus the kid being approved). Keeps a
+    // not-yet-set-up sibling from reading as having completed the chore.
+    const allKidNames = setupChildren
+      .map(c => c.name)
+      .filter(n => n === kidName || kidOnboardingDone[n]);
     // Pay the amount snapshotted when the kid submitted; fall back to the
     // current rate for legacy submissions that predate the snapshot field.
     const earnedCents = chore.childPendingCents?.[kidName]?.[unitIdx]
@@ -12201,7 +12333,7 @@ function AppInner() {
       icon: chore.icon,
       bg: chore.bg,
     }, ...prev]);
-    addKidCoins(kidName, earnedCoins);
+    addKidCoins(kidName, earnedCoins, { persist: false });
     setKidMonster(kidName, s => {
       // The streak already advanced when the kid submitted, so approval only
       // pays out the snapshotted XP/coins. Updaters must stay pure: crossing
@@ -12250,14 +12382,22 @@ function AppInner() {
       checkMilestone('grudging-respect', kidName);
     }
 
-    // Save to Supabase
+    // Save to Supabase — MON-94: approval is now the race-safe, backlog-aware
+    // approve_chore_unit RPC (chore_completions is the primary, guarded write). It
+    // returns awarded=false when there was no pending unit to claim — i.e. the
+    // optimistic credit above moved coins/history/blob without a committed
+    // completion row (the exact drift this PR closes). We log that signal precisely;
+    // the Option-2 client rollback that consumes it lands with the submit-path
+    // pending-row hardening (gated on the Step 1 device repro).
     const kidDbId = getKidDbId(kidName);
     if (kidDbId) {
-      ensureChoreInDb(id).then(realId => {
-        if (realId) approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' }).catch(e => logDbError('db.chore.approve', e));
-      });
+      ensureChoreInDb(id).then(async realId => {
+        if (!realId) return;
+        const awarded = await approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+        if (!awarded) logWarn('chore.approve.no_completion_row', { choreId: realId, kidId: kidDbId });
+      }).catch(e => logDbError('db.chore.approve', e));
     }
-  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, ensureChoreInDb]);
+  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, kidOnboardingDone, ensureChoreInDb]);
 
   // Approve a single day (the oldest pending submission).
   const approveManagedChore = useCallback((id: string, kidName: string) => {
@@ -13277,12 +13417,14 @@ function AppInner() {
         never present at once — see RewardPopup queue. */}
     <RewardModal
       visible={reward !== null}
-      icon={reward?.kind === 'weakness' ? reward.weaknessIcon : '💎'}
-      title={reward?.kind === 'weakness' ? 'Weakness discovered!' : 'Shard found!'}
+      icon={reward?.kind === 'weakness' ? reward.weaknessIcon : reward?.kind === 'sharedClaimed' ? '🤝' : '💎'}
+      title={reward?.kind === 'weakness' ? 'Weakness discovered!' : reward?.kind === 'sharedClaimed' ? 'Teamwork!' : 'Shard found!'}
       onClose={dismissReward}
       body={
         reward?.kind === 'weakness'
           ? <>{reward.bossName} is weak to <RewardModalStrong>{reward.weaknessName}</RewardModalStrong>.{'\n'}Use it in your next boss battle!</>
+          : reward?.kind === 'sharedClaimed'
+          ? <><RewardModalStrong>{reward.byName}</RewardModalStrong> finished this one first!{'\n'}Nice teamwork — your family got it done. 🎉</>
           : <>You found a battle <RewardModalStrong>shard</RewardModalStrong>!{'\n'}Spend it on a special attack in your next battle.</>
       }
     />
