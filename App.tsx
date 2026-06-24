@@ -10803,6 +10803,7 @@ function AppInner() {
   };
   const handleKidModalSave = (data: { name: string; avatarIdx: number; avatarColor: string; ageRange: import('./src/screens/ParentOnboarding').OnboardingChild['ageRange'] }) => {
     setKidModalVisible(false);
+    noteLocalWrite();   // kids (+ payouts on rename) writes below are ours — skip our household-sync echo
     if (kidModalInitial) {
       // Edit existing
       setSetupChildren(prev => prev.map(c => c.id === kidModalInitial.id ? { ...c, ...data } : c));
@@ -10882,6 +10883,11 @@ function AppInner() {
   // (and sync the corruption to Supabase via the debounced kid-stats sync).
   const addKidCoins  = useCallback((name: string, amount: number, opts?: { persist?: boolean }) => {
     if (!Number.isFinite(amount)) { console.warn(`[coins] ignored non-finite amount for ${name}:`, amount); return; }
+    // Guard our own realtime echo. Critical for the optimistic { persist:false }
+    // path: this device bumped coins locally with no DB write, so without this an
+    // unrelated remote event (e.g. a chore edit) could fire a reload that reverts
+    // the not-yet-approved coins. Also covers the atomic increment below.
+    noteLocalWrite();
     setKidCoins(prev => ({ ...prev, [name]: (Number.isFinite(prev[name]) ? prev[name] : 0) + amount }));
     // MON-92: persist the coin award as an ATOMIC delta, not via the debounced
     // absolute kid-stats sync (which is last-writer-wins and lost a kid's pay when
@@ -11334,6 +11340,11 @@ function AppInner() {
           }
         }
 
+        // Everything above came FROM the DB (cold start or a realtime-triggered
+        // reload). Mark it so the debounced persist effects below don't write it
+        // straight back — that redundant write would echo on the household-sync
+        // channel and bounce a reload back to the other device.
+        suppressPersistRef.current = Date.now();
         setAppDataLoaded(true);
 
         // MON-85 Phase 2: paired kid device → enter locked into that kid's view
@@ -11467,26 +11478,41 @@ function AppInner() {
   setupChildrenRef.current = setupChildren;
   const localChoreWriteRef = useRef(0);
   const localGoalWriteRef = useRef(0);
+  // Any local write to a realtime-synced table (payout, boss, milestone,
+  // collectible, chore/kid/rate edit, coins) stamps this so the household-sync
+  // channel skips our OWN echo instead of pointlessly reloading this device.
+  const localWriteRef = useRef(0);
+  // Stamped when a reload just applied remote data, so the debounced persist
+  // effects don't immediately write that same data straight back — that echo
+  // would ping-pong reloads between devices and re-clobber absolute kid stats.
+  const suppressPersistRef = useRef(0);
+  const noteLocalWrite = useRef(() => { localWriteRef.current = Date.now(); }).current;
+  const persistSuppressed = useRef(() => Date.now() - suppressPersistRef.current < 3000).current;
   // Set when goalsByKid was just applied FROM the DB (initial load or a realtime
   // event) so the persist effect doesn't write it straight back — that echo would
   // bump localGoalWriteRef and make us swallow the NEXT real remote change.
   const goalsFromRemoteRef = useRef(false);
   const pairedKidRef = useRef(pairedKidName);
   pairedKidRef.current = pairedKidName;
+  // One debounced full reload shared by BOTH realtime channels (chore_completions
+  // below + household_sync). A single approval writes chore_completions AND kids
+  // (coins) — without a shared timer those would fire two independent reloads on
+  // the receiving device. Coalescing keeps it to one. Skipped when THIS device
+  // made any local write in the last 6s (its state is already current; reloading
+  // would only flash, and could revert optimistic not-yet-persisted coins).
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleHouseholdReload = useRef(() => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      const since = Math.max(localWriteRef.current, localChoreWriteRef.current, localGoalWriteRef.current);
+      if (Date.now() - since < 6000) return;
+      loadUserDataFromSupabase({ pairedKid: pairedKidRef.current }).catch(() => {});
+    }, 1500);
+  }).current;
   useEffect(() => {
     if (!appDataLoaded || !sessionUser) return;
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
-    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleReload = () => {
-      if (reloadTimer) clearTimeout(reloadTimer);
-      reloadTimer = setTimeout(() => {
-        // Skip self-echo: if THIS device just approved/rejected, its local state
-        // is already current and a reload would only cause a needless flash.
-        if (Date.now() - localChoreWriteRef.current < 5000) return;
-        loadUserDataFromSupabase({ pairedKid: pairedKidRef.current }).catch(() => {});
-      }, 1500);
-    };
     (async () => {
       const { data } = await supabase.auth.getUser();
       const userId = data.user?.id;
@@ -11513,13 +11539,13 @@ function AppInner() {
                 };
               }));
             } else if (payload.eventType === 'UPDATE') {
-              if (row.status === 'approved' || row.status === 'rejected') scheduleReload();
+              if (row.status === 'approved' || row.status === 'rejected') scheduleHouseholdReload();
             }
           },
         )
         .subscribe();
     })();
-    return () => { cancelled = true; if (reloadTimer) clearTimeout(reloadTimer); if (channel) supabase.removeChannel(channel); };
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
   }, [appDataLoaded, sessionUser]);
 
   const choresStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -11528,6 +11554,8 @@ function AppInner() {
     AsyncStorage.setItem('monstir:managedChores', JSON.stringify(managedChores)).catch(() => {});
     if (choresStateSyncTimer.current) clearTimeout(choresStateSyncTimer.current);
     choresStateSyncTimer.current = setTimeout(() => {
+      if (persistSuppressed()) return;   // just loaded this board FROM the DB — don't echo it back
+      noteLocalWrite();                  // our own profiles write — skip our household-sync echo
       saveAppState({ chores_state_json: JSON.stringify(managedChores) }).catch(e => logDbError('db.board.save', e));
     }, 2000);
   }, [managedChores, appDataLoaded]);
@@ -11538,6 +11566,8 @@ function AppInner() {
     if (!appDataLoaded) return;
     if (payRateSyncTimer.current) clearTimeout(payRateSyncTimer.current);
     payRateSyncTimer.current = setTimeout(() => {
+      if (persistSuppressed()) return;   // rates just loaded FROM the DB — don't echo them back
+      noteLocalWrite();
       const rateNum = Math.round(parseFloat(baseRate) * 100) || 50;
       saveProfile({
         base_rate: rateNum,
@@ -11552,6 +11582,8 @@ function AppInner() {
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:kidApprovalSettings', JSON.stringify(kidApprovalSettings)).catch(() => {});
+    if (persistSuppressed()) return;   // just loaded FROM the DB — don't echo it back
+    noteLocalWrite();
     saveAppState({ kid_approval_settings_json: JSON.stringify(kidApprovalSettings) }).catch(e => console.warn('[DB] saveAppState (kidApproval) error:', e));
   }, [kidApprovalSettings, appDataLoaded]);
 
@@ -11605,6 +11637,44 @@ function AppInner() {
     return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
   }, [appDataLoaded, sessionUser]);
 
+  // ── Realtime: instant cross-device sync for EVERYTHING else ────────────────
+  //   chore_completions (above) already makes a kid's completion show up on the
+  //   parent's phone instantly, and an approval/rejection flow back. This channel
+  //   extends that same "subscribe → debounced full reload" pattern to the rest of
+  //   the shared household tables so they're no longer relaunch-only:
+  //     • payouts            → a payout zeroes the owed balance + the kid's coins
+  //                            on every other device (the original ask)
+  //     • kids               → coins / xp / monster / shards + add/rename/remove kid
+  //     • chores             → add / edit / delete a chore on the kid's board
+  //     • profiles           → pay rate, approval settings, PIN, week days
+  //     • milestones / collectibles / boss_captures / kid_boss_result /
+  //       household_boss_week → a kid's battle wins + trophies reach the parent
+  //   One debounced reload coalesces a burst of events; loadUserDataFromSupabase
+  //   re-derives ALL of the above, so a single reload converges the whole app.
+  //   The acting device skips its OWN echo via the recent-local-write guards
+  //   (set by noteLocalWrite at every mutation site); a reload doesn't re-persist
+  //   what it just loaded (suppressPersistRef), so devices don't ping-pong.
+  //   RLS scopes every table to this household (parent_id / profiles.id = auth.uid()).
+  useEffect(() => {
+    if (!appDataLoaded || !sessionUser) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId || cancelled) return;
+      const owner = `parent_id=eq.${userId}`;
+      channel = supabase.channel(`household_sync:${userId}`);
+      for (const table of ['payouts', 'kids', 'chores', 'milestones', 'collectibles', 'boss_captures', 'kid_boss_result', 'household_boss_week'] as const) {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: owner }, scheduleHouseholdReload);
+      }
+      // profiles is keyed by the user id itself (id = auth.uid), not parent_id.
+      channel.on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, scheduleHouseholdReload);
+      channel.subscribe();
+    })();
+    return () => { cancelled = true; if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current); if (channel) supabase.removeChannel(channel); };
+  }, [appDataLoaded, sessionUser]);
+
   useEffect(() => {
     if (!appDataLoaded) return;
     // MON-92/MON-91: the `chore_history` TABLE is the master (written on approval).
@@ -11618,6 +11688,8 @@ function AppInner() {
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:weekApprovalDays', JSON.stringify(weekApprovalDays)).catch(() => {});
+    if (persistSuppressed()) return;   // just loaded FROM the DB — don't echo it back
+    noteLocalWrite();
     saveAppState({ week_approval_days_json: JSON.stringify(weekApprovalDays) }).catch(e => console.warn('[DB] saveAppState (approvalDays) error:', e));
   }, [weekApprovalDays, appDataLoaded]);
 
@@ -11627,6 +11699,11 @@ function AppInner() {
     if (!appDataLoaded) return;
     if (kidSyncTimer.current) clearTimeout(kidSyncTimer.current);
     kidSyncTimer.current = setTimeout(() => {
+      // These stats just loaded FROM the DB (kids is realtime-synced now). Pushing
+      // them straight back as ABSOLUTE values would echo a reload AND could clobber
+      // a newer xp/shards value another device wrote between our read and this write.
+      if (persistSuppressed()) return;
+      noteLocalWrite();
       for (const name of Object.keys(kidMonsterState)) {
         const kidDbId = setupChildren.find(c => c.name === name)?.id;
         if (!kidDbId || !isUUID(kidDbId)) continue;
@@ -11665,6 +11742,7 @@ function AppInner() {
     for (const name of Object.keys(pend)) {
       const id = setupChildren.find(c => c.name === name)?.id;
       if (id && isUUID(id)) {
+        noteLocalWrite();   // kids write is ours — skip our household-sync echo
         updateKid(id, pend[name]).catch(e => console.warn('[DB] flush kid-welcome write error:', e));
         delete pend[name];
       }
@@ -11746,6 +11824,7 @@ function AppInner() {
     householdPinnedWeekRef.current = mondayKey;
     let cancelled = false;
     (async () => {
+      noteLocalWrite();   // household_boss_week upsert is ours — skip our household-sync echo
       const pinned = await getOrCreateHouseholdBoss(mondayKey, candidate, householdTier);
       if (cancelled) return;
       const name = pinned?.bossName || candidate;
@@ -12184,6 +12263,8 @@ function AppInner() {
   useEffect(() => {
     if (!appDataLoaded || !lastWeekReset) return;
     AsyncStorage.setItem('monstir:lastWeekReset', lastWeekReset).catch(() => {});
+    if (persistSuppressed()) return;   // just loaded FROM the DB — don't echo it back
+    noteLocalWrite();
     saveAppState({ last_week_reset: lastWeekReset }).catch(e => console.warn('[DB] saveAppState (lastWeekReset) error:', e));
   }, [lastWeekReset, appDataLoaded]);
 
@@ -12205,6 +12286,7 @@ function AppInner() {
     const owner = isParent ? PARENT_OWNER : name;
     const wasNew = await earnMilestone(owner, id);
     if (!wasNew) return;
+    noteLocalWrite();   // a genuinely-new milestone → its milestones/profiles write is ours, skip our echo
     // `defer` (boss-capture path): hold the toast until the chest/relic reveal is
     // done so the two celebrations don't overlap. Earning + persistence below still
     // run now, so a dropped toast never loses the milestone.
@@ -12251,6 +12333,7 @@ function AppInner() {
     for (const w of pendingMilestoneWrites.current) {
       const kidDbId = setupChildren.find(c => c.name === w.kidName)?.id;
       if (kidDbId) {
+        noteLocalWrite();   // milestones write is ours — skip our household-sync echo
         saveMilestoneToDb({ kidId: kidDbId, milestoneId: w.milestoneId }).catch(e => logDbError('db.milestone.save.retry', e));
       } else {
         stillPending.push(w);
@@ -12271,6 +12354,7 @@ function AppInner() {
   const pendingTrophyWrites = useRef<PendingTrophyWrite[]>([]);
 
   const writeTrophyToDb = useCallback((w: PendingTrophyWrite, kidDbId: string) => {
+    noteLocalWrite();   // boss_captures / collectibles write is ours — skip our household-sync echo
     if (w.kind === 'boss') {
       // bossName is fixed game content (from BOSSES), not kid PII — safe to log.
       log('boss.capture', { kidId: kidDbId, bossName: w.bossName, xpEarned: w.xpEarned, coinsEarned: w.coinsEarned, completionPct: w.completionPct });
@@ -12590,6 +12674,7 @@ function AppInner() {
   }, [managedChores, setupChildren, ensureChoreInDb, checkMilestone]);
 
   const confirmPayout = useCallback((kidName: string) => {
+    noteLocalWrite();   // payouts + kids writes below are ours — skip our household-sync echo
     const amount = kidCoins[kidName] ?? 0;
     // Capture the per-week breakdown BEFORE logging this payout — the new payout
     // entry would otherwise move the "unpaid since" boundary and zero out the weeks.
@@ -12644,6 +12729,7 @@ function AppInner() {
   };
 
     const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number, completionPctOverride?: number, bossOverride?: Boss, _remainingBossHp?: number) => {
+    noteLocalWrite();   // kid_boss_result + kids writes below are ours — skip our household-sync echo
     const boss = bossOverride ?? activeKidBoss;
     log('battle.end', { result, kidId: getKidDbId(currentKidName), shardsUsed, bossName: boss?.name });
     // Capture coin bonus (if the parent enabled it). The DB credit is owned by the
@@ -12816,6 +12902,7 @@ function AppInner() {
     setParentScreen('editChore');
   };
   const saveChore = (chore: ManagedChore) => {
+    noteLocalWrite();   // chores write is ours — skip our household-sync echo
     let isNew = false;
     setManagedChores(prev => {
       const exists = prev.find(c => c.id === chore.id);
@@ -12840,6 +12927,7 @@ function AppInner() {
     }
   };
   const deleteChore = (id: string) => {
+    noteLocalWrite();   // chores delete is ours — skip our household-sync echo
     setManagedChores(prev => prev.filter(c => c.id !== id));
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
     if (!id.startsWith('_')) deleteChoreDb(id).catch(e => logDbError('db.chore.delete', e));
@@ -12877,6 +12965,7 @@ function AppInner() {
   }, [parentPinEnabled, parentPin]);
 
   const saveParentPin = useCallback((pin: string) => {
+    noteLocalWrite();   // profiles write is ours — skip our household-sync echo
     setParentPin(pin);
     setParentPinEnabled(true);
     saveProfile({ parent_pin: pin, parent_pin_enabled: true }).catch(e => console.warn('[DB] saveParentPin error:', e));
@@ -12913,6 +13002,7 @@ function AppInner() {
   }, [appDataLoaded, applyPushRoute]);
 
   const disableParentPin = useCallback(() => {
+    noteLocalWrite();   // profiles write is ours — skip our household-sync echo
     setParentPin('');
     setParentPinEnabled(false);
     saveProfile({ parent_pin: null, parent_pin_enabled: false }).catch(e => console.warn('[DB] disableParentPin error:', e));
@@ -12975,6 +13065,7 @@ function AppInner() {
     const kidId = getKidDbId(kidName);
     if (!kidId) return null;
     try {
+      noteLocalWrite();   // kids write is ours — skip our household-sync echo
       const code = await rotatePairingCode(kidId);
       if (code) setSetupChildren(prev => prev.map(c => c.name === kidName ? { ...c, pairingCode: code } : c));
       return code;
@@ -13238,6 +13329,7 @@ function AppInner() {
               const welcomePayload = { monster_id: validId, monster_name: monsterName, kid_onboarding_done: true as const };
               const kidDbId = getKidDbId(currentKidName);
               if (kidDbId) {
+                noteLocalWrite();   // kids write is ours — skip our household-sync echo
                 updateKid(kidDbId, welcomePayload).catch(e => console.warn('[DB] updateKid (kidWelcome) error:', e));
               } else {
                 pendingKidWelcomeWrites.current[currentKidName] = welcomePayload;
@@ -13280,6 +13372,7 @@ function AppInner() {
           <>
             {screen === 'home'     && <ErrorBoundary key={`home-${currentKidName}`}><HomeScreen   key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={getKidCoins(currentKidName)} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={requestParentMode} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} parentRole={parentRole} requireApproval={requireApproval} debugDayOffset={debugDayOffset} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={(name: string) => {
                   setKidMonster(currentKidName, s => ({ ...s, selectedMonsterName: name }));
+                  noteLocalWrite();   // kids write is ours — skip our household-sync echo
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
                 }} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
