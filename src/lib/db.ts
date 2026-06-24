@@ -511,6 +511,154 @@ export async function loadBossCaptures(kidId: string) {
   return data ?? [];
 }
 
+// ─── Per-child weekly boss (MON-84) ──────────────────────────────────────────
+// The family shares ONE boss IDENTITY per week (household_boss_week), but each
+// kid fights their own single-resolution instance recorded in kid_boss_result.
+// Both writes go through dedup-keyed RPCs so two devices on the same parent
+// account agree on the boss and a capture pays out EXACTLY once.
+
+export type HouseholdBossWeek = { bossName: string; tier: number };
+
+// Pin (or read back) the week's shared boss identity. The first device to call
+// for a given week wins the pick; everyone else reads back the SAME name — so
+// the boss a kid fights and the boss the dashboard reveals always agree. Returns
+// null only when signed out / the RPC errored (caller falls back to its local
+// deterministic pick).
+export async function getOrCreateHouseholdBoss(
+  weekStart: string,
+  bossName: string,
+  tier: number,
+): Promise<HouseholdBossWeek | null> {
+  const { data, error } = await supabase.rpc('get_or_create_household_boss', {
+    p_week_start: weekStart,
+    p_boss_name:  bossName,
+    p_tier:       tier,
+  });
+  if (error) { console.warn('[DB] getOrCreateHouseholdBoss error:', error.message); return null; }
+  const row = (data ?? {}) as { boss_name?: string; tier?: number };
+  if (!row.boss_name) return null;
+  return { bossName: row.boss_name, tier: row.tier ?? tier };
+}
+
+// Record a kid's single-resolution weekly outcome EXACTLY once and credit the
+// capture coin bonus only on that first write. Returns { first }: the client
+// fires the durable reward writes (chest/relic/trophy/local coin bump) only when
+// first === true. A second call for the same (kid, week) — other device, retry,
+// double-tap — is a no-op. On RPC error we return first:false so we never
+// double-grant; the cost is a rare under-grant on a network blip, which is the
+// safe direction for money (mirrors how record_chore_approval owns coin credits).
+export async function resolveKidBoss(params: {
+  kidId: string;
+  weekStart: string;
+  bossName: string;
+  result: 'captured' | 'got-away';
+  completionPct: number;
+  coins: number;
+}): Promise<{ first: boolean; coinsAwarded: number }> {
+  const { data, error } = await supabase.rpc('resolve_kid_boss', {
+    p_kid_id:         params.kidId,
+    p_week_start:     params.weekStart,
+    p_boss_name:      params.bossName,
+    p_result:         params.result,
+    p_completion_pct: params.completionPct,
+    p_coins:          params.coins,
+  });
+  if (error) {
+    console.warn('[DB] resolveKidBoss error:', error.message);
+    return { first: false, coinsAwarded: 0 };
+  }
+  const row = (data ?? {}) as { first?: boolean; coins_awarded?: number };
+  return { first: row.first === true, coinsAwarded: row.coins_awarded ?? 0 };
+}
+
+export type KidBossResultRow = {
+  kid_id: string;
+  boss_name: string;
+  result: 'captured' | 'got-away';
+  completion_pct: number;
+  resolved_at: string;
+};
+
+// All per-kid outcomes for the household this week — drives the parent dashboard
+// reveal and each kid's cross-device "already fought" lock. Keyed by kid_id.
+export async function loadKidBossResults(weekStart: string): Promise<KidBossResultRow[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+  const { data } = await supabase
+    .from('kid_boss_result')
+    .select('kid_id, boss_name, result, completion_pct, resolved_at')
+    .eq('parent_id', userId)
+    .eq('week_start', weekStart);
+  return (data ?? []) as KidBossResultRow[];
+}
+
+// ─── Savings goals (normalized; replaces the kids.goals_json blob) ────────────
+
+export type SavingsGoalRow = {
+  id: string;
+  kid_id: string;
+  name: string;
+  target_cents: number;
+  saved_cents: number;
+  category: string | null;
+  color: string | null;
+  icon: string | null;         // the stable iconKey (the rendered image is derived from it)
+  activity_feed: { label: string; pts: number; when: string }[];
+};
+
+export async function loadSavingsGoals(): Promise<SavingsGoalRow[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+  const { data } = await supabase
+    .from('savings_goals')
+    .select('id, kid_id, name, target_cents, saved_cents, category, color, icon, activity_feed')
+    .eq('parent_id', userId)
+    .order('created_at');
+  return (data ?? []) as SavingsGoalRow[];
+}
+
+export type SavingsGoalWrite = {
+  id: string;                  // uuid
+  name: string;
+  target_cents: number;
+  saved_cents: number;
+  category: string;
+  color: string;
+  icon: string;                // iconKey
+  activity_feed: { label: string; pts: number; when: string }[];
+};
+
+// Full per-kid sync: upsert the kid's current goals (by id) and delete any DB
+// rows for that kid that are no longer present. Keeps savings_goals the single
+// source of truth as goals are added / edited / progressed / deleted.
+export async function syncKidSavingsGoals(kidId: string, goals: SavingsGoalWrite[]): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId || !kidId) return;
+
+  if (goals.length > 0) {
+    const rows = goals.map(g => ({
+      id:            g.id,
+      kid_id:        kidId,
+      parent_id:     userId,
+      name:          g.name,
+      target_cents:  g.target_cents,
+      saved_cents:   g.saved_cents,
+      category:      g.category,
+      color:         g.color,
+      icon:          g.icon,
+      activity_feed: g.activity_feed,
+    }));
+    const { error } = await supabase.from('savings_goals').upsert(rows, { onConflict: 'id' });
+    if (error) { console.warn('[DB] syncKidSavingsGoals upsert error:', error.message); return; }
+  }
+
+  // Remove goals deleted on this device.
+  let del = supabase.from('savings_goals').delete().eq('kid_id', kidId);
+  if (goals.length > 0) del = del.not('id', 'in', `(${goals.map(g => g.id).join(',')})`);
+  const { error: delErr } = await del;
+  if (delErr) console.warn('[DB] syncKidSavingsGoals delete error:', delErr.message);
+}
+
 // ─── Collectibles ──────────────────────────────────────────────────────────
 
 export async function saveCollectibleToDb(params: {
@@ -616,17 +764,21 @@ export async function updateKidStats(kidId: string, delta: {
   last_chore_date?: string;
   monster_idx?: number;
   monster_name?: string;
+  shards?: number;
+  battle_win_streak?: number;
 }): Promise<void> {
   if (!kidId) return;
   // Use RPC increment to avoid race conditions
   const updates: Record<string, unknown> = {};
-  if (delta.xp !== undefined)              updates.xp = delta.xp;
-  if (delta.weekly_xp !== undefined)       updates.weekly_xp = delta.weekly_xp;
-  if (delta.coins !== undefined)           updates.coins = delta.coins;
-  if (delta.current_streak !== undefined)  updates.current_streak = delta.current_streak;
-  if (delta.last_chore_date !== undefined) updates.last_chore_date = delta.last_chore_date;
-  if (delta.monster_idx !== undefined)     updates.monster_idx = delta.monster_idx;
-  if (delta.monster_name !== undefined)    updates.monster_name = delta.monster_name;
+  if (delta.xp !== undefined)                    updates.xp = delta.xp;
+  if (delta.weekly_xp !== undefined)             updates.weekly_xp = delta.weekly_xp;
+  if (delta.coins !== undefined)                 updates.coins = delta.coins;
+  if (delta.current_streak !== undefined)        updates.current_streak = delta.current_streak;
+  if (delta.last_chore_date !== undefined)       updates.last_chore_date = delta.last_chore_date;
+  if (delta.monster_idx !== undefined)           updates.monster_idx = delta.monster_idx;
+  if (delta.monster_name !== undefined)          updates.monster_name = delta.monster_name;
+  if (delta.shards !== undefined)                updates.shards = delta.shards;
+  if (delta.battle_win_streak !== undefined)     updates.battle_win_streak = delta.battle_win_streak;
   const { data, error } = await supabase.from('kids').update(updates).eq('id', kidId);
   console.log('[DB] updateKidStats data:', data, 'error:', error);
 }

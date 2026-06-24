@@ -73,7 +73,7 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './src/lib/supabase';
-import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, recordChoreApproval, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, type NotificationPrefs } from './src/lib/db';
+import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, recordChoreApproval, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, getOrCreateHouseholdBoss, resolveKidBoss, loadKidBossResults, loadSavingsGoals, syncKidSavingsGoals, type SavingsGoalRow, type SavingsGoalWrite, type NotificationPrefs } from './src/lib/db';
 import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, getPushPermission, type PushRoute } from './src/lib/push';
 import { initDebugLog, log, logWarn, logError, logDbError, flushNow } from './src/lib/debugLog';
 import { DebugTap } from './src/components/DebugTap';
@@ -2617,7 +2617,7 @@ function countdownParts(ms: number): [string, string, string, string] {
   return [pad(d), pad(h), pad(m), pad(s)];
 }
 
-function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays, parentRole = '', battleCoinBonusEnabled, battleBonusCoins, bossHpPct = 1, totalFighters = 1, battledThisWeek = false, kidJoinDate }: {
+function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onStartBattle, onSwitchToParent, onNavigateToWallet, monsterName, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, currentBoss, debugDayOffset, weekApprovalDays, parentRole = '', battleCoinBonusEnabled, battleBonusCoins, battledThisWeek = false, kidJoinDate }: {
   monsterIdx: MonsterIdx; coins: number; xp: number; weeklyXp: number;
   done: Partial<Record<ChoreId, boolean>>; managedChores: ManagedChore[];
   onStartBattle: () => void;
@@ -2636,13 +2636,8 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
   weekApprovalDays: string[];
   battleCoinBonusEnabled: boolean;
   battleBonusCoins: number;
-  // Cooperative shared HP (MON-84): the family's one boss bar (0–1) and the
-  // household size, so the meter can show how worn down he is.
-  bossHpPct?: number;
-  totalFighters?: number;
   // True once this kid has used their single battle this week (won OR escaped) —
-  // prevents same-day re-fighting, incl. farming a freshly-rotated boss after a
-  // family capture on Sunday.
+  // prevents same-day re-fighting (MON-84: one resolution per kid per week).
   battledThisWeek?: boolean;
 }) {
   const boss        = currentBoss;
@@ -2901,22 +2896,6 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
           </View>
         </View>
 
-        {/* Cooperative shared-HP meter (MON-84) — "wear him down together."
-            Only meaningful in a multi-kid household once he's been chipped. */}
-        {totalFighters > 1 && bossHpPct < 1 && (
-          <View style={{ marginBottom: 12, backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 12, padding: 12 }}>
-            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: '#C5F215', textAlign: 'center' }}>
-              {bossHpPct <= 0.2
-                ? `${boss.name} is on his last legs — finish him together!`
-                : `${boss.name} is at ${Math.round(bossHpPct * 100)}% — keep wearing him down`}
-            </Text>
-            {/* Shared HP bar */}
-            <View style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.18)', marginTop: 8, overflow: 'hidden' }}>
-              <View style={{ width: `${Math.max(0, Math.min(100, Math.round(bossHpPct * 100)))}%`, height: '100%', borderRadius: 4, backgroundColor: '#C5F215' }} />
-            </View>
-          </View>
-        )}
-
         {/* Battle Button — one battle per kid per week */}
         {battledThisWeek ? (
           <Button label="⚔️  Battle used — back next week" onPress={() => {}} disabled />
@@ -3156,7 +3135,7 @@ function ResultScreen({ monsterIdx, captured, bonusCoins, onDone, monsterImg, bo
       <Text style={{ fontSize: scale(16), color: C.muted, textAlign: 'center', lineHeight: scale(22) }}>
         {captured
           ? `It's yours! You earned ${bonusCoins} coins.`
-          : `This time.\nIt's wounded. Keep doing your chores\nand it'll be weaker next battle.`}
+          : `This time.\nHe slipped away — a fresh boss arrives\nnext week. Keep doing your chores!`}
       </Text>
       <TouchableOpacity
         style={{ backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, ...SOLID_SHADOW }}
@@ -5940,6 +5919,7 @@ function MoneyScreen({
   baseRate,
   onConfirm,
   debugDayOffset = 0,
+  managedChores = [],
 }: {
   kidCoins: Record<string, number>;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
@@ -5948,6 +5928,8 @@ function MoneyScreen({
   baseRate: string;
   onConfirm: (kidName: string) => void;
   debugDayOffset?: number;
+  /** Live board — used to heal activity rows whose icon was lost to the '✅' fallback. */
+  managedChores?: ManagedChore[];
 }) {
   const insets = useSafeAreaInsets();
 
@@ -5988,6 +5970,15 @@ function MoneyScreen({
     () => choreHistory.filter(e => e.choreName.trim().toLowerCase() !== 'test'),
     [choreHistory],
   );
+
+  // Heal history rows whose icon was lost to the '✅' fallback (older approvals
+  // wrote that for image-based chore icons) by falling back to the live board's
+  // current icon for that chore name.
+  const liveIconByName = useMemo(() => {
+    const m: Record<string, string | number> = {};
+    for (const c of managedChores) m[c.name] = c.icon;
+    return m;
+  }, [managedChores]);
 
   const filteredHistory = useMemo(() => (
     activityFilter === 'all'
@@ -6346,7 +6337,11 @@ function MoneyScreen({
               </Text>
               {group.entries.map(entry => {
                 const isPaid = isEntryPaid(entry);
-                const hasIcon = typeof entry.icon === 'string' && entry.icon.length <= 4;
+                // If this row stored the '✅' fallback, show the live chore's icon instead.
+                const effIcon = (entry.icon === '✅' && liveIconByName[entry.choreName] != null)
+                  ? liveIconByName[entry.choreName]
+                  : entry.icon;
+                const hasIcon = typeof effIcon === 'string' && effIcon.length <= 4;
                 return (
                   <View
                     key={entry.id}
@@ -6374,8 +6369,8 @@ function MoneyScreen({
                       borderColor: '#1A1A1A',
                     }}>
                       {hasIcon
-                        ? <Text style={{ fontSize: scale(18) }}>{entry.icon as string}</Text>
-                        : <Image source={entry.icon as number} style={{ width: 26, height: 26 }} resizeMode="contain" />
+                        ? <Text style={{ fontSize: scale(18) }}>{effIcon as string}</Text>
+                        : <Image source={effIcon as number} style={{ width: 26, height: 26 }} resizeMode="contain" />
                       }
                     </View>
 
@@ -6492,7 +6487,7 @@ function MoneyScreen({
   );
 }
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays, kidJoinDates = {}, debugDayOffset = 0, currentBossName = '', householdBossHpPct = 1, householdTotalFighters = 0 }: {
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays, kidJoinDates = {}, debugDayOffset = 0, currentBossName = '', kidBossStatus = {} }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: (name: string) => void;
   onAddKid: () => void;
@@ -6515,9 +6510,9 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
   kidJoinDates?: Record<string, string>;
   debugDayOffset?: number;
   currentBossName?: string;
-  // Cooperative shared HP (MON-84): the family's one boss bar (0–1) + household size.
-  householdBossHpPct?: number;
-  householdTotalFighters?: number;
+  // MON-84 (per-child): the week's shared boss identity + each kid's own outcome
+  // (kid name → 'captured' | 'got-away'); absent = hasn't fought yet.
+  kidBossStatus?: Record<string, 'captured' | 'got-away'>;
 }) {
   const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
   useEffect(() => { getEarnedMilestones(PARENT_OWNER).then(setEarnedMilestones); }, []);
@@ -6645,11 +6640,12 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
                       {currentBossName || 'Boss'}
                     </Text>
                     <Text style={{ fontSize: scale(12), fontFamily: 'Nunito_700Bold', color: MUTE, marginTop: 4 }}>
-                      {householdTotalFighters > 1 && householdBossHpPct < 1
-                        ? householdBossHpPct <= 0.2
-                          ? 'on his last legs · finish him together'
-                          : `wearing down · ${Math.round(householdBossHpPct * 100)}% left`
-                        : 'arrives Sunday'}
+                      {(() => {
+                        const statuses = Object.values(kidBossStatus);
+                        if (statuses.length === 0) return 'arrives Sunday';
+                        const captured = statuses.filter(st => st === 'captured').length;
+                        return `${captured}/${kidProfiles.length} captured this week`;
+                      })()}
                     </Text>
                   </View>
                 </View>
@@ -9164,6 +9160,41 @@ function goalIconSource(key?: string): number {
   return (key && GOAL_ICONS[key]) || GOAL_ICONS[DEFAULT_GOAL_ICON_KEY];
 }
 
+// The milestone labels are constant for every goal, so they aren't stored in the
+// savings_goals table — re-applied on load.
+const DEFAULT_GOAL_MILESTONES = ['Keep it up!', 'Halfway there!', 'Almost done!', 'Goal unlocked!'];
+
+// savings_goals row → in-app SavedGoal. `amount` (dollars) and the rendered `icon`
+// are derived from target_cents / the stored iconKey.
+function rowToSavedGoal(r: SavingsGoalRow): SavedGoal {
+  return {
+    id:          r.id,
+    name:        r.name,
+    amount:      ((r.target_cents ?? 0) / 100).toFixed(2),
+    category:    r.category ?? '',
+    color:       r.color ?? '',
+    iconKey:     r.icon ?? DEFAULT_GOAL_ICON_KEY,
+    icon:        goalIconSource(r.icon ?? DEFAULT_GOAL_ICON_KEY),
+    savedCents:  r.saved_cents ?? 0,
+    milestones:  DEFAULT_GOAL_MILESTONES,
+    activityFeed: Array.isArray(r.activity_feed) ? r.activity_feed : [],
+  };
+}
+
+// in-app SavedGoal → savings_goals write payload.
+function savedGoalToWrite(g: SavedGoal): SavingsGoalWrite {
+  return {
+    id:            g.id,
+    name:          g.name,
+    target_cents:  Math.round((parseFloat(g.amount) || 0) * 100),
+    saved_cents:   g.savedCents,
+    category:      g.category,
+    color:         g.color,
+    icon:          g.iconKey,
+    activity_feed: g.activityFeed,
+  };
+}
+
 const GOAL_OPTIONS: { key: string; name: string; amount: string }[] = [
   { key: 'ps5',        name: 'PS5',              amount: '499.99' },
   { key: 'switch',     name: 'Nintendo Switch',  amount: '299.99' },
@@ -10583,19 +10614,6 @@ const splashStyles = StyleSheet.create({
   },
 });
 
-/** A co-op chest owed to a kid because the family finished off a boss this kid
- *  had already worn down (escaped) earlier in the cycle. Carries everything the
- *  reveal + trophy need so it can be shown the next time they open their profile
- *  (the other kids aren't at the device when the bar empties). */
-interface PendingCoopChest {
-  bossName:      string;
-  weakness:      string;
-  threat:        string;
-  completionPct: number;
-  xpEarned:      number;
-  coinsEarned:   number;
-}
-
 interface KidMonsterState {
   monsterIdx: MonsterIdx;
   selectedMonsterId: MonsterId;
@@ -10610,11 +10628,6 @@ interface KidMonsterState {
   pendingEvolution: boolean;
   /** Banked battle shards. Per kid — siblings must not share a wallet. */
   shards: number;
-  /** True once this week's shard grant was claimed (first battle entry); reset Monday. */
-  weeklyShardsClaimed: boolean;
-  /** A co-op chest owed because the family finished a boss this kid had already
-   *  worn down; null when nothing is pending. Shown on next profile open. */
-  pendingCoopChest: PendingCoopChest | null;
   /** Consecutive boss wins with no escape in between — drives the Undefeated milestone. */
   battleWinStreak: number;
   /** MON-82: true once this kid has discovered the boss weakness this week; reset Monday. */
@@ -10634,8 +10647,6 @@ const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
   lastChoreDate: '',
   pendingEvolution: false,
   shards: 0,
-  weeklyShardsClaimed: false,
-  pendingCoopChest: null,
   battleWinStreak: 0,
   weaknessDiscovered: false,
 };
@@ -10643,6 +10654,11 @@ const DEFAULT_KID_MONSTER_STATE: KidMonsterState = {
 function AppInner() {
   const [activeToast, setActiveToast]     = useState<{ def: MilestoneDef; kidName?: string } | null>(null);
   const [toastMilestoneId, setToastMid]   = useState<string | null>(null);
+  // A milestone earned during a boss capture, held back so its celebration toast
+  // doesn't fight the chest-crack / relic reveal. Flushed once the kid leaves the
+  // chestReveal screen (see effect below). The milestone is still EARNED + persisted
+  // immediately in checkMilestone — only the toast is deferred.
+  const [pendingChestToast, setPendingChestToast] = useState<{ def: MilestoneDef; kidName?: string; id: string } | null>(null);
   const [appMode, setAppMode]             = useState<AppMode>('splash');
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
 
@@ -10680,20 +10696,18 @@ function AppInner() {
   const getKidMonster = (name: string): KidMonsterState => kidMonsterState[name] ?? { ...DEFAULT_KID_MONSTER_STATE };
   const setKidMonster = (name: string, updater: (prev: KidMonsterState) => KidMonsterState) =>
     setKidMonsterState(prev => ({ ...prev, [name]: updater(prev[name] ?? { ...DEFAULT_KID_MONSTER_STATE }) }));
-  // ── Cooperative household boss (MON-84) ──────────────────────────────────
-  // The family shares ONE boss identity AND one HP bar (`hpPct`, 0–1). Every
-  // kid fights a tier-scaled instance seeded at `hpPct` of their own max HP;
-  // damage carries between siblings. `participants` records who has chipped in
-  // this cycle (with the completion % at the time they fought) so that when the
-  // bar finally empties EVERY participant — not just the kid who landed the
-  // finishing blow — is owed a chest. When the bar hits 0 the boss is captured
-  // and rotates to a fresh identity with a full bar. Persisted to AsyncStorage
-  // only for now (Supabase sync is a follow-up; multi-device is out of scope).
-  const [householdBoss, setHouseholdBoss] = useState<{
-    bossName: string;
-    hpPct: number;
-    participants: { name: string; completionPct: number; xpSnapshot: number }[];
-  }>({ bossName: '', hpPct: 1, participants: [] });
+  // ── Household boss-of-the-week IDENTITY (MON-84, per-child model) ─────────
+  // The family faces ONE boss identity per week (shared, for the dashboard
+  // reveal), but each kid fights their OWN single-resolution instance — no
+  // shared HP bar, no participant ledger, no carry-forward. The identity is
+  // pinned server-side (household_boss_week) so every device + the dashboard
+  // agree; this state is just the resolved name, cached to AsyncStorage for an
+  // instant offline cold start. `''` until the DB pick (or local fallback) lands.
+  const [householdBossName, setHouseholdBossName] = useState<string>('');
+  const householdPinnedWeekRef = useRef<string>('');
+  // Per-kid weekly outcome from the DB (kid_id → 'captured'|'got-away'), hydrated
+  // on load so a capture on one device shows on another + on the parent dashboard.
+  const [kidBossStatus, setKidBossStatus] = useState<Record<string, 'captured' | 'got-away'>>({});
   const [screen, setScreen]             = useState<Screen>('home');
   const [tab, setTab]                   = useState<Tab>('home');
   const [trophyOrigin, setTrophyOrigin]       = useState<Tab>('home');
@@ -10703,10 +10717,9 @@ function AppInner() {
   const [chestTier, setChestTier]           = useState<ChestTier>('Common');
   const [chorePctAtBattle, setChorePctAtBattle] = useState(0);
   const [chestCollectible, setChestCollectible] = useState(() => pickForTier('Common'));
-  // Cooperative win outcome (MON-84), captured at battle end and shown on the
-  // reveal screen: did this win finish the family capture, or just wear the
-  // boss down further (and how many fights remain)?
-  const [coopWin, setCoopWin] = useState<{ familyCaptured: boolean; fightsLeft: number; totalFighters: number; bossName: string } | null>(null);
+  // The boss this kid just captured (MON-84), shown on the chest-reveal banner.
+  // Each capture is the kid's OWN — no family-capture / fights-left language.
+  const [capturedBossName, setCapturedBossName] = useState<string | null>(null);
   // Reward popups (weakness discovery + random shard drop) share ONE Modal host,
   // driven by a queue. Two RN <Modal>s presented at once leave a ghost overlay
   // that swallows touches — and a chore tap can fire both at once (the chore that
@@ -10790,6 +10803,7 @@ function AppInner() {
   };
   const handleKidModalSave = (data: { name: string; avatarIdx: number; avatarColor: string; ageRange: import('./src/screens/ParentOnboarding').OnboardingChild['ageRange'] }) => {
     setKidModalVisible(false);
+    noteLocalWrite();   // kids (+ payouts on rename) writes below are ours — skip our household-sync echo
     if (kidModalInitial) {
       // Edit existing
       setSetupChildren(prev => prev.map(c => c.id === kidModalInitial.id ? { ...c, ...data } : c));
@@ -10869,6 +10883,11 @@ function AppInner() {
   // (and sync the corruption to Supabase via the debounced kid-stats sync).
   const addKidCoins  = useCallback((name: string, amount: number, opts?: { persist?: boolean }) => {
     if (!Number.isFinite(amount)) { console.warn(`[coins] ignored non-finite amount for ${name}:`, amount); return; }
+    // Guard our own realtime echo. Critical for the optimistic { persist:false }
+    // path: this device bumped coins locally with no DB write, so without this an
+    // unrelated remote event (e.g. a chore edit) could fire a reload that reverts
+    // the not-yet-approved coins. Also covers the atomic increment below.
+    noteLocalWrite();
     setKidCoins(prev => ({ ...prev, [name]: (Number.isFinite(prev[name]) ? prev[name] : 0) + amount }));
     // MON-92: persist the coin award as an ATOMIC delta, not via the debounced
     // absolute kid-stats sync (which is last-writer-wins and lost a kid's pay when
@@ -10902,7 +10921,6 @@ function AppInner() {
   const lastChoreDate       = _km.lastChoreDate;
   const pendingEvolution    = _km.pendingEvolution;
   const shards              = _km.shards;
-  const pendingCoopChest    = _km.pendingCoopChest;
   const effectiveMonsterName = selectedMonsterName || fallbackNameForKid(currentKidName);
 
   const [kidPayoutPending, setKidPayoutPending] = useState<Record<string, boolean>>({});
@@ -10950,7 +10968,7 @@ function AppInner() {
           await AsyncStorage.setItem('monstir:lastUserId', session.user.id);
         } catch {}
 
-        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset, savedHouseholdBoss, weekCompletions, dbHistory] = await Promise.all([
+        const [profile, dbKids, dbChores, dbGoals, dbPayouts, savedApproval, savedChores, savedGoalsLocal, savedGoalsByKidLocal, savedLastWeekReset, savedBossName, weekCompletions, dbHistory] = await Promise.all([
           loadProfile(),
           loadKids(),
           loadChores(),
@@ -10961,25 +10979,13 @@ function AppInner() {
           AsyncStorage.getItem('monstir:goals'),
           AsyncStorage.getItem('monstir:goalsByKid'),
           AsyncStorage.getItem('monstir:lastWeekReset'),
-          AsyncStorage.getItem('monstir:householdBoss'),
+          AsyncStorage.getItem('monstir:householdBossName'),
           loadWeekCompletions(),   // durable audit → rebuild board counters + lock (immune to blob clobber)
           loadChoreHistory(),      // MON-92: History + money breakdown from the chore_history TABLE (not the drifting blob)
         ]);
-        if (savedHouseholdBoss) {
-          try {
-            const hb = JSON.parse(savedHouseholdBoss);
-            if (hb && typeof hb.bossName === 'string') {
-              // Migrate the legacy { bossName, felledBy } shape: a partially
-              // felled boss starts the new shared bar at full and lets the
-              // family re-wear it down (no clean HP to recover from felledBy).
-              setHouseholdBoss({
-                bossName:     hb.bossName,
-                hpPct:        typeof hb.hpPct === 'number' ? hb.hpPct : 1,
-                participants: Array.isArray(hb.participants) ? hb.participants : [],
-              });
-            }
-          } catch {}
-        }
+        // Show the cached boss identity instantly; the DB pin effect confirms /
+        // overrides it once the household tier is known (MON-84 per-child model).
+        if (savedBossName) setHouseholdBossName(savedBossName);
         console.log('[bootstrap] profile:', JSON.stringify(profile));
         console.log('[bootstrap] dbKids:', JSON.stringify(dbKids));
         console.log('[bootstrap] dbChores count:', dbChores?.length);
@@ -11079,7 +11085,12 @@ function AppInner() {
           const kidMonsterInit: Record<string, KidMonsterState> = {};
           const kidCoinsInit: Record<string, number> = {};
           const goalsInit: Record<string, SavedGoal[]> = {};
-          for (const k of dbKids as { name: string; xp: number; weekly_xp: number; coins: number; current_streak: number; last_chore_date: string | null; monster_idx: number; monster_id: string | null; monster_name: string | null; kid_onboarding_done: boolean; goals_json?: string | null }[]) {
+          // Savings goals now live in the normalized savings_goals TABLE. Load them
+          // up front; kids with none in the table but goals in the legacy goals_json
+          // blob are backfilled into the table (new uuids) so existing users migrate.
+          const savingsRows = await loadSavingsGoals();
+          const goalBackfill: { kidId: string; goals: SavedGoal[] }[] = [];
+          for (const k of dbKids as { id: string; name: string; xp: number; weekly_xp: number; coins: number; current_streak: number; last_chore_date: string | null; monster_idx: number; monster_id: string | null; monster_name: string | null; kid_onboarding_done: boolean; goals_json?: string | null; shards?: number | null; battle_win_streak?: number | null }[]) {
             kidMonsterInit[k.name] = {
               ...DEFAULT_KID_MONSTER_STATE,
               xp:                  k.xp ?? 0,
@@ -11089,11 +11100,22 @@ function AppInner() {
               monsterIdx:          toMonsterIdx(k.monster_idx),
               selectedMonsterId:   toMonsterId(k.monster_id),
               selectedMonsterName: k.monster_name ?? '',
+              shards:              Math.min(SHARD_CAP, k.shards ?? 0),
+              battleWinStreak:     k.battle_win_streak ?? 0,
             };
             kidCoinsInit[k.name] = k.coins ?? 0;
-            // Goals: prefer DB column, fall back to local per-kid map
-            let kidGoals: SavedGoal[] = [];
-            if (k.goals_json) { try { const g = JSON.parse(k.goals_json); if (Array.isArray(g)) kidGoals = (g as SavedGoal[]).map(normalizeGoalIcon); } catch {} }
+            // Goals: prefer the savings_goals table; else backfill from the legacy
+            // goals_json blob (assigning uuids) and queue the rows to write back.
+            let kidGoals: SavedGoal[] = savingsRows.filter(r => r.kid_id === k.id).map(rowToSavedGoal);
+            if (kidGoals.length === 0 && k.goals_json) {
+              try {
+                const g = JSON.parse(k.goals_json);
+                if (Array.isArray(g) && g.length > 0) {
+                  kidGoals = (g as SavedGoal[]).map(normalizeGoalIcon).map(gg => ({ ...gg, id: isUUID(gg.id) ? gg.id : randomUUID() }));
+                  goalBackfill.push({ kidId: k.id, goals: kidGoals });
+                }
+              } catch {}
+            }
             if (kidGoals.length === 0 && Array.isArray(localGoalsByKid[k.name])) kidGoals = localGoalsByKid[k.name];
             goalsInit[k.name] = kidGoals;
             if (k.kid_onboarding_done) {
@@ -11106,7 +11128,12 @@ function AppInner() {
           }
           setKidMonsterState(kidMonsterInit);
           setKidCoins(kidCoinsInit);
+          goalsFromRemoteRef.current = true; // loaded from the table — don't re-persist
           setGoalsByKid(goalsInit);
+          // Persist any legacy goals_json we just migrated into the savings_goals table.
+          for (const b of goalBackfill) {
+            syncKidSavingsGoals(b.kidId, b.goals.map(savedGoalToWrite)).catch(e => console.warn('[DB] goal backfill error:', e));
+          }
         }
 
         const choresToMerge = profile?.chores_state_json ?? savedChores;
@@ -11313,6 +11340,11 @@ function AppInner() {
           }
         }
 
+        // Everything above came FROM the DB (cold start or a realtime-triggered
+        // reload). Mark it so the debounced persist effects below don't write it
+        // straight back — that redundant write would echo on the household-sync
+        // channel and bounce a reload back to the other device.
+        suppressPersistRef.current = Date.now();
         setAppDataLoaded(true);
 
         // MON-85 Phase 2: paired kid device → enter locked into that kid's view
@@ -11445,22 +11477,42 @@ function AppInner() {
   const setupChildrenRef = useRef(setupChildren);
   setupChildrenRef.current = setupChildren;
   const localChoreWriteRef = useRef(0);
+  const localGoalWriteRef = useRef(0);
+  // Any local write to a realtime-synced table (payout, boss, milestone,
+  // collectible, chore/kid/rate edit, coins) stamps this so the household-sync
+  // channel skips our OWN echo instead of pointlessly reloading this device.
+  const localWriteRef = useRef(0);
+  // Stamped when a reload just applied remote data, so the debounced persist
+  // effects don't immediately write that same data straight back — that echo
+  // would ping-pong reloads between devices and re-clobber absolute kid stats.
+  const suppressPersistRef = useRef(0);
+  const noteLocalWrite = useRef(() => { localWriteRef.current = Date.now(); }).current;
+  const persistSuppressed = useRef(() => Date.now() - suppressPersistRef.current < 3000).current;
+  // Set when goalsByKid was just applied FROM the DB (initial load or a realtime
+  // event) so the persist effect doesn't write it straight back — that echo would
+  // bump localGoalWriteRef and make us swallow the NEXT real remote change.
+  const goalsFromRemoteRef = useRef(false);
   const pairedKidRef = useRef(pairedKidName);
   pairedKidRef.current = pairedKidName;
+  // One debounced full reload shared by BOTH realtime channels (chore_completions
+  // below + household_sync). A single approval writes chore_completions AND kids
+  // (coins) — without a shared timer those would fire two independent reloads on
+  // the receiving device. Coalescing keeps it to one. Skipped when THIS device
+  // made any local write in the last 6s (its state is already current; reloading
+  // would only flash, and could revert optimistic not-yet-persisted coins).
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleHouseholdReload = useRef(() => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      const since = Math.max(localWriteRef.current, localChoreWriteRef.current, localGoalWriteRef.current);
+      if (Date.now() - since < 6000) return;
+      loadUserDataFromSupabase({ pairedKid: pairedKidRef.current }).catch(() => {});
+    }, 1500);
+  }).current;
   useEffect(() => {
     if (!appDataLoaded || !sessionUser) return;
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
-    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleReload = () => {
-      if (reloadTimer) clearTimeout(reloadTimer);
-      reloadTimer = setTimeout(() => {
-        // Skip self-echo: if THIS device just approved/rejected, its local state
-        // is already current and a reload would only cause a needless flash.
-        if (Date.now() - localChoreWriteRef.current < 5000) return;
-        loadUserDataFromSupabase({ pairedKid: pairedKidRef.current }).catch(() => {});
-      }, 1500);
-    };
     (async () => {
       const { data } = await supabase.auth.getUser();
       const userId = data.user?.id;
@@ -11487,13 +11539,13 @@ function AppInner() {
                 };
               }));
             } else if (payload.eventType === 'UPDATE') {
-              if (row.status === 'approved' || row.status === 'rejected') scheduleReload();
+              if (row.status === 'approved' || row.status === 'rejected') scheduleHouseholdReload();
             }
           },
         )
         .subscribe();
     })();
-    return () => { cancelled = true; if (reloadTimer) clearTimeout(reloadTimer); if (channel) supabase.removeChannel(channel); };
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
   }, [appDataLoaded, sessionUser]);
 
   const choresStateSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -11502,6 +11554,8 @@ function AppInner() {
     AsyncStorage.setItem('monstir:managedChores', JSON.stringify(managedChores)).catch(() => {});
     if (choresStateSyncTimer.current) clearTimeout(choresStateSyncTimer.current);
     choresStateSyncTimer.current = setTimeout(() => {
+      if (persistSuppressed()) return;   // just loaded this board FROM the DB — don't echo it back
+      noteLocalWrite();                  // our own profiles write — skip our household-sync echo
       saveAppState({ chores_state_json: JSON.stringify(managedChores) }).catch(e => logDbError('db.board.save', e));
     }, 2000);
   }, [managedChores, appDataLoaded]);
@@ -11512,6 +11566,8 @@ function AppInner() {
     if (!appDataLoaded) return;
     if (payRateSyncTimer.current) clearTimeout(payRateSyncTimer.current);
     payRateSyncTimer.current = setTimeout(() => {
+      if (persistSuppressed()) return;   // rates just loaded FROM the DB — don't echo them back
+      noteLocalWrite();
       const rateNum = Math.round(parseFloat(baseRate) * 100) || 50;
       saveProfile({
         base_rate: rateNum,
@@ -11526,23 +11582,98 @@ function AppInner() {
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:kidApprovalSettings', JSON.stringify(kidApprovalSettings)).catch(() => {});
+    if (persistSuppressed()) return;   // just loaded FROM the DB — don't echo it back
+    noteLocalWrite();
     saveAppState({ kid_approval_settings_json: JSON.stringify(kidApprovalSettings) }).catch(e => console.warn('[DB] saveAppState (kidApproval) error:', e));
   }, [kidApprovalSettings, appDataLoaded]);
 
   // ── Persist per-kid goals to Supabase + AsyncStorage ─────────────────────
+  // Goals are now the normalized savings_goals TABLE (was the kids.goals_json
+  // blob). AsyncStorage stays an offline cache; the table is the source of truth.
   const goalSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:goalsByKid', JSON.stringify(goalsByKid)).catch(() => {});
+    // Applied from the DB (load / realtime) — cache it, but don't write it back.
+    if (goalsFromRemoteRef.current) { goalsFromRemoteRef.current = false; return; }
     if (goalSyncTimer.current) clearTimeout(goalSyncTimer.current);
     goalSyncTimer.current = setTimeout(() => {
-      // Each kid's goals live on their own kids row (goals_json column)
+      localGoalWriteRef.current = Date.now(); // suppress this device's own realtime echo
       for (const [name, kidGoals] of Object.entries(goalsByKid)) {
         const kidDbId = setupChildren.find(c => c.name === name)?.id;
-        if (kidDbId) updateKid(kidDbId, { goals_json: JSON.stringify(kidGoals) }).catch(e => console.warn('[DB] saveGoals error:', e));
+        if (kidDbId && isUUID(kidDbId)) {
+          syncKidSavingsGoals(kidDbId, kidGoals.map(savedGoalToWrite)).catch(e => console.warn('[DB] saveGoals error:', e));
+        }
       }
     }, 1000);
   }, [goalsByKid, appDataLoaded, setupChildren]);
+
+  // ── Realtime: a goal edited on another device (e.g. parent's phone) syncs
+  //    live to this one. Mirrors the chore_completions channel + echo guard.
+  useEffect(() => {
+    if (!appDataLoaded || !sessionUser) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId || cancelled) return;
+      channel = supabase
+        .channel(`savings_goals:${userId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_goals', filter: `parent_id=eq.${userId}` },
+          () => {
+            if (Date.now() - localGoalWriteRef.current < 4000) return; // our own write echoing back
+            loadSavingsGoals().then(rows => {
+              const idToName: Record<string, string> = {};
+              for (const c of setupChildrenRef.current) idToName[c.id] = c.name;
+              const byName: Record<string, SavedGoal[]> = {};
+              for (const r of rows) { const nm = idToName[r.kid_id]; if (nm) (byName[nm] ??= []).push(rowToSavedGoal(r)); }
+              goalsFromRemoteRef.current = true;
+              setGoalsByKid(byName);
+            }).catch(() => {});
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
+  }, [appDataLoaded, sessionUser]);
+
+  // ── Realtime: instant cross-device sync for EVERYTHING else ────────────────
+  //   chore_completions (above) already makes a kid's completion show up on the
+  //   parent's phone instantly, and an approval/rejection flow back. This channel
+  //   extends that same "subscribe → debounced full reload" pattern to the rest of
+  //   the shared household tables so they're no longer relaunch-only:
+  //     • payouts            → a payout zeroes the owed balance + the kid's coins
+  //                            on every other device (the original ask)
+  //     • kids               → coins / xp / monster / shards + add/rename/remove kid
+  //     • chores             → add / edit / delete a chore on the kid's board
+  //     • profiles           → pay rate, approval settings, PIN, week days
+  //     • milestones / collectibles / boss_captures / kid_boss_result /
+  //       household_boss_week → a kid's battle wins + trophies reach the parent
+  //   One debounced reload coalesces a burst of events; loadUserDataFromSupabase
+  //   re-derives ALL of the above, so a single reload converges the whole app.
+  //   The acting device skips its OWN echo via the recent-local-write guards
+  //   (set by noteLocalWrite at every mutation site); a reload doesn't re-persist
+  //   what it just loaded (suppressPersistRef), so devices don't ping-pong.
+  //   RLS scopes every table to this household (parent_id / profiles.id = auth.uid()).
+  useEffect(() => {
+    if (!appDataLoaded || !sessionUser) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId || cancelled) return;
+      const owner = `parent_id=eq.${userId}`;
+      channel = supabase.channel(`household_sync:${userId}`);
+      for (const table of ['payouts', 'kids', 'chores', 'milestones', 'collectibles', 'boss_captures', 'kid_boss_result', 'household_boss_week'] as const) {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: owner }, scheduleHouseholdReload);
+      }
+      // profiles is keyed by the user id itself (id = auth.uid), not parent_id.
+      channel.on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, scheduleHouseholdReload);
+      channel.subscribe();
+    })();
+    return () => { cancelled = true; if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current); if (channel) supabase.removeChannel(channel); };
+  }, [appDataLoaded, sessionUser]);
 
   useEffect(() => {
     if (!appDataLoaded) return;
@@ -11557,6 +11688,8 @@ function AppInner() {
   useEffect(() => {
     if (!appDataLoaded) return;
     AsyncStorage.setItem('monstir:weekApprovalDays', JSON.stringify(weekApprovalDays)).catch(() => {});
+    if (persistSuppressed()) return;   // just loaded FROM the DB — don't echo it back
+    noteLocalWrite();
     saveAppState({ week_approval_days_json: JSON.stringify(weekApprovalDays) }).catch(e => console.warn('[DB] saveAppState (approvalDays) error:', e));
   }, [weekApprovalDays, appDataLoaded]);
 
@@ -11566,6 +11699,11 @@ function AppInner() {
     if (!appDataLoaded) return;
     if (kidSyncTimer.current) clearTimeout(kidSyncTimer.current);
     kidSyncTimer.current = setTimeout(() => {
+      // These stats just loaded FROM the DB (kids is realtime-synced now). Pushing
+      // them straight back as ABSOLUTE values would echo a reload AND could clobber
+      // a newer xp/shards value another device wrote between our read and this write.
+      if (persistSuppressed()) return;
+      noteLocalWrite();
       for (const name of Object.keys(kidMonsterState)) {
         const kidDbId = setupChildren.find(c => c.name === name)?.id;
         if (!kidDbId || !isUUID(kidDbId)) continue;
@@ -11583,6 +11721,13 @@ function AppInner() {
           last_chore_date: km.lastChoreDate || undefined,
           monster_idx:     km.monsterIdx,
           monster_name:    km.selectedMonsterName || undefined,
+          // Banked battle shards + the weekly-claim flag (absolute, same LWW
+          // pattern as xp/weekly_xp). A kid normally acts on one device, so the
+          // cross-device race that forced coins atomic doesn't apply here.
+          shards:                km.shards,
+          // Consecutive-capture counter for the Undefeated milestone (persisted so
+          // it can actually reach 4 across sessions).
+          battle_win_streak:     km.battleWinStreak,
         }).catch(e => console.warn('[DB] updateKidStats error:', e));
       }
     }, 2000); // 2s debounce — avoids hammering DB on rapid updates
@@ -11597,6 +11742,7 @@ function AppInner() {
     for (const name of Object.keys(pend)) {
       const id = setupChildren.find(c => c.name === name)?.id;
       if (id && isUUID(id)) {
+        noteLocalWrite();   // kids write is ours — skip our household-sync echo
         updateKid(id, pend[name]).catch(e => console.warn('[DB] flush kid-welcome write error:', e));
         delete pend[name];
       }
@@ -11636,8 +11782,8 @@ function AppInner() {
   const householdTier: MonsterIdx = (setupChildren.length
     ? Math.max(...setupChildren.map(c => (kidMonsterState[c.name] ?? DEFAULT_KID_MONSTER_STATE).monsterIdx))
     : monsterIdx) as MonsterIdx;
-  const householdIdentity: Boss = (householdBoss.bossName
-    ? BOSSES.find(b => b.name === householdBoss.bossName)
+  const householdIdentity: Boss = (householdBossName
+    ? BOSSES.find(b => b.name === householdBossName)
     : null) ?? pickHouseholdBoss(householdTier, debugDayOffset);
   const activeKidBoss: Boss = bossForKid(householdIdentity, monsterIdx);
 
@@ -11658,26 +11804,52 @@ function AppInner() {
     setKidMonsterState(prev => ({ ...prev, [currentKidName]: { ...prev[currentKidName], weaknessDiscovered: true } }));
   }, [viewMode, currentKidName, managedChores, kidMonsterState, activeKidBoss.name, kidJoinDates]);
 
-  // Shared-bar progress for the current household boss.
   const householdKidNames = setupChildren.map(c => c.name);
-  const householdHpPct = householdBoss.hpPct;
+  // Only pin the boss to the DB once kid tiers are hydrated, so we snapshot the
+  // real household tier (not a transient default-0 before kids load).
+  const householdKidsHydrated = householdKidNames.length > 0 && householdKidNames.every(n => kidMonsterState[n] != null);
 
-  // Seed the household boss once the family is loaded and none is set, and prune
-  // `participants` to current kids (a removed kid shouldn't stay owed a chest).
+  // Pin & read the week's SHARED boss identity from the DB (MON-84 per-child).
+  // The first device to call for the week wins the pick; every other device —
+  // and the parent dashboard — reads back the SAME name, so no one disagrees on
+  // the boss. Also hydrates each kid's single-resolution outcome for the week so
+  // a capture on one device shows on another + on the dashboard. Re-pins at the
+  // week boundary; the AsyncStorage cache gives an instant offline cold start.
   useEffect(() => {
     if (!appDataLoaded || householdKidNames.length === 0) return;
-    setHouseholdBoss(prev => {
-      const participants = prev.participants.filter(p => householdKidNames.includes(p.name));
-      const bossName = prev.bossName || pickHouseholdBoss(householdTier, debugDayOffset).name;
-      return (bossName === prev.bossName && participants.length === prev.participants.length) ? prev : { ...prev, bossName, participants };
-    });
-  }, [appDataLoaded, householdKidNames.join('|'), householdTier]);
+    const mondayKey = getWeekMondayKey(debugDayOffset);
+    const candidate = pickHouseholdBoss(householdTier, debugDayOffset).name;
+    setHouseholdBossName(prev => prev || candidate); // instant fallback for the UI
+    if (!householdKidsHydrated || householdPinnedWeekRef.current === mondayKey) return;
+    householdPinnedWeekRef.current = mondayKey;
+    let cancelled = false;
+    (async () => {
+      noteLocalWrite();   // household_boss_week upsert is ours — skip our household-sync echo
+      const pinned = await getOrCreateHouseholdBoss(mondayKey, candidate, householdTier);
+      if (cancelled) return;
+      const name = pinned?.bossName || candidate;
+      setHouseholdBossName(name);
+      AsyncStorage.setItem('monstir:householdBossName', name).catch(() => {});
 
-  // Persist the household boss locally (Supabase sync is a MON-84 follow-up).
-  useEffect(() => {
-    if (!appDataLoaded) return;
-    AsyncStorage.setItem('monstir:householdBoss', JSON.stringify(householdBoss)).catch(() => {});
-  }, [householdBoss, appDataLoaded]);
+      const results = await loadKidBossResults(mondayKey);
+      if (cancelled) return;
+      const idToName: Record<string, string> = {};
+      for (const c of setupChildren) idToName[c.id] = c.name;
+      const byName: Record<string, 'captured' | 'got-away'> = {};
+      for (const r of results) { const nm = idToName[r.kid_id]; if (nm) byName[nm] = r.result; }
+      setKidBossStatus(byName);
+      // Reflect the durable outcome onto each kid's local "already fought" lock.
+      setKidMonsterState(prev => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [nm, res] of Object.entries(byName)) {
+          if (next[nm] && next[nm].battleResult !== res) { next[nm] = { ...next[nm], battleResult: res }; changed = true; }
+        }
+        return changed ? next : prev;
+      });
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [appDataLoaded, householdKidNames.join('|'), householdTier, debugDayOffset, householdKidsHydrated]);
 
   // ── Battle-power reconciliation: keep weekly power honest with completions ──
   // "Battle power" (`weeklyXp`) is a scalar on the kid row; "Chores completed"
@@ -12019,7 +12191,7 @@ function AppInner() {
           if (!realId) return;
           const res = await submitChoreCompletion({ choreId: realId, kidId: kidDbId, requiresApproval: false, earnedCents });
           if (res.claimedId) {
-            await recordChoreApproval({ completionId: res.claimedId, kidId: kidDbId, kidName: currentKidName, choreName: chore.name, earnedCents, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+            await recordChoreApproval({ completionId: res.claimedId, kidId: kidDbId, kidName: currentKidName, choreName: chore.name, earnedCents, icon: serializeChoreIcon(chore.icon) });
           } else if (res.ok && res.blockedByKid && res.blockedByKid !== kidDbId) {
             // a sibling finished this shared chore first — credit them. The optimistic
             // coins/history reconcile from the authoritative tables on next board load.
@@ -12072,13 +12244,12 @@ function AppInner() {
           weeklyXp: 0,
           done: {},
           battleResult: null,
-          weeklyShardsClaimed: false,
           weaknessDiscovered: false, // MON-82: re-discoverable each new week
-          // MON-84: the household boss now CARRIES OVER until the family captures
-          // it, so the shared HP bar and participant ledger (`householdBoss.hpPct`
-          // / `participants`) persist across the week boundary — only the weekly
-          // power/chore bookkeeping resets here. A kid's `pendingCoopChest` (owed
-          // from a family capture) also persists until they open it.
+          // MON-84 (per-child, no carry-forward): clearing battleResult here lets
+          // every kid fight again next week. There is NO shared HP bar or ledger to
+          // carry over — a new week_start pins a fresh household_boss_week identity
+          // for everyone (the weekly reset IS the parity mechanism), and last
+          // week's kid_boss_result rows simply age out as history.
         };
       }
       return next;
@@ -12092,6 +12263,8 @@ function AppInner() {
   useEffect(() => {
     if (!appDataLoaded || !lastWeekReset) return;
     AsyncStorage.setItem('monstir:lastWeekReset', lastWeekReset).catch(() => {});
+    if (persistSuppressed()) return;   // just loaded FROM the DB — don't echo it back
+    noteLocalWrite();
     saveAppState({ last_week_reset: lastWeekReset }).catch(e => console.warn('[DB] saveAppState (lastWeekReset) error:', e));
   }, [lastWeekReset, appDataLoaded]);
 
@@ -12104,7 +12277,7 @@ function AppInner() {
   // the Grudging Respect milestone. In-memory only (a moment trigger, not durable).
   const rejectedThenResubmitted = useRef<Set<string>>(new Set());
 
-  const checkMilestone = useCallback(async (id: string, kidName?: string) => {
+  const checkMilestone = useCallback(async (id: string, kidName?: string, opts?: { defer?: boolean }) => {
     const def = getMilestone(id);
     if (!def) return;
     // Parent milestones belong to the parent; kid milestones to a specific kid.
@@ -12113,8 +12286,16 @@ function AppInner() {
     const owner = isParent ? PARENT_OWNER : name;
     const wasNew = await earnMilestone(owner, id);
     if (!wasNew) return;
-    setToastMid(id);
-    setActiveToast({ def, kidName: isParent ? undefined : name });
+    noteLocalWrite();   // a genuinely-new milestone → its milestones/profiles write is ours, skip our echo
+    // `defer` (boss-capture path): hold the toast until the chest/relic reveal is
+    // done so the two celebrations don't overlap. Earning + persistence below still
+    // run now, so a dropped toast never loses the milestone.
+    if (opts?.defer) {
+      setPendingChestToast({ def, kidName: isParent ? undefined : name, id });
+    } else {
+      setToastMid(id);
+      setActiveToast({ def, kidName: isParent ? undefined : name });
+    }
     if (isParent) {
       // Persist the full parent-milestone set to Supabase (Part 1 gap) so it
       // survives reinstall / new device, mirroring the other profile *_json state.
@@ -12133,6 +12314,18 @@ function AppInner() {
     }
   }, [currentKidName, setupChildren]);
 
+  // Release a deferred boss-capture milestone toast once the chest/relic reveal is
+  // done — i.e. as soon as the kid leaves the battle/reveal flow. Keyed on both the
+  // pending toast and `screen`, so it fires whether the milestone resolved during
+  // the reveal (most common) or just after the kid had already moved on.
+  useEffect(() => {
+    if (!pendingChestToast) return;
+    if (['boss-intro', 'arena', 'chestReveal'].includes(screen)) return;
+    setToastMid(pendingChestToast.id);
+    setActiveToast({ def: pendingChestToast.def, kidName: pendingChestToast.kidName });
+    setPendingChestToast(null);
+  }, [pendingChestToast, screen]);
+
   // Flush queued kid-milestone writes once their kid row ids become available.
   useEffect(() => {
     if (pendingMilestoneWrites.current.length === 0) return;
@@ -12140,6 +12333,7 @@ function AppInner() {
     for (const w of pendingMilestoneWrites.current) {
       const kidDbId = setupChildren.find(c => c.name === w.kidName)?.id;
       if (kidDbId) {
+        noteLocalWrite();   // milestones write is ours — skip our household-sync echo
         saveMilestoneToDb({ kidId: kidDbId, milestoneId: w.milestoneId }).catch(e => logDbError('db.milestone.save.retry', e));
       } else {
         stillPending.push(w);
@@ -12160,6 +12354,7 @@ function AppInner() {
   const pendingTrophyWrites = useRef<PendingTrophyWrite[]>([]);
 
   const writeTrophyToDb = useCallback((w: PendingTrophyWrite, kidDbId: string) => {
+    noteLocalWrite();   // boss_captures / collectibles write is ours — skip our household-sync echo
     if (w.kind === 'boss') {
       // bossName is fixed game content (from BOSSES), not kid PII — safe to log.
       log('boss.capture', { kidId: kidDbId, bossName: w.bossName, xpEarned: w.xpEarned, coinsEarned: w.coinsEarned, completionPct: w.completionPct });
@@ -12393,7 +12588,7 @@ function AppInner() {
     if (kidDbId) {
       ensureChoreInDb(id).then(async realId => {
         if (!realId) return;
-        const awarded = await approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: typeof chore.icon === 'string' ? chore.icon : '✅' });
+        const awarded = await approveChoreCompletion({ choreId: realId, kidId: kidDbId, earnedCents, choreName: chore.name, kidName, icon: serializeChoreIcon(chore.icon) });
         if (!awarded) logWarn('chore.approve.no_completion_row', { choreId: realId, kidId: kidDbId });
       }).catch(e => logDbError('db.chore.approve', e));
     }
@@ -12479,6 +12674,7 @@ function AppInner() {
   }, [managedChores, setupChildren, ensureChoreInDb, checkMilestone]);
 
   const confirmPayout = useCallback((kidName: string) => {
+    noteLocalWrite();   // payouts + kids writes below are ours — skip our household-sync echo
     const amount = kidCoins[kidName] ?? 0;
     // Capture the per-week breakdown BEFORE logging this payout — the new payout
     // entry would otherwise move the "unpaid since" boundary and zero out the weeks.
@@ -12532,19 +12728,19 @@ function AppInner() {
     return 'Common';
   };
 
-    const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number, completionPctOverride?: number, bossOverride?: Boss, remainingBossHp?: number) => {
+    const handleBattleEnd = useCallback((result: 'captured' | 'got-away', shardsUsed: number, completionPctOverride?: number, bossOverride?: Boss, _remainingBossHp?: number) => {
+    noteLocalWrite();   // kid_boss_result + kids writes below are ours — skip our household-sync echo
     const boss = bossOverride ?? activeKidBoss;
     log('battle.end', { result, kidId: getKidDbId(currentKidName), shardsUsed, bossName: boss?.name });
-    let coinsEarned = 0;
-    if (result === 'captured' && battleCoinBonusEnabled) {
-      coinsEarned = Math.round(baseRateCents(baseRate) * battleCoinBonusMultiplier);
-      addKidCoins(currentKidName, coinsEarned);
-      setBonusCoins(coinsEarned);
-    } else {
-      setBonusCoins(0);
-    }
+    // Capture coin bonus (if the parent enabled it). The DB credit is owned by the
+    // resolve_kid_boss RPC (single-grant per kid/week); here we only compute it and
+    // do an optimistic LOCAL bump once the RPC confirms this is the first resolution.
+    const coinsEarned = (result === 'captured' && battleCoinBonusEnabled)
+      ? Math.round(baseRateCents(baseRate) * battleCoinBonusMultiplier)
+      : 0;
+    setBonusCoins(coinsEarned);
     const xpSnapshot = weeklyXp;
-    // Chore completion % — drives the chest tier and the weekly shard grant.
+    // Chore completion % — drives the chest tier.
     let pct: number;
     if (completionPctOverride !== undefined) {
       pct = completionPctOverride;
@@ -12554,115 +12750,93 @@ function AppInner() {
       const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
       pct = weeklyCompletion(myChores, currentKidName, kidJoinDates[currentKidName]).pct;
     }
+    // Per-child SINGLE RESOLUTION: each kid's battle is one-and-done. Their boss
+    // bar always starts full (no shared HP, no carry between sessions), so the
+    // result is just the outcome — captured or got-away — locked for the week.
     setKidMonster(currentKidName, s => {
       // Bank unspent shards. Shards now come ONLY from doing chores (the random
-      // per-chore drop), so the bank is just what's left after spending — no
-      // weekly completion grant is added here.
+      // per-chore drop), so the bank is just what's left after spending.
       const entryShards = Math.min(SHARD_CAP, s.shards);
       return {
         ...s,
         battleResult: result,
-        lockedBossName: null,       // the shared bar now lives on the household, not the kid
+        lockedBossName: null,       // identity is household-level, not kid-locked
         weeklyXp: 0,
         shards: Math.max(0, entryShards - shardsUsed),
-        weeklyShardsClaimed: true,
         // Consecutive-win counter for the Undefeated milestone: bump on capture,
         // reset on escape.
         battleWinStreak: result === 'captured' ? (s.battleWinStreak ?? 0) + 1 : 0,
       };
     });
-    // The battle consumes the week's power (weeklyXp) and hands out rewards, but it
-    // does NOT reset the chore board — Sunday is still part of the current week, so
-    // chores completed that day stay done. The chore board rolls over only at the
-    // real week boundary, handled by the weekly reset effect.
+    // The battle consumes the week's power (weeklyXp) but does NOT reset the chore
+    // board — Sunday is still part of the current week. The board rolls over only
+    // at the real week boundary, handled by the weekly reset effect.
 
     const now = new Date();
     const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
     const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
     const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const weekLabel = `${fmt(weekStart)} – ${fmt(weekEnd)}`;
+    const mondayKey = getWeekMondayKey(debugDayOffset);
+    const kidId = getKidDbId(currentKidName);
+
+    // Reflect the outcome on the dashboard status map right away.
+    setKidBossStatus(prev => ({ ...prev, [currentKidName]: result }));
 
     if (result === 'got-away') {
-      // This kid chipped the SHARED bar but didn't empty it. Lower the family's
-      // HP and record them as a participant (with the completion % they fought
-      // at) so they're owed a chest when the bar finally drops to zero. No chest
-      // yet — they ran. `remainingBossHp` is on the kid's own tier-scaled bar, so
-      // store it as a tier-independent fraction.
-      const newHpPct = boss.hp > 0
-        ? Math.max(0, Math.min(1, (remainingBossHp ?? boss.hp) / boss.hp))
-        : 0;
-      setHouseholdBoss(prev => {
-        const others = prev.participants.filter(p => p.name !== currentKidName);
-        return { ...prev, hpPct: newHpPct, participants: [...others, { name: currentKidName, completionPct: pct, xpSnapshot }] };
-      });
+      // He escaped — no reward, no carry. A fresh boss shows up next week. Record
+      // the outcome so the kid can't re-fight this week (idempotent per kid/week).
+      if (kidId) {
+        resolveKidBoss({ kidId, weekStart: mondayKey, bossName: boss.name, result, completionPct: pct, coins: 0 }).catch(() => {});
+      }
       setScreen('result');
       return;
     }
 
-    // result === 'captured' → this kid emptied the SHARED bar, so the FAMILY
-    // captures the boss. The finisher gets their chest now; every OTHER kid who
-    // wore him down this cycle is owed a co-op chest (sized to their own
-    // completion %), shown the next time they open their profile.
-    setCoopWin({ familyCaptured: true, fightsLeft: 0, totalFighters: householdKidNames.length, bossName: boss.name });
+    // result === 'captured' → this kid captured THEIR own boss. Show the chest
+    // immediately, but grant the durable rewards (coins + relic + trophy) only
+    // when the DB confirms this is the FIRST resolution for (kid, week), so a
+    // retry / second device can't double-pay (the MON-92 double-credit class).
+    setCapturedBossName(boss.name);
+    setChorePctAtBattle(pct);
+    const tier = tierFromPct(pct);
+    setChestTier(tier);
+    setChestCollectible(pickForTier(tier));
+    setScreen('chestReveal');
 
-    const owed = householdBoss.participants.filter(p => householdKidNames.includes(p.name) && p.name !== currentKidName);
-    for (const p of owed) {
-      const pBoss  = bossForKid(householdIdentity, (kidMonsterState[p.name] ?? DEFAULT_KID_MONSTER_STATE).monsterIdx);
-      const pCoins = battleCoinBonusEnabled ? Math.round(baseRateCents(baseRate) * battleCoinBonusMultiplier) : 0;
-      if (pCoins > 0) addKidCoins(p.name, pCoins);
-      checkMilestone('boss-slayer', p.name);
-      saveBossCapture(p.name, {
-        id:            `${Date.now()}-${boss.name}-${p.name}`,
+    const grantRewards = () => {
+      if (coinsEarned > 0) addKidCoins(currentKidName, coinsEarned, { persist: false }); // DB credit owned by the RPC
+      // Defer these toasts until the chest/relic reveal is finished (see pendingChestToast).
+      checkMilestone('boss-slayer', currentKidName, { defer: true });
+      // Undefeated — 4 captures in a row with no escape. Compute the post-win
+      // streak from the pre-battle value (the setKidMonster above hasn't committed).
+      const winStreak = ((kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).battleWinStreak ?? 0) + 1;
+      if (winStreak >= 4) checkMilestone('kid-undefeated', currentKidName, { defer: true });
+      saveBossCapture(currentKidName, {
+        id:            `${Date.now()}-${boss.name}`,
         bossName:      boss.name,
         capturedAt:    now.toISOString(),
         weekLabel,
         weakness:      boss.counterChore,
         threat:        boss.threat,
-        completionPct: p.completionPct,
-        coinsEarned:   pCoins,
-        xpEarned:      p.xpSnapshot,
+        completionPct: pct,
+        coinsEarned,
+        xpEarned:      xpSnapshot,
       }).catch(() => {});
-      queueOrWriteTrophy({ kind: 'boss', kidName: p.name, bossName: boss.name, xpEarned: p.xpSnapshot, coinsEarned: pCoins, completionPct: p.completionPct });
-      setKidMonster(p.name, s => ({
-        ...s,
-        pendingCoopChest: { bossName: boss.name, weakness: boss.counterChore, threat: boss.threat, completionPct: p.completionPct, xpEarned: p.xpSnapshot, coinsEarned: pCoins },
-      }));
+      // Durable Supabase write — queued + retried if the kid row id isn't ready.
+      queueOrWriteTrophy({ kind: 'boss', kidName: currentKidName, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned, completionPct: pct });
+    };
+
+    if (kidId) {
+      resolveKidBoss({ kidId, weekStart: mondayKey, bossName: boss.name, result, completionPct: pct, coins: coinsEarned })
+        .then(({ first }) => { if (first) grantRewards(); })
+        .catch(() => {});
+    } else {
+      // No DB id yet (rare cold-start race): grant locally so the kid isn't
+      // shortchanged; queueOrWriteTrophy already retries the durable write.
+      grantRewards();
     }
-
-    // Rotate the family to a fresh, full-HP boss and clear the participant ledger.
-    setHouseholdBoss(prev => {
-      const next = pickHouseholdBoss(householdTier, debugDayOffset, prev.bossName || boss.name);
-      return { bossName: next.name, hpPct: 1, participants: [] };
-    });
-
-    // The finisher's own chest (existing flow).
-    setChorePctAtBattle(pct);
-    const t = tierFromPct(pct);
-    setChestTier(t);
-    setChestCollectible(pickForTier(t));
-    checkMilestone('boss-slayer', currentKidName);
-    // Undefeated — 4 captures in a row with no escape. Compute the post-win
-    // streak from the pre-battle value (state update above hasn't committed yet).
-    const winStreak = ((kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE).battleWinStreak ?? 0) + 1;
-    if (winStreak >= 4) checkMilestone('kid-undefeated', currentKidName);
-
-    saveBossCapture(currentKidName, {
-      id:            `${Date.now()}-${boss.name}`,
-      bossName:      boss.name,
-      capturedAt:    now.toISOString(),
-      weekLabel,
-      weakness:      boss.counterChore,
-      threat:        boss.threat,
-      completionPct: pct,
-      coinsEarned,
-      xpEarned:      xpSnapshot,
-    }).catch(() => {});
-
-    // Also save to Supabase — queued + retried if the kid row id isn't ready (Gap 6).
-    queueOrWriteTrophy({ kind: 'boss', kidName: currentKidName, bossName: boss.name, xpEarned: xpSnapshot, coinsEarned, completionPct: pct });
-
-    setScreen('chestReveal');
-  }, [monsterIdx, activeKidBoss, householdBoss, householdIdentity, householdKidNames, householdTier, battleCoinBonusEnabled, battleCoinBonusMultiplier, baseRate, managedChores, weeklyXp, currentKidName, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone]);
+  }, [activeKidBoss, battleCoinBonusEnabled, battleCoinBonusMultiplier, baseRate, managedChores, weeklyXp, currentKidName, kidJoinDates, addKidCoins, debugDayOffset, kidMonsterState, checkMilestone, queueOrWriteTrophy]);
 
   const startBattle = useCallback(() => { log('battle.start', { kidId: getKidDbId(currentKidName) }); setScreen('boss-intro'); }, [currentKidName]);
 
@@ -12672,23 +12846,8 @@ function AppInner() {
   // backing out strands the user on a nav-less screen.
   const showTabBar = ['home', 'world', 'wallet', 'trophies', 'trophyRoom'].includes(screen);
 
-  // Deliver a co-op chest the family earned while this kid was away: when the
-  // bar was emptied by a sibling, this kid was owed a chest (sized to the
-  // completion % they fought at). Fire it the next time they're back on a base
-  // tab — never mid-battle — then clear the pending flag so it shows once.
-  useEffect(() => {
-    if (viewMode !== 'kid' || !currentKidName || !pendingCoopChest) return;
-    if (!['home', 'world', 'wallet', 'trophies'].includes(screen)) return;
-    const p = pendingCoopChest;
-    const tier = tierFromPct(p.completionPct);
-    setChorePctAtBattle(p.completionPct);
-    setChestTier(tier);
-    setChestCollectible(pickForTier(tier));
-    setBonusCoins(p.coinsEarned);
-    setCoopWin({ familyCaptured: true, fightsLeft: 0, totalFighters: householdKidNames.length, bossName: p.bossName });
-    setKidMonster(currentKidName, s => ({ ...s, pendingCoopChest: null }));
-    setScreen('chestReveal');
-  }, [viewMode, currentKidName, pendingCoopChest, screen]);
+  // (MON-84) The co-op "owed chest" delivery is gone in the per-child model:
+  // each kid captures their own boss, so nobody is ever owed a chest by a sibling.
 
   // MON-6 — commit the form advance. Called by HomeScreen once the in-place
   // moment's result modal is dismissed (we're already on the home screen, so no
@@ -12743,6 +12902,7 @@ function AppInner() {
     setParentScreen('editChore');
   };
   const saveChore = (chore: ManagedChore) => {
+    noteLocalWrite();   // chores write is ours — skip our household-sync echo
     let isNew = false;
     setManagedChores(prev => {
       const exists = prev.find(c => c.id === chore.id);
@@ -12767,6 +12927,7 @@ function AppInner() {
     }
   };
   const deleteChore = (id: string) => {
+    noteLocalWrite();   // chores delete is ours — skip our household-sync echo
     setManagedChores(prev => prev.filter(c => c.id !== id));
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
     if (!id.startsWith('_')) deleteChoreDb(id).catch(e => logDbError('db.chore.delete', e));
@@ -12774,7 +12935,7 @@ function AppInner() {
 
   const addGoal = useCallback((data: GoalData) => {
     const goal: SavedGoal = {
-      id: Date.now().toString(),
+      id: randomUUID(),   // uuid → primary key in the savings_goals table
       name: data.name,
       amount: data.amount,
       category: data.category,
@@ -12782,7 +12943,7 @@ function AppInner() {
       iconKey: data.iconKey,
       icon: goalIconSource(data.iconKey),
       savedCents: getKidCoins(currentKidName),   // credit whatever the kid has already earned
-      milestones: ['Keep it up!', 'Halfway there!', 'Almost done!', 'Goal unlocked!'],
+      milestones: DEFAULT_GOAL_MILESTONES,
       activityFeed: [],
     };
     setKidGoals(currentKidName, prev => [...prev, goal]);
@@ -12804,6 +12965,7 @@ function AppInner() {
   }, [parentPinEnabled, parentPin]);
 
   const saveParentPin = useCallback((pin: string) => {
+    noteLocalWrite();   // profiles write is ours — skip our household-sync echo
     setParentPin(pin);
     setParentPinEnabled(true);
     saveProfile({ parent_pin: pin, parent_pin_enabled: true }).catch(e => console.warn('[DB] saveParentPin error:', e));
@@ -12840,6 +13002,7 @@ function AppInner() {
   }, [appDataLoaded, applyPushRoute]);
 
   const disableParentPin = useCallback(() => {
+    noteLocalWrite();   // profiles write is ours — skip our household-sync echo
     setParentPin('');
     setParentPinEnabled(false);
     saveProfile({ parent_pin: null, parent_pin_enabled: false }).catch(e => console.warn('[DB] disableParentPin error:', e));
@@ -12902,6 +13065,7 @@ function AppInner() {
     const kidId = getKidDbId(kidName);
     if (!kidId) return null;
     try {
+      noteLocalWrite();   // kids write is ours — skip our household-sync echo
       const code = await rotatePairingCode(kidId);
       if (code) setSetupChildren(prev => prev.map(c => c.name === kidName ? { ...c, pairingCode: code } : c));
       return code;
@@ -13165,6 +13329,7 @@ function AppInner() {
               const welcomePayload = { monster_id: validId, monster_name: monsterName, kid_onboarding_done: true as const };
               const kidDbId = getKidDbId(currentKidName);
               if (kidDbId) {
+                noteLocalWrite();   // kids write is ours — skip our household-sync echo
                 updateKid(kidDbId, welcomePayload).catch(e => console.warn('[DB] updateKid (kidWelcome) error:', e));
               } else {
                 pendingKidWelcomeWrites.current[currentKidName] = welcomePayload;
@@ -13207,10 +13372,11 @@ function AppInner() {
           <>
             {screen === 'home'     && <ErrorBoundary key={`home-${currentKidName}`}><HomeScreen   key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} monsterName={effectiveMonsterName} xp={xp} coins={getKidCoins(currentKidName)} managedChores={managedChores} onCompleteManaged={submitManagedChore} currentKidName={currentKidName} onSwitchToParent={requestParentMode} onOpenDebug={openDebug} dbgMonsterSize={dbgMonsterSize} dbgMonsterY={dbgMonsterY} dbgPlatformSize={dbgPlatformSize} dbgPlatformY={dbgPlatformY} monsterImg={currentMonsterImg} platformImg={platformImg} platformAspect={platformAspect} baseRate={baseRate} parentRole={parentRole} requireApproval={requireApproval} debugDayOffset={debugDayOffset} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} onRenameMonster={(name: string) => {
                   setKidMonster(currentKidName, s => ({ ...s, selectedMonsterName: name }));
+                  noteLocalWrite();   // kids write is ours — skip our household-sync echo
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
                 }} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
-            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidJoinDate={kidJoinDates[currentKidName]} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} bossHpPct={householdHpPct} totalFighters={householdKidNames.length} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
+            {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidJoinDate={kidJoinDates[currentKidName]} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : activeKidBoss} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} /></ErrorBoundary>
             </Modal>
@@ -13222,7 +13388,7 @@ function AppInner() {
                   totalPower={totalPower} completionPct={dbgCompletionPct} shards={dbgShards} weaknessUnlocked={dbgWeaknessUnlocked}
                   guaranteedWin={dbgCompletionPct >= 100} onBattleEnd={(r, u, remainingHp) => { setDbgBattleActive(false); handleBattleEnd(r, u, dbgCompletionPct, BOSSES[dbgBossIdx], remainingHp); }}
                   bossOverride={BOSSES[dbgBossIdx]}
-                  initialBossHp={Math.round(householdHpPct * BOSSES[dbgBossIdx].hp)}
+                  initialBossHp={BOSSES[dbgBossIdx].hp}
                 />;
               }
               const myChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName));
@@ -13243,7 +13409,7 @@ function AppInner() {
                 totalPower={totalPower} completionPct={completionPct} shards={battleShards} weaknessUnlocked={weaknessUnlocked}
                 guaranteedWin={guaranteedWin} onBattleEnd={(r, u, remainingHp) => handleBattleEnd(r, u, undefined, undefined, remainingHp)}
                 bossOverride={currentBoss}
-                initialBossHp={Math.round(householdHpPct * currentBoss.hp)}
+                initialBossHp={currentBoss.hp}
               />;
             })()}</ErrorBoundary>}
             {screen === 'result'   && <ErrorBoundary key="result"><ResultScreen monsterIdx={monsterIdx} captured={battleResult === 'captured'} bonusCoins={bonusCoins} onDone={() => { setTab('home'); setScreen('home'); }} monsterImg={currentMonsterImg} bossName={householdIdentity.name} /></ErrorBoundary>}
@@ -13258,10 +13424,7 @@ function AppInner() {
                   kidName={currentKidName}
                   kidDbId={getKidDbId(currentKidName)}
                   onQueueDbWrite={(kidName, collectibleId, rarity) => queueOrWriteTrophy({ kind: 'collectible', kidName, collectibleId, rarity })}
-                  bossName={coopWin?.bossName}
-                  coopFamilyCaptured={coopWin?.familyCaptured}
-                  coopFightsLeft={coopWin?.fightsLeft}
-                  coopTotalFighters={coopWin?.totalFighters}
+                  bossName={capturedBossName ?? undefined}
                 />
               </ErrorBoundary>
             )}
@@ -13334,14 +13497,14 @@ function AppInner() {
               </TouchableOpacity>
             </View>
 
-            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} kidJoinDates={kidJoinDates} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} householdBossHpPct={householdHpPct} householdTotalFighters={householdKidNames.length} /></ErrorBoundary>}
+            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} kidJoinDates={kidJoinDates} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} kidBossStatus={kidBossStatus} /></ErrorBoundary>}
             {parentScreen === 'parentPayout' && <ErrorBoundary key="parentPayout"><ParentPayoutScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} payoutLog={payoutLog} onConfirm={confirmPayout} onBack={goBack} /></ErrorBoundary>}
             {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
             {parentScreen === 'choreLibrary' && <ErrorBoundary key="choreLibrary"><ChoreLibraryScreen chores={managedChores} onBack={goBack} onAdd={() => { setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore'); }} onEdit={(c) => { setPrevParentScreen('choreLibrary'); openEditChore(c); }} onDelete={deleteChore} baseRate={baseRate} /></ErrorBoundary>}
             {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} /></ErrorBoundary>}
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
+            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} managedChores={managedChores} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
             {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} onRotateCode={handleRotateCode} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx, pairingCode: c.pairingCode }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'kidMilestones' && <ErrorBoundary key="kidMilestones"><ParentKidMilestonesScreen kidProfiles={setupChildren.map(c => ({ name: c.name, avatarIdx: c.avatarIdx }))} onBack={goBack} /></ErrorBoundary>}
@@ -13620,7 +13783,7 @@ function AppInner() {
                       const dt = tierFromPct(dbgCompletionPct);
                       setChestTier(dt);
                       setChestCollectible(pickForTier(dt));
-                      setCoopWin(null); // debug chest: no co-op banner
+                      setCapturedBossName(null); // debug chest: no boss banner
                       setScreen('chestReveal');
                       setDebugOpen(false);
                     }}

@@ -36,12 +36,8 @@ export interface ChestRevealProps {
   /** Fallback when kidDbId isn't resolved yet: hand the DB write up to be
    *  queued + retried once the kid row id is available (Gap 6). */
   onQueueDbWrite?: (kidName: string, collectibleId: string, rarity: string) => void;
-  // Cooperative boss outcome (MON-84). Shown as a banner when the household has
-  // 2+ kids: either "you wore him down, N left" or "the family captured him!".
+  // The boss this kid just captured (MON-84). Shown as a personal capture banner.
   bossName?: string;
-  coopFamilyCaptured?: boolean;
-  coopFightsLeft?: number;
-  coopTotalFighters?: number;
 }
 
 // ─── Chest frame sequences ────────────────────────────────────────────────────
@@ -146,17 +142,12 @@ function TierMeter({ activeTier }: { activeTier: ChestTier }) {
 
 // ─── ChestReveal component ────────────────────────────────────────────────────
 
-export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidName, kidDbId, onQueueDbWrite, bossName, coopFamilyCaptured, coopFightsLeft = 0, coopTotalFighters = 1 }: ChestRevealProps) {
-  // Cooperative "wearing him down" banner — only meaningful in a 2+ kid household.
-  const showCoop  = coopTotalFighters > 1 && !!bossName;
-  const coopTitle = coopFamilyCaptured
-    ? `🎉 The family captured ${bossName}!`
-    : `💥 You staggered ${bossName}!`;
-  const coopSub   = coopFamilyCaptured
-    ? 'You all wore him down — he’s in the collection.'
-    : coopFightsLeft <= 1
-      ? 'One more fight and the family captures him!'
-      : `${coopFightsLeft} more fights and the family captures him!`;
+export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDone, kidName, kidDbId, onQueueDbWrite, bossName }: ChestRevealProps) {
+  // Per-child capture banner (MON-84): each kid captures their OWN boss, so this
+  // is a personal win — no shared/family language.
+  const showCoop  = !!bossName;
+  const coopTitle = `🎉 You captured ${bossName}!`;
+  const coopSub   = 'He’s in your collection!';
 
   const [phase, setPhase]       = useState<Phase>('preOpen');
   const [tapCount, setTapCount] = useState(0);
@@ -354,9 +345,9 @@ export function ChestReveal({ tier, completionPct, collectible, weekLabel, onDon
       {/* ── Collectible card ── */}
       {phase === 'collectible' && (
         <View style={styles.collectibleArea}>
-          {/* Cooperative boss outcome (MON-84) */}
+          {/* Per-child boss capture (MON-84) */}
           {showCoop && (
-            <Animated.View style={[styles.coopBanner, coopFamilyCaptured ? styles.coopBannerWin : styles.coopBannerStagger, { opacity: cardOpacity }]}>
+            <Animated.View style={[styles.coopBanner, styles.coopBannerWin, { opacity: cardOpacity }]}>
               <Text style={styles.coopTitle}>{coopTitle}</Text>
               <Text style={styles.coopSub}>{coopSub}</Text>
             </Animated.View>
