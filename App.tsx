@@ -6092,7 +6092,7 @@ function MoneyScreen({
         <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 4 }} numberOfLines={1}>
           {kid.name}
         </Text>
-        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>
+        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4, textAlign: 'center' }}>
           This Week
         </Text>
         {/* Earned is neutral ink — green is reserved for the settled/paid state
@@ -8291,7 +8291,7 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
               borderRadius: 999, borderWidth: 2, borderColor: '#1A1A1A',
               paddingHorizontal: 16, paddingVertical: 8,
             }}>
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: active ? '#FFFFFF' : '#1A1A1A' }}>{name}</Text>
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), lineHeight: scale(18), color: active ? '#FFFFFF' : '#1A1A1A' }}>{name}</Text>
             </TouchableOpacity>
           );
         })}
@@ -13037,14 +13037,13 @@ function AppInner() {
 
   // Avatar index for the currently active kid (0 = fallback)
   const currentKidAvatarIdx = setupChildren.find(c => c.name === currentKidName)?.avatarIdx ?? 0;
-  // Profiles shown in the kid-facing profile switcher. On a kid-paired device the
-  // switcher is locked to that one kid so the device can't hop to siblings; on a
-  // shared device it lists every kid (MON-85 Phase 2). Parent screens keep using
-  // the full setupChildren list.
-  const kidSwitcherProfiles = (pairedKidName
-    ? setupChildren.filter(c => c.name === pairedKidName)
-    : setupChildren
-  ).map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }));
+  // Profiles shown in the kid-facing profile switcher — every kid on the account,
+  // on both shared and kid-paired devices. Switching kids here (switchToKid) only
+  // changes currentKidName/viewMode; it never touches the device's persisted
+  // pairedKidName/AsyncStorage pairing lock, so a paired device still boots back
+  // into its originally paired kid on relaunch.
+  const kidSwitcherProfiles = setupChildren
+    .map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }));
   // Cash bonus paid on a boss win: a fraction of the base chore rate (in coins =
   // cents). 0 when the bonus is disabled. Shown as the battle "coins" stake.
   const battleBonusCoins = battleCoinBonusEnabled ? Math.round(baseRateCents(baseRate) * battleCoinBonusMultiplier) : 0;
