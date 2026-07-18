@@ -13,6 +13,7 @@ import { SafeAreaView, SafeAreaProvider, useSafeAreaInsets } from 'react-native-
 import Svg, { Ellipse, Circle, Path, Polygon, Line, Defs, LinearGradient as SvgLinearGradient, RadialGradient, Stop } from 'react-native-svg';
 import { EvolutionFX } from './src/components/EvolutionFX';
 import { ChestReveal, type ChestTier } from './src/components/ChestReveal';
+import { ChoreSuccessScreen } from './src/components/ChoreSuccessScreen';
 import { pickForTier, COLLECTIBLES } from './src/data/collectibles';
 import { MascotBanner } from './src/components/MascotBanner';
 import { CreamBg } from './src/components/CreamBg';
@@ -1803,8 +1804,8 @@ function Header({ title, coins, showCoins = true }: { title: string; coins?: num
 }
 
 const NAV_TABS: { id: Tab; label: string; icon: ReturnType<typeof require> }[] = [
-  { id: 'home',     label: 'Monsters', icon: require('./assets/icons/navHome.png')   },
-  { id: 'world',    label: 'World',    icon: require('./assets/icons/navWorld.png') },
+  { id: 'home',     label: 'Monstir',  icon: require('./assets/icons/navHome.png')   },
+  { id: 'world',    label: 'Battle',   icon: require('./assets/icons/navEvents.png') },
   { id: 'wallet',   label: 'Wallet',   icon: require('./assets/icons/navWallet.png') },
   { id: 'trophies', label: 'Trophies', icon: require('./assets/icons/navTrophy.png') },
 ];
@@ -2145,10 +2146,19 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
 
 type XpPop = { id: number; label: string; y: Animated.Value; opacity: Animated.Value; kind: 'xp' | 'coin' };
 
-function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, nextMonsterImg, platformImg, platformAspect, baseRate, parentRole, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid, initialAvatarIdx, evolutionAutoOpen, onConsumeAutoOpen, onEvolveComplete, debugDayOffset = 0 }: {
+function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompleteManaged, currentKidName, onSwitchToParent, onOpenDebug, dbgMonsterSize, dbgMonsterY, dbgPlatformSize, dbgPlatformY, monsterImg, nextMonsterImg, platformImg, platformAspect, baseRate, parentRole, requireApproval, onNavigateToWallet, onRenameMonster, kidProfiles, onSwitchToKid, initialAvatarIdx, evolutionAutoOpen, onConsumeAutoOpen, onEvolveComplete, debugDayOffset = 0, pendingReward, onDismissChoreReward }: {
   monsterIdx: MonsterIdx; monsterName: string; xp: number; coins: number;
   managedChores: ManagedChore[]; onCompleteManaged: (id: string) => void;
   currentKidName: string;
+  // Full-screen "Quest complete!" celebration, set the instant a chore's
+  // reward is granted (auto-approve households only — a chore still awaiting
+  // parent approval has nothing to celebrate yet).
+  pendingReward: {
+    choreTitle: string; coinsGained: number; xpGained: number;
+    prevCoins: number; newCoins: number; prevXp: number; newXp: number;
+    xpNeeded: number; readyToEvolve: boolean;
+  } | null;
+  onDismissChoreReward: () => void;
   debugDayOffset?: number;
   onSwitchToParent: () => void;
   onOpenDebug: () => void;
@@ -2178,11 +2188,101 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
 }) {
   const monster    = MONSTERS[monsterIdx];
   const need       = monster.needed;
-  const pct        = Math.min(100, Math.round((xp / need) * 100));
+  // ── Displayed coins/xp (MON-96 "Quest complete!" celebration) ──────────────
+  // While a reward is pending (the full-screen celebration is up), the header
+  // pill + XP bar/text stay frozen at their PRE-award values — `coins`/`xp`
+  // already hold the new totals (the underlying state updates immediately so
+  // it persists/syncs right away). Once the kid dismisses the celebration,
+  // these animate from the frozen value up to the real one so the payout is
+  // felt on the home screen, not just claimed on the celebration card.
+  const animCoinRef = useRef(new Animated.Value(coins)).current;
+  const animXpRef   = useRef(new Animated.Value(xp)).current;
+  const [animCoins, setAnimCoins] = useState(coins);
+  const [animXp,    setAnimXp]    = useState(xp);
+  // True for the entire window from "reward granted" through "catch-up
+  // animation finished" — external coin/xp changes (wallet spend, realtime
+  // sync from another device) must not snap the display mid-celebration.
+  const suppressRewardSyncRef = useRef(false);
+  useEffect(() => { if (pendingReward) suppressRewardSyncRef.current = true; }, [pendingReward]);
+  useEffect(() => {
+    const cId = animCoinRef.addListener(({ value }) => setAnimCoins(Math.round(value)));
+    const xId = animXpRef.addListener(({ value }) => setAnimXp(Math.round(value)));
+    return () => { animCoinRef.removeListener(cId); animXpRef.removeListener(xId); };
+  }, []);
+  useEffect(() => {
+    if (!suppressRewardSyncRef.current) {
+      animCoinRef.setValue(coins);
+      animXpRef.setValue(xp);
+    }
+  }, [coins, xp]);
+
+  // ── Coins-fly-to-pill (MON-96) ──────────────────────────────────────────────
+  // Measured in the SAME coordinate space (both relative to homeRoot's own
+  // top-left) so a straight-line delta between them is meaningful: homeHeader
+  // is homeRoot's first non-absolute child, so the pill's onLayout position is
+  // already relative to homeRoot with no further offset math needed.
+  const [rootHeight, setRootHeight] = useState(0);
+  const [pillLayout, setPillLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const pillBounce = useRef(new Animated.Value(1)).current;
+  type FlyingCoin = { id: number; dx: Animated.Value; dy: Animated.Value; opacity: Animated.Value; scale: Animated.Value; startX: number; startY: number };
+  const [flyingCoins, setFlyingCoins] = useState<FlyingCoin[]>([]);
+  const flyCoinIdRef = useRef(0);
+
+  const launchFlyingCoins = useCallback(() => {
+    if (!pillLayout || !rootHeight) return;
+    const endX = pillLayout.x + pillLayout.width / 2;
+    const endY = pillLayout.y + pillLayout.height / 2;
+    const baseStartX = Dimensions.get('window').width / 2;
+    const baseStartY = rootHeight - 200; // mirrors homeXpPopLayer's anchor
+    const coinsToLaunch = [0, 1, 2].map(i => {
+      const id = ++flyCoinIdRef.current;
+      const startX = baseStartX + (i - 1) * 22;
+      const startY = baseStartY + (i === 1 ? -10 : 6);
+      return { id, dx: new Animated.Value(0), dy: new Animated.Value(0), opacity: new Animated.Value(1), scale: new Animated.Value(1), startX, startY };
+    });
+    setFlyingCoins(prev => [...prev, ...coinsToLaunch]);
+    coinsToLaunch.forEach((coin, i) => {
+      const delay = i * 90;
+      const dxTarget = (endX - coin.startX);
+      const dyTarget = (endY - coin.startY);
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.parallel([
+          Animated.timing(coin.dx, { toValue: dxTarget, duration: 560, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+          Animated.sequence([
+            Animated.timing(coin.dy, { toValue: dyTarget * 0.35 - 70, duration: 200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+            Animated.timing(coin.dy, { toValue: dyTarget, duration: 360, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+          ]),
+          // The dx/dy legs both ease IN (slow start, fast finish), so the coin
+          // covers most of the distance only in the last stretch — fading it
+          // starting at 400ms (71% of the flight's TIME) meant fading while
+          // still ~65% of the DISTANCE from the pill. Hold full opacity until
+          // it's actually close, then fade it out right as it lands.
+          Animated.sequence([
+            Animated.delay(520),
+            Animated.parallel([
+              Animated.timing(coin.opacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+              Animated.timing(coin.scale,   { toValue: 0.4, duration: 180, useNativeDriver: true }),
+            ]),
+          ]),
+        ]),
+      ]).start(() => {
+        setFlyingCoins(prev => prev.filter(c => c.id !== coin.id));
+        if (i === coinsToLaunch.length - 1) {
+          Animated.sequence([
+            Animated.spring(pillBounce, { toValue: 1.18, useNativeDriver: true, tension: 300, friction: 5 }),
+            Animated.spring(pillBounce, { toValue: 1,    useNativeDriver: true, tension: 200, friction: 8 }),
+          ]).start();
+        }
+      });
+    });
+  }, [pillLayout, rootHeight]);
+
+  const pct        = Math.min(100, Math.round((animXp / need) * 100));
   // MON-6 — evolution eligibility is derived live so the "Ready to evolve" pill
   // persists after a decline (the auto-open flag is one-shot; this is not).
   const nextM             = MONSTERS[Math.min(monsterIdx + 1, MONSTERS.length - 1)];
-  const evolutionEligible = monsterIdx < MONSTERS.length - 1 && xp >= need;
+  const evolutionEligible = monsterIdx < MONSTERS.length - 1 && animXp >= need;
   const allAssignedChores = managedChores.filter(c =>
     c.assignedTo.length === 0 || c.assignedTo.includes(currentKidName)
   );
@@ -2200,7 +2300,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   const dailyChores  = allAssignedChores.filter(c => !isDoneForNow(c));
   const remaining    = dailyChores.filter(c => { const s = getChoreStatus(c, currentKidName); return s === 'active' || s === 'rejected'; }).length;
   const allSubmitted = !allDailyDone && dailyChores.length > 0 && dailyChores.every(c => getChoreStatus(c, currentKidName) === 'pending');
-  const dollars    = (coins / 100).toFixed(2);
+  const dollars    = (animCoins / 100).toFixed(2);
   const [kidAgeRange,  setKidAgeRange]  = useState('Ages 7–9');
   const [showRename, setShowRename]     = useState(false);
   const [renameText, setRenameText]     = useState(monsterName);
@@ -2319,18 +2419,37 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   }, []);
 
   const handleCompleteManaged = useCallback((c: ManagedChore) => {
-    pulseMonster();
     if (requireApproval) {
+      // No reward yet — nothing to celebrate until a parent approves it.
+      pulseMonster();
       showPop('Submitted! ✋', 'xp');
-    } else {
-      showPop(`+${XP_BY_DIFFICULTY[c.difficulty]} XP`, 'xp');
-      showPop(`+${fmtCoins(Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[c.difficulty]))}`, 'coin', 120);
     }
+    // else: the reward lands immediately, so the full-screen "Quest complete!"
+    // celebration (driven by `pendingReward`) takes over instead of the small
+    // floating pops — see the ChoreSuccessScreen render below.
     onCompleteManaged(c.id);
-  }, [pulseMonster, showPop, onCompleteManaged, baseRate, requireApproval]);
+  }, [pulseMonster, showPop, onCompleteManaged, requireApproval]);
+
+  // Kid taps the celebration's fun-word button — dismiss it and let the coin
+  // pill / XP bar catch up to the real totals with a felt animation + a
+  // floating "+coins"/"+XP" pop, instead of the numbers just silently snapping.
+  const handleDismissChoreReward = useCallback(() => {
+    const reward = pendingReward;
+    onDismissChoreReward();
+    pulseMonster();
+    launchFlyingCoins();
+    Animated.parallel([
+      Animated.timing(animCoinRef, { toValue: coins, duration: 800, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(animXpRef,   { toValue: xp,    duration: 800, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+    ]).start(() => { suppressRewardSyncRef.current = false; });
+    if (reward) {
+      showPop(`+${reward.xpGained} XP`, 'xp');
+      showPop(`+${fmtCoins(reward.coinsGained)}`, 'coin', 120);
+    }
+  }, [coins, xp, onDismissChoreReward, pendingReward, pulseMonster, showPop, launchFlyingCoins]);
 
   return (
-    <View style={s.homeRoot}>
+    <View style={s.homeRoot} onLayout={(e) => setRootHeight(e.nativeEvent.layout.height)}>
       <Image
         source={require('./assets/appBG.png')}
         style={{ position: 'absolute', width: '100%', aspectRatio: 1024 / 1536, bottom: 0 }}
@@ -2351,10 +2470,15 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
             />
           </View>
         </View>
-        <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
-          <Text style={s.homeBalanceText}>${dollars}</Text>
-          <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
-        </TouchableOpacity>
+        <Animated.View
+          onLayout={(e) => setPillLayout(e.nativeEvent.layout)}
+          style={{ transform: [{ scale: pillBounce }] }}
+        >
+          <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
+            <Text style={s.homeBalanceText}>${dollars}</Text>
+            <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
+          </TouchableOpacity>
+        </Animated.View>
       </View>
 
       <ScrollView style={{ flex: 1, overflow: 'visible' }} showsVerticalScrollIndicator={false} contentContainerStyle={s.homeScroll}>
@@ -2403,7 +2527,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
                 width: xpWidthAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
               }]} />
             </View>
-            <Text style={s.homeXpText}>{Math.min(xp, need)}/{need}xp</Text>
+            <Text style={s.homeXpText}>{Math.min(animXp, need)}/{need}xp</Text>
           </View>
 
           {/* In-place evolution FX — fills the card exactly (no measured overlay) */}
@@ -2491,6 +2615,24 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         ))}
       </View>
 
+      {/* Coins flying up into the wallet pill after a chore reward is claimed */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {flyingCoins.map(coin => (
+          <Animated.View
+            key={coin.id}
+            style={{
+              position: 'absolute',
+              left: coin.startX - scale(11),
+              top: coin.startY - scale(11),
+              opacity: coin.opacity,
+              transform: [{ translateX: coin.dx }, { translateY: coin.dy }, { scale: coin.scale }],
+            }}
+          >
+            <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(22), height: scale(22) }} resizeMode="contain" />
+          </Animated.View>
+        ))}
+      </View>
+
       {/* Rename mascot modal */}
       <Modal visible={showRename} transparent animationType="fade" onRequestClose={() => setShowRename(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
@@ -2556,6 +2698,19 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
       </Modal>
 
       {toastMsg && <Toast key={toastMsg + Date.now()} message={toastMsg} />}
+
+      <ChoreSuccessScreen
+        visible={!!pendingReward}
+        choreTitle={pendingReward?.choreTitle ?? ''}
+        monsterImg={monsterImg}
+        monsterName={monsterName}
+        coinsGained={pendingReward?.coinsGained ?? 0}
+        xpGained={pendingReward?.xpGained ?? 0}
+        xpIntoLevel={pendingReward ? Math.min(pendingReward.newXp, pendingReward.xpNeeded) : 0}
+        xpNeeded={pendingReward?.xpNeeded ?? need}
+        readyToEvolve={pendingReward?.readyToEvolve ?? false}
+        onDone={handleDismissChoreReward}
+      />
     </View>
   );
 }
@@ -7040,6 +7195,69 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
   );
 }
 
+// ─── Approve-all confirmation sheet (MON-96) ───────────────────────────────────
+// Bulk-skips the per-chore review for every chore currently pending across
+// every kid. Mirrors ChoreReviewSheet's slide-up Modal chrome.
+
+function ApproveAllSheet({ visible, count, totalCents, kidsLabel, onCancel, onConfirm }: {
+  visible: boolean;
+  count: number;
+  totalCents: number;
+  kidsLabel: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { open, openSheet, closeSheet, scrimOpacity, sheetY } = useSheet(400);
+  const wasVisible = useRef(false);
+
+  useEffect(() => {
+    if (visible && !wasVisible.current) openSheet();
+    wasVisible.current = visible;
+  }, [visible]);
+
+  const totalLabel = (totalCents / 100).toFixed(2);
+
+  return (
+    <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet(onCancel)}>
+      <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', opacity: scrimOpacity }}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => closeSheet(onCancel)} />
+        <Animated.View
+          style={{ backgroundColor: '#FAF9F5', borderTopLeftRadius: 28, borderTopRightRadius: 28, transform: [{ translateY: sheetY }], padding: 20, paddingBottom: Platform.OS === 'ios' ? 40 : 24 }}
+          onStartShouldSetResponder={() => true}
+        >
+          <View style={{ width: 40, height: 4, backgroundColor: '#D0CEC8', borderRadius: 2, alignSelf: 'center', marginBottom: 20 }} />
+          <Text style={{ fontSize: scale(24), fontFamily: 'Inter_900Black', color: '#1A1A1A', marginBottom: 8 }}>Approve all {count} {count === 1 ? 'chore' : 'chores'}?</Text>
+          <Text style={{ fontSize: scale(15), fontFamily: 'Inter_500Medium', color: '#767676', marginBottom: 20, lineHeight: scale(21) }}>
+            This releases <Text style={{ color: '#3B8A3A', fontFamily: 'Inter_800ExtraBold' }}>${totalLabel}</Text>{kidsLabel ? ` to ${kidsLabel}` : ''} right away.
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FFF4D6', borderRadius: 14, borderWidth: 2, borderColor: '#E6A817', padding: 14, marginBottom: 20 }}>
+            <Text style={{ fontSize: scale(16) }}>⚠️</Text>
+            <Text style={{ flex: 1, fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: '#8A5D0A', lineHeight: scale(19) }}>
+              Heads up — you won't review each chore. Approving all skips the per-chore check and pays every submission in this list.
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <TouchableOpacity
+              style={{ flex: 1, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 100, paddingVertical: 16, alignItems: 'center', backgroundColor: '#FFFFFF' }}
+              onPress={() => closeSheet(onCancel)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: '#C5F215', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center' }}
+              onPress={() => closeSheet(onConfirm)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>✓ Approve all</Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+}
+
 // ─── Payout Bottom Sheet ──────────────────────────────────────────────────────
 // Confirms a payout for one child, surfacing a per-week breakdown of what's owed
 // (especially when multiple unpaid weeks have accumulated). Driven by a non-null
@@ -7149,7 +7367,7 @@ function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
 // ─── Parent Chores Screen (daily status view) ─────────────────────────────────
 
 
-function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, baseRate, onApprove, onApproveAll, onReject, kidProfiles }: {
+function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, baseRate, onApprove, onApproveAll, onApproveAllPending, onReject, onOpenSettings, kidProfiles }: {
   chores: ManagedChore[];
   history: ChoreHistoryEntry[];
   onBack: () => void;
@@ -7159,14 +7377,17 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
   baseRate: string;
   onApprove: (id: string, kidName: string) => void;
   onApproveAll: (id: string, kidName: string) => void;
+  onApproveAllPending: () => void;
   onReject: (id: string, note: string, kidName: string) => void;
+  onOpenSettings: () => void;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
 }) {
   const [activeTab, setActiveTab] = useState<'today' | 'history'>('today');
-  // "Today" tab kid filter — when there's more than one kid, pills separate them
-  // so the parent reviews one kid at a time instead of a long stacked list.
-  const [choreKidFilter, setChoreKidFilter] = useState<string | null>(null);
+  // Kid filter pills on the review queue — "All kids" plus one pill per kid
+  // who currently has something pending.
+  const [kidFilter, setKidFilter] = useState<string>('All kids');
   const [reviewingChore, setReviewingChore] = useState<{ chore: ManagedChore; kidName: string } | null>(null);
+  const [confirmApproveAll, setConfirmApproveAll] = useState(false);
   const [toastMsg, setToastMsg]     = useState<string | null>(null);
   const [toastBg, setToastBg]       = useState<string | undefined>(undefined);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -7181,62 +7402,66 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
     });
   };
 
-  // Group chores by child for "Today" tab
   const allKidNames = kidProfiles.map(k => k.name);
   const extraKids = chores.flatMap(c => c.assignedTo).filter(n => !allKidNames.includes(n));
   const kidNames = [...allKidNames, ...Array.from(new Set(extraKids))];
 
-  // Bucket a chore for the per-kid sort (MON-64 §3/§D): to-review → not-done → approved.
-  // Approved chores are NOT dropped — they recede to the bottom as subdued "done" cards
-  // (§6.3, the bridge to History). Filtering them out made "all done" fall through to the
-  // empty state and forced approvedCount to 0; both are bugs this restores.
-  const bucketRank = (c: ManagedChore, name: string) => {
-    if (getPendingCount(c, name) > 0) return 0;                 // to review
-    if (getChoreStatus(c, name) === 'approved') return 2;       // approved (receded)
-    return 1;                                                   // not done (active/rejected)
-  };
-  const choresByKid = kidNames.map(name => ({
-    name,
-    profile: kidProfiles.find(k => k.name === name),
-    chores: chores
-      .filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(name))
-      .sort((a, b) => bucketRank(a, name) - bucketRank(b, name)),
-  })).filter(g => g.chores.length > 0);
+  // ── Review queue (MON-96) ───────────────────────────────────────────────────
+  // Flatten every (chore, kid) pair currently awaiting review into one list —
+  // this list IS the queue. A chore the kid hasn't done yet, or one sitting
+  // rejected-with-a-note, isn't actionable BY THE PARENT, so it no longer shows
+  // here (the kid still sees it on their own board) — this screen is now purely
+  // "what needs my approval," matching the hero card's "NEEDS YOUR REVIEW" framing.
+  type PendingReview = { chore: ManagedChore; kidName: string; pending: number; submittedAt?: string; earnedCents: number };
+  const allPendingReviews: PendingReview[] = [];
+  chores.forEach(c => {
+    const eligible = c.assignedTo.length === 0 ? kidNames : c.assignedTo;
+    eligible.forEach(name => {
+      const pending = getPendingCount(c, name);
+      if (pending <= 0) return;
+      const earnedCents = c.childPendingCents?.[name]?.[0]
+        ?? Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[c.difficulty]);
+      allPendingReviews.push({ chore: c, kidName: name, pending, submittedAt: c.childSubmittedAt?.[name], earnedCents });
+    });
+  });
 
-  // If no kids yet, show unassigned chores under a generic group so they're visible
-  const unassignedGroup = kidNames.length === 0 && chores.length > 0
-    ? [{ name: 'Everyone', profile: undefined, chores: chores.filter(c => c.assignedTo.length === 0) }]
-    : [];
+  const kidsWithPending = Array.from(new Set(allPendingReviews.map(r => r.kidName)));
+  const kidsLabel = kidsWithPending.length === 0 ? ''
+    : kidsWithPending.length === 1 ? kidsWithPending[0]
+    : kidsWithPending.length === 2 ? kidsWithPending.join(' & ')
+    : `${kidsWithPending.slice(0, -1).join(', ')} & ${kidsWithPending[kidsWithPending.length - 1]}`;
 
-  // With more than one kid we show kid-filter pills and one kid's chores at a
-  // time. `selectedChoreKid` falls back to the first kid if the filter is unset
-  // or stale (e.g. the selected kid was removed).
-  const multiKid = choresByKid.length > 1;
-  const selectedChoreKid = choreKidFilter && choresByKid.some(g => g.name === choreKidFilter)
-    ? choreKidFilter
-    : choresByKid[0]?.name;
-  const todayGroups = multiKid
-    ? choresByKid.filter(g => g.name === selectedChoreKid)
-    : [...choresByKid, ...unassignedGroup];
+  // Sum every individual pending unit's snapshotted pay, not just count × one
+  // unit's rate — a backlogged chore can carry a different rate per day.
+  const totalPendingCents = allPendingReviews.reduce((sum, r) => {
+    const amounts = r.chore.childPendingCents?.[r.kidName];
+    return sum + (amounts && amounts.length > 0 ? amounts.reduce((a, b) => a + b, 0) : r.earnedCents * r.pending);
+  }, 0);
 
-  // Credit attribution (MON-94: "whoever did the chore gets the credit"). A shared
-  // first-to-finish chore's board-lock marks EVERY eligible kid 'approved', but the
-  // completion is credited to one DOER — the kid recorded in childCompletions, which
-  // reconstructBoardFromAudit rebuilds by bucketing the chore_completions audit by
-  // kid_id (so it's the completion's kid_id, not the clobberable blob). It counts as
-  // approved ONLY under that kid, so one completion is counted once, not once per
-  // household kid. Non-doers still SEE the chore (labeled "done by <doer>") via
-  // sharedChoreClaimant in the tile, but it is excluded from their count here.
-  const approvedForKid = (c: ManagedChore, name: string): boolean => {
-    if (getChoreStatus(c, name) !== 'approved') return false;
-    const claimant = sharedChoreClaimant(c, kidNames);
-    return !claimant || claimant === name;
-  };
-  // Stat counts: 'approved' is credit-attributed (each completion counted once, under
-  // its doer); to-review/to-do stay per-kid (pending is already keyed to the submitter).
-  const approvedCount = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => approvedForKid(c, g.name)).length, 0);
-  const pendingCount  = choresByKid.reduce((acc, g) => acc + g.chores.reduce((s, c) => s + getPendingCount(c, g.name), 0), 0);
-  const todoCount     = choresByKid.reduce((acc, g) => acc + g.chores.filter(c => { const s = getChoreStatus(c, g.name); return s === 'active' || s === 'rejected'; }).length, 0);
+  const filteredReviews = kidFilter === 'All kids' ? allPendingReviews : allPendingReviews.filter(r => r.kidName === kidFilter);
+
+  // Group the filtered queue by submission day, newest first — mirrors the
+  // History tab's day-grouping below, plus a "· JUL 14"-style date suffix.
+  const pendingGroups = (() => {
+    const groups: { headerLabel: string; dayLabel: string; date: string; items: PendingReview[] }[] = [];
+    const now = new Date();
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    const sorted = [...filteredReviews].sort((a, b) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''));
+    sorted.forEach(r => {
+      const d = r.submittedAt ? new Date(r.submittedAt) : now;
+      const dateKey = d.toDateString();
+      const dayLabel = dateKey === now.toDateString() ? 'Today' : dateKey === yesterday.toDateString() ? 'Yesterday' : d.toLocaleDateString('en-US', { weekday: 'long' });
+      const existing = groups.find(g => g.date === dateKey);
+      if (existing) existing.items.push(r);
+      else groups.push({
+        dayLabel,
+        headerLabel: `${dayLabel.toUpperCase()} · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}`,
+        date: dateKey,
+        items: [r],
+      });
+    });
+    return groups;
+  })();
 
   // History: group entries by day
   const historyGroups = (() => {
@@ -7272,214 +7497,140 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
     showLocalToast(`✕ Sent back to ${kidName}`, '#FCEBEB');
   };
 
+  const handleApproveAllPending = () => {
+    const n = allPendingReviews.length;
+    setConfirmApproveAll(false);
+    onApproveAllPending();
+    showLocalToast(`✓ Approved all ${n} ${n === 1 ? 'chore' : 'chores'}!`, '#E1F5EE');
+  };
+
   return (
     <CreamBg>
-      {/* Header — purple bg, Fredoka title, date pill */}
-
-      {/* Action-only hero + compact legend + tabs (MON-64 Rev 5 §4/§C). Supersedes
-          the old proportional funnel bar: week-progress lives on Home (MON-77), so
-          this hero speaks ONLY when the parent has an action and goes quiet otherwise.
-          NOTE: the §4.2 sage "N auto-approved today · spot-check" tier is deferred —
-          ChoreHistoryEntry carries no auto-vs-manual flag, so it can't be counted
-          without a data-model change (out of scope for the hero/legend pass). The
-          ladder degrades to amber-action → quiet-resting. */}
-      {(() => {
-        return (
-          <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 12 }}>
-            {/* Hero: amber action bar when there's something to review, else a calm line */}
-            {pendingCount > 0 ? (
-              <View style={{ backgroundColor: '#FBF1DC', borderRadius: 18, borderWidth: 3, borderColor: '#111111', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16, shadowColor: '#111111', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 1, shadowRadius: 0, elevation: 5 }}>
-                <View style={{ minWidth: 44, height: 44, borderRadius: 12, backgroundColor: '#E8A11C', borderWidth: 2.5, borderColor: '#111111', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}>
-                  <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), color: '#111111' }}>{pendingCount}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(18), color: '#111111' }}>{pendingCount} {pendingCount === 1 ? 'chore' : 'chores'} to review</Text>
-                  <Text style={{ fontFamily: 'Nunito_600SemiBold', fontSize: scale(12), color: '#7A5A18', marginTop: 4 }}>Tap any below to log what they earned.</Text>
-                </View>
-              </View>
-            ) : (
-              <View style={{ paddingVertical: 12, paddingHorizontal: 4 }}>
-                <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(16), color: '#767676' }}>✓ Nothing to approve right now.</Text>
-              </View>
-            )}
-
-            {/* Compact count legend (§C): a key to the cells below, not a progress bar.
-                Each square lights its status colour only when count > 0; To do stays a
-                neutral ink outline always (not-started is not a failure — warm floor). */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 16, marginBottom: 4, paddingHorizontal: 4 }}>
-              {[
-                { label: 'To do',     count: todoCount,    fill: 'transparent' },
-                { label: 'To review', count: pendingCount, fill: '#E8A11C' },
-                { label: 'Approved',  count: approvedCount, fill: '#D8F52F' },
-              ].map(s => (
-                <View key={s.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <View style={{ width: 14, height: 14, borderRadius: 4, borderWidth: 2, borderColor: '#111111', backgroundColor: s.count > 0 ? s.fill : 'transparent' }} />
-                  <Text style={{ fontSize: scale(12), fontFamily: 'Nunito_700Bold', color: '#111111' }}>{s.count} {s.label.toLowerCase()}</Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Tabs — Today | History */}
-            <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ECEAE4', alignItems: 'center', marginTop: 8 }}>
+      <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 12 }}>
+        {/* Hero: purple review-queue card when there's something to approve,
+            else a calm line (MON-96, supersedes the amber action bar). */}
+        {allPendingReviews.length > 0 ? (
+          <View style={{ backgroundColor: '#6B35F0', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, shadowColor: '#111111', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 1, shadowRadius: 0, elevation: 5 }}>
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), letterSpacing: 1.5, color: '#C5F215' }}>NEEDS YOUR REVIEW</Text>
+            <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(40), lineHeight: scale(44), color: '#FFFFFF', marginTop: 2 }}>
+              {allPendingReviews.length} {allPendingReviews.length === 1 ? 'chore' : 'chores'}
+            </Text>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(14), color: 'rgba(255,255,255,0.85)', marginTop: 6 }}>
+              ${(totalPendingCents / 100).toFixed(2)} ready to release{kidsLabel ? ` · ${kidsLabel}` : ''}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 }}>
               <TouchableOpacity
-                style={{ paddingVertical: 12, paddingHorizontal: 4, marginRight: 24, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'today' ? '#6B35F0' : 'transparent' }}
-                onPress={() => setActiveTab('today')}
-                activeOpacity={0.7}
+                onPress={() => setConfirmApproveAll(true)}
+                activeOpacity={0.85}
+                style={{ flex: 1, backgroundColor: '#C5F215', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 14, alignItems: 'center' }}
               >
-                <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'today' ? '#6B35F0' : '#ABABAB' }}>Today</Text>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#1A1A1A' }}>✓ Approve all</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={{ paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'history' ? '#6B35F0' : 'transparent' }}
-                onPress={() => setActiveTab('history')}
-                activeOpacity={0.7}
+                onPress={onOpenSettings}
+                activeOpacity={0.85}
+                style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}
               >
-                <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'history' ? '#6B35F0' : '#ABABAB' }}>History</Text>
+                <Text style={{ fontSize: scale(18) }}>⚙️</Text>
               </TouchableOpacity>
             </View>
           </View>
-        );
-      })()}
+        ) : (
+          <View style={{ paddingVertical: 12, paddingHorizontal: 4 }}>
+            <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(16), color: '#767676' }}>✓ Nothing to approve right now.</Text>
+          </View>
+        )}
+
+        {/* Tabs — Today | History */}
+        <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ECEAE4', alignItems: 'center', marginTop: 16 }}>
+          <TouchableOpacity
+            style={{ paddingVertical: 12, paddingHorizontal: 4, marginRight: 24, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'today' ? '#6B35F0' : 'transparent' }}
+            onPress={() => setActiveTab('today')}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'today' ? '#6B35F0' : '#ABABAB' }}>Today</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'history' ? '#6B35F0' : 'transparent' }}
+            onPress={() => setActiveTab('history')}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'history' ? '#6B35F0' : '#ABABAB' }}>History</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 }}>
         {activeTab === 'today' ? (
-          choresByKid.length === 0 && unassignedGroup.length === 0 ? (
+          chores.length === 0 ? (
             <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
               <Text style={{ fontSize: scale(28) }}>🧹</Text>
               <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: C.text }}>No chores assigned</Text>
               <Text style={{ fontSize: scale(12), color: C.muted, textAlign: 'center' }}>Go to Settings → Chore Library to add chores.</Text>
             </View>
+          ) : allPendingReviews.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
+              <Text style={{ fontSize: scale(28) }}>🎉</Text>
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: C.text }}>All caught up!</Text>
+              <Text style={{ fontSize: scale(12), color: C.muted, textAlign: 'center' }}>Nothing needs your review right now.</Text>
+            </View>
           ) : (
             <>
-              {/* Kid filter pills — separate kids instead of one long stacked list */}
-              {multiKid && (
+              {/* Kid filter pills — "All kids" plus one pill per kid with pending work */}
+              {kidsWithPending.length > 1 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 16 }}>
-                  {choresByKid.map((g, ci) => {
-                    const isActive = g.name === selectedChoreKid;
+                  {['All kids', ...kidsWithPending].map((name, i) => {
+                    const isActive = kidFilter === name;
                     return (
                       <TouchableOpacity
-                        key={`${g.name}-chip-${ci}`}
-                        onPress={() => setChoreKidFilter(g.name)}
+                        key={`${name}-chip-${i}`}
+                        onPress={() => setKidFilter(name)}
                         activeOpacity={0.75}
                         style={{ borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: isActive ? '#1A1A1A' : '#FFFFFF', borderWidth: 1.5, borderColor: '#1A1A1A' }}
                       >
-                        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: isActive ? '#FFFFFF' : '#1A1A1A' }} numberOfLines={1}>{g.name}</Text>
+                        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: isActive ? '#FFFFFF' : '#1A1A1A' }} numberOfLines={1}>{name}</Text>
                       </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
               )}
-              {todayGroups.map((group, gi) => {
-              const groupApproved = group.chores.filter(c => approvedForKid(c, group.name)).length;
-              const groupToReview = group.chores.reduce((s, c) => s + getPendingCount(c, group.name), 0);
-              return (
-                <View key={`${group.name}-${gi}`} style={{ marginBottom: 20 }}>
-                  {/* Child section header */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    {group.profile ? (
-                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: group.profile.avatarColor, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                        <Image source={getAvatarImage(group.profile.avatarIdx)} style={{ width: 32, height: 32 }} resizeMode="cover" />
-                      </View>
-                    ) : (
-                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EAE4FF', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ fontSize: scale(18) }}>🧒</Text>
-                      </View>
-                    )}
-                    <Text style={{ flex: 1, fontSize: scale(18), fontFamily: 'FredokaOne_400Regular', color: C.text }}>{group.name}</Text>
-                    {/* State-explicit counts, not "done" (kid-completed vs parent-approved
-                        are distinct axes — MON-64 Rev 2 / MON-75 chore state model). */}
-                    <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: C.muted }}>
-                      {groupApproved} approved · {groupToReview} to review
-                    </Text>
-                  </View>
 
-                  {/* Chore cards — gap matches the Chore Library list (10) */}
+              {pendingGroups.map(group => (
+                <View key={group.date} style={{ marginBottom: 20 }}>
+                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: C.muted, marginBottom: 8, letterSpacing: 0.6 }}>{group.headerLabel}</Text>
                   <View style={{ gap: 12 }}>
-                    {group.chores.map(chore => {
-                      const choreStatus = getChoreStatus(chore, group.name);
-                      const pending    = getPendingCount(chore, group.name); // today's + carried-over backlog
-                      const reviewable = pending > 0;
-                      const isApproved = choreStatus === 'approved' && !reviewable;
-                      const isRejected = choreStatus === 'rejected';
-                      const rejNote    = getChoreRejectionNote(chore, group.name);
-                      const hasNote    = isRejected && !!rejNote;
-                      const earnAmt    = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty] / 100).toFixed(2);
-                      // Shared first-to-finish chore credited to a DIFFERENT kid: show it
-                      // here as "done by <doer>" (so this kid knows it's handled) but it is
-                      // NOT this kid's credit — excluded from the count by approvedForKid.
-                      const claimedBy        = sharedChoreClaimant(chore, kidNames);
-                      const creditedToOther  = !!claimedBy && claimedBy !== group.name;
+                    {group.items.map(r => {
+                      const earnAmt = (r.earnedCents / 100).toFixed(2);
+                      const time = r.submittedAt ? new Date(r.submittedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+                      const whenLabel = group.dayLabel === 'Today' && time ? time : group.dayLabel;
                       return (
-                        <View key={chore.id} style={[s.homeQuestCard, reviewable && s.homeQuestCardPending, reviewable && { borderWidth: 2.5, borderColor: '#E6A817', backgroundColor: '#FBF1DC' }, { flexDirection: 'column', overflow: 'hidden', marginBottom: 0 }]}>
-                          {isApproved && <View style={s.homeQuestSweep} />}
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                            <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-                              <ChoreIcon icon={chore.icon} size={45} />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={[s.homeQuestTitle, isApproved && s.homeQuestTitleDone]}>{chore.name}</Text>
-                              {/* Adjudication facts, not the schedule (MON-64 Rev 2): who marked
-                                  it done + when (amber recency line), then the earn amount. */}
-                              {reviewable ? (
-                                <>
-                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#C8860A', marginTop: 4 }}>
-                                    {group.name} marked done{(() => { const t = chore.childSubmittedAt?.[group.name]; return t ? ` · ${choreAgo(t)}` : ''; })()}
-                                  </Text>
-                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginTop: 4 }}>${earnAmt}</Text>
-                                </>
-                              ) : creditedToOther ? (
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676', marginTop: 4 }}>{claimedBy} did this one</Text>
-                              ) : (
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676', marginTop: 4 }}>${earnAmt}</Text>
-                              )}
-                            </View>
-                            {reviewable ? (
-                              <TouchableOpacity
-                                style={{ borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 2.5, borderColor: '#111111', backgroundColor: '#7B3FF2', flexDirection: 'row', alignItems: 'center', gap: 8, ...SOLID_SHADOW_SM }}
-                                onPress={() => setReviewingChore({ chore, kidName: group.name })}
-                                activeOpacity={0.85}
-                              >
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>Review</Text>
-                                {pending > 1 && (
-                                  <View style={{ minWidth: scale(18), height: scale(18), borderRadius: scale(9), backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
-                                    <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>{pending}</Text>
-                                  </View>
-                                )}
-                              </TouchableOpacity>
-                            ) : isApproved ? (
-                              creditedToOther ? (
-                                <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#ABABAB', backgroundColor: '#FFFFFF' }}>
-                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676' }}>✓ Done</Text>
-                                </View>
-                              ) : (
-                                <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#27AE60', backgroundColor: '#FFFFFF' }}>
-                                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#27AE60' }}>✓ Approved</Text>
-                                </View>
-                              )
-                            ) : hasNote ? (
-                              <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#E6A817', backgroundColor: '#FFFFFF' }}>
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>💬 Note</Text>
-                              </View>
-                            ) : (
-                              <View style={{ borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4, borderWidth: 1.5, borderColor: '#ABABAB', backgroundColor: '#FFFFFF' }}>
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676' }}>Not done</Text>
+                        <View key={`${r.chore.id}-${r.kidName}`} style={[s.homeQuestCard, { marginBottom: 0, overflow: 'hidden' }]}>
+                          <View style={[s.homeQuestIcon, { backgroundColor: r.chore.bg }]}>
+                            <ChoreIcon icon={r.chore.icon} size={45} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.homeQuestTitle}>{r.chore.name}</Text>
+                            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676', marginTop: 4 }}>{r.kidName} · {whenLabel}</Text>
+                          </View>
+                          <Text style={{ fontSize: scale(14), fontFamily: 'Inter_800ExtraBold', color: '#3B8A3A' }}>+${earnAmt}</Text>
+                          <TouchableOpacity
+                            style={{ borderRadius: 100, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#6B35F0', flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                            onPress={() => setReviewingChore({ chore: r.chore, kidName: r.kidName })}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={{ fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>Review</Text>
+                            {r.pending > 1 && (
+                              <View style={{ minWidth: scale(18), height: scale(18), borderRadius: scale(9), backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
+                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#FFFFFF' }}>{r.pending}</Text>
                               </View>
                             )}
-                          </View>
-                          {hasNote && (
-                            <View style={{ backgroundColor: '#FAEEDA', marginTop: 8, borderRadius: 10, padding: 12, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#A0660A', marginBottom: 4 }}>Note left for {group.name}</Text>
-                                <Text style={{ fontSize: scale(12), color: '#7A4D0A', lineHeight: scale(18) }}>{rejNote}</Text>
-                              </View>
-                            </View>
-                          )}
+                          </TouchableOpacity>
                         </View>
                       );
                     })}
                   </View>
                 </View>
-              );
-            })}
+              ))}
             </>
           )
         ) : (
@@ -7524,6 +7675,16 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
         onApproveAll={(id) => reviewingChore && handleApproveAll(id, reviewingChore.kidName)}
         onReject={(id, note) => reviewingChore && handleReject(id, note, reviewingChore.kidName)}
         onClose={() => setReviewingChore(null)}
+      />
+
+      {/* Approve-all confirmation sheet */}
+      <ApproveAllSheet
+        visible={confirmApproveAll}
+        count={allPendingReviews.length}
+        totalCents={totalPendingCents}
+        kidsLabel={kidsLabel}
+        onCancel={() => setConfirmApproveAll(false)}
+        onConfirm={handleApproveAllPending}
       />
 
       {/* Toast */}
@@ -8008,7 +8169,17 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
 
 // ─── Parent Settings Screens ──────────────────────────────────────────────────
 
-type SettingsSubScreen = 'main' | 'kids' | 'battle' | 'account' | 'approval';
+// Plan & billing — presentational only for now, no real Apple IAP/StoreKit
+// wiring. `planCadence` lives as local state on ParentSettingsScreen (not
+// persisted) until a real subscription backend exists to hang it off of.
+const PLAN_YEARLY_PRICE     = 39.99;
+const PLAN_MONTHLY_PRICE    = 4.99;
+const PLAN_TRIAL_DAYS_TOTAL = 7;
+const PLAN_TRIAL_DAYS_LEFT  = 5;
+const PLAN_TRIAL_END_LABEL  = 'Jul 22';
+const planCadenceLabel = (c: 'yearly' | 'monthly') => c === 'yearly' ? 'Yearly' : 'Monthly';
+
+type SettingsSubScreen = 'main' | 'kids' | 'battle' | 'account' | 'approval' | 'planBilling';
 
 function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   iconBg: string; iconEmoji: string; title: string; subtitle?: string;
@@ -8055,17 +8226,38 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
   onSignOut: () => void;
 }) {
   const [sub, setSub] = useState<SettingsSubScreen>('main');
+  const [planCadence, setPlanCadence] = useState<'yearly' | 'monthly'>('yearly');
   const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
-  if (sub === 'kids')     return <SettingsKidsScreen     onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} onRotateCode={onRotateCode} kidProfiles={kidProfiles} />;
-  if (sub === 'battle')   return <SettingsBattleScreen   onBack={() => setSub('main')} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} />;
-  if (sub === 'account')  return <SettingsAccountScreen  onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} onSignOut={onSignOut} />;
-  if (sub === 'approval') return <SettingsApprovalScreen onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={kidProfiles} />;
+  if (sub === 'kids')        return <SettingsKidsScreen        onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} onRotateCode={onRotateCode} kidProfiles={kidProfiles} />;
+  if (sub === 'battle')      return <SettingsBattleScreen       onBack={() => setSub('main')} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} />;
+  if (sub === 'account')     return <SettingsAccountScreen      onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} onSignOut={onSignOut} />;
+  if (sub === 'approval')    return <SettingsApprovalScreen     onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={kidProfiles} />;
+  if (sub === 'planBilling') return <SettingsPlanBillingScreen  onBack={() => setSub('main')} planCadence={planCadence} onChangeCadence={setPlanCadence} />;
 
   return (
     <CreamBg>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        {/* Your plan */}
+        <Text style={ps.sectionLabel}>Your plan</Text>
+        <TouchableOpacity
+          onPress={() => setSub('planBilling')}
+          activeOpacity={0.8}
+          style={{ marginHorizontal: 16, marginBottom: 4, backgroundColor: '#EAE4FF', borderRadius: 16, borderWidth: 2, borderColor: '#6B35F0', padding: 16, ...SOLID_SHADOW }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#6B35F0', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: scale(20) }}>👑</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Monstir Premium</Text>
+              <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#6B35F0' }}>Free trial · {PLAN_TRIAL_DAYS_LEFT} days left</Text>
+            </View>
+          </View>
+          <ProgressBar value={PLAN_TRIAL_DAYS_TOTAL - PLAN_TRIAL_DAYS_LEFT} max={PLAN_TRIAL_DAYS_TOTAL} fillColor="#6B35F0" height={8} />
+        </TouchableOpacity>
+
         {/* Family */}
         <Text style={ps.sectionLabel}>Family</Text>
         <View style={ps.group}>
@@ -8824,6 +9016,212 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
           </Text>
         </View>
       </ScrollView>
+    </CreamBg>
+  );
+}
+
+// ─── Plan & billing / Change plan (MVP scaffolds) ──────────────────────────────
+// Presentational only — `planCadence` is passed down from ParentSettingsScreen's
+// local state, no real Apple IAP/StoreKit call happens on "confirm" yet.
+
+function SettingsPlanBillingScreen({ onBack, planCadence, onChangeCadence }: {
+  onBack: () => void;
+  planCadence: 'yearly' | 'monthly';
+  onChangeCadence: (c: 'yearly' | 'monthly') => void;
+}) {
+  const [sub, setSub] = useState<'main' | 'changePlan'>('main');
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  if (sub === 'changePlan') {
+    return (
+      <ChangePlanScreen
+        currentCadence={planCadence}
+        onBack={() => setSub('main')}
+        onConfirm={(c) => {
+          onChangeCadence(c);
+          setSub('main');
+          setToastMsg(`You're now on the ${planCadenceLabel(c)} plan`);
+        }}
+      />
+    );
+  }
+
+  const openAppStoreSubscriptions = () => {
+    Linking.openURL('itms-apps://apps.apple.com/account/subscriptions').catch(() => {
+      Linking.openURL('https://apps.apple.com/account/subscriptions').catch(() => {});
+    });
+  };
+
+  return (
+    <CreamBg>
+      <View style={p.screenHeader}>
+        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+          <Text style={p.backBtnText}>←</Text>
+        </TouchableOpacity>
+        <Text style={p.screenTitle}>Plan & billing</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        {/* Hero */}
+        <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 4, backgroundColor: '#6B35F0', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, ...SOLID_SHADOW }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Text style={{ fontSize: scale(22) }}>👑</Text>
+              <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#FFFFFF' }}>Monstir Premium</Text>
+            </View>
+            <View style={{ backgroundColor: '#C5F215', borderRadius: 100, paddingHorizontal: 12, paddingVertical: 4 }}>
+              <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{planCadenceLabel(planCadence)}</Text>
+            </View>
+          </View>
+          <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: 'rgba(255,255,255,0.9)', marginBottom: 12 }}>
+            Free trial · {PLAN_TRIAL_DAYS_LEFT} days left
+          </Text>
+          <ProgressBar value={PLAN_TRIAL_DAYS_TOTAL - PLAN_TRIAL_DAYS_LEFT} max={PLAN_TRIAL_DAYS_TOTAL} fillColor="#C5F215" height={10} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: 'rgba(255,255,255,0.85)' }}>Trial ends {PLAN_TRIAL_END_LABEL}</Text>
+            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: 'rgba(255,255,255,0.85)' }}>
+              then ${planCadence === 'yearly' ? `${PLAN_YEARLY_PRICE.toFixed(2)}/yr` : `${PLAN_MONTHLY_PRICE.toFixed(2)}/mo`}
+            </Text>
+          </View>
+        </View>
+
+        {/* Included */}
+        <Text style={ps.sectionLabel}>Included</Text>
+        <View style={ps.group}>
+          <View style={{ padding: 16, gap: 14 }}>
+            {['Unlimited kids & chores', 'Real-allowance ledger & payouts', 'Weekly boss battles & rewards'].map(item => (
+              <View key={item} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Text style={{ color: '#3B8A3A', fontSize: scale(16), fontFamily: 'Inter_900Black' }}>✓</Text>
+                <Text style={{ flex: 1, fontSize: scale(15), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' }}>{item}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={[ps.group, { marginTop: 20 }]}>
+          <SettingsRow iconBg="#EAE4FF" iconEmoji="🔄" title="Change plan" subtitle={planCadenceLabel(planCadence)} onPress={() => setSub('changePlan')} />
+          <View style={ps.divider} />
+          <SettingsRow iconBg="#1A1A1A" iconEmoji="🍎" title="Manage in App Store" subtitle="Billed via Apple ID" onPress={openAppStoreSubscriptions} />
+        </View>
+
+        <TouchableOpacity
+          onPress={() => setToastMsg("You're already on Monstir Premium")}
+          activeOpacity={0.7}
+          style={{ alignItems: 'center', paddingVertical: 20 }}
+        >
+          <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#6B35F0', textDecorationLine: 'underline' }}>Restore purchases</Text>
+        </TouchableOpacity>
+
+        <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#888888', textAlign: 'center', lineHeight: scale(18), paddingHorizontal: 32 }}>
+          Cancel anytime in the App Store at least 24 hrs before {PLAN_TRIAL_END_LABEL} and you won't be charged.
+        </Text>
+      </ScrollView>
+
+      {toastMsg && <Toast key={toastMsg + Date.now()} message={toastMsg} />}
+    </CreamBg>
+  );
+}
+
+function ChangePlanScreen({ onBack, currentCadence, onConfirm }: {
+  onBack: () => void;
+  currentCadence: 'yearly' | 'monthly';
+  onConfirm: (c: 'yearly' | 'monthly') => void;
+}) {
+  const [selected, setSelected] = useState<'yearly' | 'monthly'>(currentCadence);
+  const yearlyMonthlyEquiv = (PLAN_YEARLY_PRICE / 12).toFixed(2);
+  const monthlyAnnualized  = (PLAN_MONTHLY_PRICE * 12).toFixed(2);
+  const savingsPct = Math.round((1 - PLAN_YEARLY_PRICE / (PLAN_MONTHLY_PRICE * 12)) * 100);
+  const changed = selected !== currentCadence;
+  const isDowngradeToMonthly = changed && selected === 'monthly';
+
+  const renderPlanCard = ({ cadence, title, price, priceUnit, sub, badge }: {
+    cadence: 'yearly' | 'monthly'; title: string; price: string; priceUnit: string; sub: string; badge?: string;
+  }) => {
+    const isSelected = selected === cadence;
+    return (
+      <TouchableOpacity
+        onPress={() => setSelected(cadence)}
+        activeOpacity={0.8}
+        style={{
+          marginHorizontal: 16, marginTop: 16, position: 'relative',
+          flexDirection: 'row', alignItems: 'center', gap: 12,
+          backgroundColor: isSelected ? '#EAE4FF' : '#FFFFFF',
+          borderWidth: 2, borderColor: isSelected ? '#6B35F0' : '#1A1A1A',
+          borderRadius: 16, padding: 16, ...SOLID_SHADOW,
+        }}
+      >
+        {badge && (
+          <View style={{ position: 'absolute', top: -12, right: 16, backgroundColor: '#C5F215', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 10, paddingVertical: 3 }}>
+            <Text style={{ fontSize: scale(11), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{badge}</Text>
+          </View>
+        )}
+        <View style={{
+          width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+          borderWidth: 2, borderColor: isSelected ? '#6B35F0' : '#C7C5BF',
+          backgroundColor: isSelected ? '#6B35F0' : '#FFFFFF',
+        }}>
+          {isSelected && <Text style={{ color: '#FFFFFF', fontSize: scale(13), fontFamily: 'Inter_900Black' }}>✓</Text>}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>{title}</Text>
+          <Text style={{ fontSize: scale(13), fontFamily: 'Inter_600SemiBold', color: '#767676', marginTop: 2 }}>{sub}</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ fontSize: scale(20), fontFamily: 'Inter_900Black', color: '#6B35F0' }}>{price}</Text>
+          <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676' }}>{priceUnit}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <CreamBg>
+      <View style={p.screenHeader}>
+        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
+          <Text style={p.backBtnText}>←</Text>
+        </TouchableOpacity>
+        <Text style={p.screenTitle}>Change plan</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        <Text style={{ marginHorizontal: 16, marginTop: 16, fontSize: scale(14), fontFamily: 'Inter_500Medium', color: '#4A4A4A', lineHeight: scale(20) }}>
+          You're on the {planCadenceLabel(currentCadence).toLowerCase()} plan. Switches take effect at your next renewal.
+        </Text>
+
+        {renderPlanCard({
+          cadence: 'yearly',
+          title: 'Yearly',
+          sub: `$${PLAN_YEARLY_PRICE.toFixed(2)}/yr${currentCadence === 'yearly' ? ' · current plan' : ''}`,
+          price: `$${yearlyMonthlyEquiv}`,
+          priceUnit: '/mo',
+          badge: `SAVE ${savingsPct}%`,
+        })}
+        {renderPlanCard({
+          cadence: 'monthly',
+          title: 'Monthly',
+          sub: `Billed every month${currentCadence === 'monthly' ? ' · current plan' : ''}`,
+          price: `$${PLAN_MONTHLY_PRICE.toFixed(2)}`,
+          priceUnit: '/mo',
+        })}
+
+        {isDowngradeToMonthly && (
+          <View style={{ marginHorizontal: 16, marginTop: 20, backgroundColor: '#EAE4FF', borderRadius: 12, padding: 16 }}>
+            <Text style={{ fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#3D1FA3', lineHeight: scale(20) }}>
+              💡 Switching to monthly ends your {savingsPct}% yearly discount. You'd pay ${monthlyAnnualized} a year instead of ${PLAN_YEARLY_PRICE.toFixed(2)}.
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+
+      <View style={{ padding: 16 }}>
+        <Button
+          label={changed ? `Switch to ${planCadenceLabel(selected)}` : `Keep ${planCadenceLabel(currentCadence)} plan`}
+          disabled={!changed}
+          onPress={() => onConfirm(selected)}
+        />
+      </View>
     </CreamBg>
   );
 }
@@ -10733,6 +11131,19 @@ function AppInner() {
   const reward = rewardQueue[0] ?? null;
   const enqueueReward  = (p: RewardPopup) => setRewardQueue(q => [...q, p]);
   const dismissReward  = () => setRewardQueue(q => q.slice(1));
+
+  // Full-screen "Quest complete!" celebration — fires when a chore's reward is
+  // granted immediately (auto-approve households). Carries the exact amounts
+  // paid (including any streak bonus) so the screen never has to re-derive
+  // them, and `kidName` so a mid-celebration kid switch can't show it to the
+  // wrong sibling.
+  type ChoreReward = {
+    kidName: string; choreTitle: string; coinsGained: number; xpGained: number;
+    prevCoins: number; newCoins: number; prevXp: number; newXp: number;
+    xpNeeded: number; readyToEvolve: boolean;
+  };
+  const [pendingChoreReward, setPendingChoreReward] = useState<ChoreReward | null>(null);
+  const dismissChoreReward = () => setPendingChoreReward(null);
   const [battleCoinBonusEnabled,    setBattleCoinBonusEnabled]    = useState(false);
   // Fraction of the base chore rate paid on a boss win (0.25 = 25%). Was a
   // multiple of the boss's capture value; now a % of base rate (one model,
@@ -11186,8 +11597,20 @@ function AppInner() {
                 }
                 return c;
               });
+              // Name is only a fallback key for a LOCAL-ONLY chore (temp '_' id) whose
+              // ensureChoreInDb insert has since landed under a real UUID — reconnecting
+              // it to its now-upgraded DB row. It must never match an already-synced
+              // local chore (real UUID id) against a DIFFERENT db.id: two db chores that
+              // happen to share a name (e.g. an accidental duplicate) would otherwise both
+              // claim the same local record's childStatus/childPendingCount, making one
+              // real pending submission render as two identical "to review" tiles. usedLocalIds
+              // also stops a single local record from being claimed by more than one db chore.
+              const usedLocalIds = new Set<string>();
               const merged = mapped.map(db => {
-                const loc = local.find(l => l.id === db.id || l.name === db.name);
+                const loc = local.find(l =>
+                  !usedLocalIds.has(l.id) &&
+                  (l.id === db.id || (l.id.startsWith('_') && l.name === db.name)));
+                if (loc) usedLocalIds.add(loc.id);
                 if (!loc) return db;
                 return {
                   ...db,
@@ -12152,6 +12575,33 @@ function AppInner() {
         icon: chore.icon,
         bg: chore.bg,
       }, ...prev]);
+      // Snapshot the reward for the "Quest complete!" celebration — mirrors the
+      // streak-bonus math the setKidMonster updater below applies, computed here
+      // (synchronously, off the same pre-award snapshot) purely for display.
+      {
+        const kmNow = kidMonsterState[currentKidName] ?? DEFAULT_KID_MONSTER_STATE;
+        const isNewDay = kmNow.lastChoreDate !== today;
+        const newStreak = nextStreak(kmNow.currentStreak, kmNow.lastChoreDate, today);
+        const baseXp = XP_BY_DIFFICULTY[chore.difficulty];
+        let earnedXp = baseXp;
+        if (isNewDay && newStreak > 0 && newStreak % 7 === 0) earnedXp += 25;
+        else if (isNewDay && newStreak > 0 && newStreak % 3 === 0) earnedXp = Math.round(earnedXp * 1.1);
+        const prevCoins = getKidCoins(currentKidName);
+        const newXp = kmNow.xp + earnedXp;
+        const needed = MONSTERS[kmNow.monsterIdx].needed;
+        setPendingChoreReward({
+          kidName: currentKidName,
+          choreTitle: chore.name,
+          coinsGained: earnedCoins,
+          xpGained: earnedXp,
+          prevCoins,
+          newCoins: prevCoins + earnedCoins,
+          prevXp: kmNow.xp,
+          newXp,
+          xpNeeded: needed,
+          readyToEvolve: kmNow.monsterIdx < MONSTERS.length - 1 && newXp >= needed,
+        });
+      }
       setKidMonster(currentKidName, s => {
         const isNewDay = s.lastChoreDate !== today;
         const newStreak = nextStreak(s.currentStreak, s.lastChoreDate, today);
@@ -12200,7 +12650,7 @@ function AppInner() {
         }).catch(e => logDbError('db.chore.submit', e));
       }
     }
-  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, setupChildren, kidOnboardingDone, kidMonsterState, ensureChoreInDb, pairedKidName, enqueueReward, reduceSubmitUnit]);
+  }, [managedChores, baseRate, kidApprovalSettings, currentKidName, debugDayOffset, addKidCoins, getKidCoins, setupChildren, kidOnboardingDone, kidMonsterState, ensureChoreInDb, pairedKidName, enqueueReward, reduceSubmitUnit]);
 
   // ── Weekly reset (the chore board rolls over at the week boundary) ───────────
   // This is the ONLY place the chore board resets for a new week. It fires on the
@@ -12609,6 +13059,21 @@ function AppInner() {
     const n = getPendingCount(chore, kidName);
     for (let i = 0; i < n; i++) grantChoreApproval(id, kidName, i);
   }, [managedChores, grantChoreApproval]);
+
+  // MON-96 — "Approve all" hero action on the Chores screen: grants every
+  // pending unit across every chore and every kid in one shot (the household-
+  // wide bulk-skip; approveAllManagedChore above only covers one chore's
+  // backlog for one kid).
+  const approveAllPendingChores = useCallback(() => {
+    const kidNames = setupChildren.map(c => c.name);
+    managedChores.forEach(chore => {
+      const eligible = chore.assignedTo.length === 0 ? kidNames : chore.assignedTo;
+      eligible.forEach(kidName => {
+        const n = getPendingCount(chore, kidName);
+        for (let i = 0; i < n; i++) grantChoreApproval(chore.id, kidName, i);
+      });
+    });
+  }, [managedChores, setupChildren, grantChoreApproval]);
 
   const rejectManagedChore = useCallback((id: string, note: string, kidName: string) => {
     localChoreWriteRef.current = Date.now(); // suppress this device's own realtime echo
@@ -13374,7 +13839,7 @@ function AppInner() {
                   noteLocalWrite();   // kids write is ours — skip our household-sync echo
                   const kidDbId = getKidDbId(currentKidName);
                   if (kidDbId) updateKidStats(kidDbId, { monster_name: name }).catch(e => console.warn('[DB] rename monster error:', e));
-                }} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} /></ErrorBoundary>}
+                }} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} nextMonsterImg={nextMonsterImg} evolutionAutoOpen={pendingEvolution} onConsumeAutoOpen={() => setKidMonster(currentKidName, s => ({ ...s, pendingEvolution: false }))} onEvolveComplete={handleEvolveDone} pendingReward={pendingChoreReward && pendingChoreReward.kidName === currentKidName ? pendingChoreReward : null} onDismissChoreReward={dismissChoreReward} /></ErrorBoundary>}
             {screen === 'world'      && <ErrorBoundary key={`world-${currentKidName}`}><WorldScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} monsterIdx={monsterIdx} coins={getKidCoins(currentKidName)} done={done} xp={xp} weeklyXp={weeklyXp} managedChores={managedChores} onStartBattle={startBattle} onSwitchToParent={requestParentMode} onNavigateToWallet={() => { setTab('wallet'); setScreen('wallet'); }} monsterName={effectiveMonsterName} currentKidName={currentKidName} kidJoinDate={kidJoinDates[currentKidName]} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} currentBoss={activeKidBoss} debugDayOffset={debugDayOffset} weekApprovalDays={weekApprovalDays} parentRole={parentRole} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} battledThisWeek={battleResult !== null} /></ErrorBoundary>}
             <Modal visible={screen === 'boss-intro'} animationType="fade" statusBarTranslucent transparent={false}>
               <ErrorBoundary><BossIntroScreen monsterIdx={monsterIdx} onReady={() => setScreen('arena')} bossOverride={dbgBattleActive ? BOSSES[dbgBossIdx] : activeKidBoss} battleCoinBonusEnabled={battleCoinBonusEnabled} battleBonusCoins={battleBonusCoins} /></ErrorBoundary>
@@ -13498,7 +13963,7 @@ function AppInner() {
 
             {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} kidJoinDates={kidJoinDates} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} kidBossStatus={kidBossStatus} /></ErrorBoundary>}
             {parentScreen === 'parentPayout' && <ErrorBoundary key="parentPayout"><ParentPayoutScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} payoutLog={payoutLog} onConfirm={confirmPayout} onBack={goBack} /></ErrorBoundary>}
-            {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
+            {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onApproveAllPending={approveAllPendingChores} onReject={rejectManagedChore} onOpenSettings={() => { setPrevParentScreen(parentScreen); setParentScreen('settings'); }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
             {parentScreen === 'choreLibrary' && <ErrorBoundary key="choreLibrary"><ChoreLibraryScreen chores={managedChores} onBack={goBack} onAdd={() => { setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore'); }} onEdit={(c) => { setPrevParentScreen('choreLibrary'); openEditChore(c); }} onDelete={deleteChore} baseRate={baseRate} /></ErrorBoundary>}
             {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} /></ErrorBoundary>}
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
