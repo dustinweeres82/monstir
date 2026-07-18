@@ -77,6 +77,7 @@ import { supabase } from './src/lib/supabase';
 import { saveOnboardingSetup, loadProfile, loadKids, loadChores, loadWeekCompletions, loadChoreHistory, submitChoreCompletion, approveChoreCompletion, recordChoreApproval, rejectChoreCompletion, saveBossCaptureToDb, saveCollectibleToDb, savePayoutToDb, updateKidStats, incrementKidCoins, updateKid, renameKidInHistory, addKid, addChore, updateChore as updateChoreDb, deleteChore as deleteChoreDb, saveProfile, loadGoals, saveAppState, loadPayoutLog, saveMilestoneToDb, loadBossCaptures, loadCollectibles, loadMilestones, saveDisplayName, saveEmailAndPassword, rotatePairingCode, redeemPairingCode, loadNotificationPrefs, saveNotificationPrefs, getOrCreateHouseholdBoss, resolveKidBoss, loadKidBossResults, loadSavingsGoals, syncKidSavingsGoals, type SavingsGoalRow, type SavingsGoalWrite, type NotificationPrefs } from './src/lib/db';
 import { registerPushToken, addNotificationResponseListener, getInitialNotificationRoute, getPushPermission, type PushRoute } from './src/lib/push';
 import { initDebugLog, log, logWarn, logError, logDbError, flushNow } from './src/lib/debugLog';
+import { playCashRegister } from './src/lib/sfx';
 import { DebugTap } from './src/components/DebugTap';
 
 const APP_VERSION = Constants.expoConfig?.version ?? null;
@@ -5366,7 +5367,7 @@ function KidPayoutScreen({ amount, completedCount, weeks, battleWon, battleBonus
         {/* Collect button */}
         <TouchableOpacity
           style={{ backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 20, paddingHorizontal: 48, alignItems: 'center', ...SOLID_SHADOW, marginTop: 8 }}
-          onPress={onDismiss}
+          onPress={() => { playCashRegister(); onDismiss(); }}
           onPressIn={collectPI} onPressOut={collectPO}
           activeOpacity={1}
         >
@@ -11899,6 +11900,16 @@ function AppInner() {
   // RLS ("owner read": auth.uid()=parent_id) scopes events to this household.
   const setupChildrenRef = useRef(setupChildren);
   setupChildrenRef.current = setupChildren;
+  // Read inside the chore_completions realtime handler below to snapshot a kid's
+  // pre-award coins/xp for the cross-device "Quest complete!" celebration — that
+  // handler is set up once ([appDataLoaded, sessionUser] deps) so it can't close
+  // over live state directly.
+  const managedChoresRef = useRef(managedChores);
+  managedChoresRef.current = managedChores;
+  const kidMonsterStateRef = useRef(kidMonsterState);
+  kidMonsterStateRef.current = kidMonsterState;
+  const kidCoinsRef = useRef(kidCoins);
+  kidCoinsRef.current = kidCoins;
   const localChoreWriteRef = useRef(0);
   const localGoalWriteRef = useRef(0);
   // Any local write to a realtime-synced table (payout, boss, milestone,
@@ -11946,7 +11957,7 @@ function AppInner() {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'chore_completions', filter: `parent_id=eq.${userId}` },
           (payload) => {
-            const row = (payload.new ?? {}) as { chore_id?: string; kid_id?: string; status?: string };
+            const row = (payload.new ?? {}) as { chore_id?: string; kid_id?: string; status?: string; earned_cents?: number };
             if (payload.eventType === 'INSERT') {
               if (!row.chore_id || row.status !== 'pending') return;
               const kidName = setupChildrenRef.current.find(c => c.id === row.kid_id)?.name;
@@ -11962,6 +11973,44 @@ function AppInner() {
                 };
               }));
             } else if (payload.eventType === 'UPDATE') {
+              if (row.status === 'approved') {
+                // Cross-device "Quest complete!" celebration for approval-required
+                // kids: grantChoreApproval already shows this LOCALLY on whatever
+                // device the parent approved from, but that's frequently a
+                // different physical device than the kid's — this is the delivery
+                // path for the kid's own device. Skip if this event is just the
+                // echo of OUR OWN approval (already celebrated there + stamped
+                // localChoreWriteRef); XP is approximated from difficulty (no
+                // streak bonus — that's not carried on the row) since this is a
+                // display-only snapshot, not the source of truth for xp/coins
+                // (the debounced reload below applies the real, DB-authoritative
+                // totals right after).
+                const recentlyOurs = Date.now() - localChoreWriteRef.current < 3000;
+                const kidName = recentlyOurs ? undefined : setupChildrenRef.current.find(c => c.id === row.kid_id)?.name;
+                const chore = kidName ? managedChoresRef.current.find(c => c.id === row.chore_id) : undefined;
+                log('chore.reward.cross_device_check', { recentlyOurs, hasKidName: !!kidName, hasChore: !!chore, earnedCents: row.earned_cents });
+                if (kidName && chore && typeof row.earned_cents === 'number') {
+                  const kmNow = kidMonsterStateRef.current[kidName] ?? DEFAULT_KID_MONSTER_STATE;
+                  const earnedXp = XP_BY_DIFFICULTY[chore.difficulty];
+                  const prevCoins = kidCoinsRef.current[kidName] ?? 0;
+                  const newXpTotal = kmNow.xp + earnedXp;
+                  const neededXp = MONSTERS[kmNow.monsterIdx].needed;
+                  setPendingChoreReward({
+                    kidName,
+                    choreTitle: chore.name,
+                    coinsGained: row.earned_cents,
+                    xpGained: earnedXp,
+                    prevCoins,
+                    newCoins: prevCoins + row.earned_cents,
+                    prevXp: kmNow.xp,
+                    newXp: newXpTotal,
+                    xpNeeded: neededXp,
+                    readyToEvolve: kmNow.monsterIdx < MONSTERS.length - 1 && newXpTotal >= neededXp,
+                  });
+                  playCashRegister();
+                  log('chore.reward.cross_device_fire', { choreId: row.chore_id, kidId: row.kid_id, coinsGained: row.earned_cents, xpGained: earnedXp });
+                }
+              }
               if (row.status === 'approved' || row.status === 'rejected') scheduleHouseholdReload();
             }
           },
@@ -12601,6 +12650,7 @@ function AppInner() {
           xpNeeded: needed,
           readyToEvolve: kmNow.monsterIdx < MONSTERS.length - 1 && newXp >= needed,
         });
+        playCashRegister();
       }
       setKidMonster(currentKidName, s => {
         const isNewDay = s.lastChoreDate !== today;
@@ -12978,6 +13028,30 @@ function AppInner() {
       icon: chore.icon,
       bg: chore.bg,
     }, ...prev]);
+    // Same "Quest complete!" celebration the auto-approve path shows the instant
+    // a kid submits — approval-required households only credit coins/xp HERE (on
+    // the parent's approve tap), so this is the equivalent "money hit the wallet"
+    // moment for them. Snapshotted off kmAtClick (pre-award), mirroring the
+    // auto-approve block above; shows next time this kid's Home screen is active
+    // (pendingReward is gated to currentKidName there).
+    {
+      const prevCoins = getKidCoins(kidName);
+      const newXpTotal = kmAtClick.xp + earnedXp;
+      const neededXp = MONSTERS[kmAtClick.monsterIdx].needed;
+      setPendingChoreReward({
+        kidName,
+        choreTitle: chore.name,
+        coinsGained: earnedCoins,
+        xpGained: earnedXp,
+        prevCoins,
+        newCoins: prevCoins + earnedCoins,
+        prevXp: kmAtClick.xp,
+        newXp: newXpTotal,
+        xpNeeded: neededXp,
+        readyToEvolve: kmAtClick.monsterIdx < MONSTERS.length - 1 && newXpTotal >= neededXp,
+      });
+      playCashRegister();
+    }
     addKidCoins(kidName, earnedCoins, { persist: false });
     setKidMonster(kidName, s => {
       // The streak already advanced when the kid submitted, so approval only
@@ -13042,7 +13116,7 @@ function AppInner() {
         if (!awarded) logWarn('chore.approve.no_completion_row', { choreId: realId, kidId: kidDbId });
       }).catch(e => logDbError('db.chore.approve', e));
     }
-  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, setupChildren, kidOnboardingDone, ensureChoreInDb]);
+  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, getKidCoins, setupChildren, kidOnboardingDone, ensureChoreInDb]);
 
   // Approve a single day (the oldest pending submission).
   const approveManagedChore = useCallback((id: string, kidName: string) => {
@@ -13139,6 +13213,7 @@ function AppInner() {
   }, [managedChores, setupChildren, ensureChoreInDb, checkMilestone]);
 
   const confirmPayout = useCallback((kidName: string) => {
+    playCashRegister();
     noteLocalWrite();   // payouts + kids writes below are ours — skip our household-sync echo
     const amount = kidCoins[kidName] ?? 0;
     // Capture the per-week breakdown BEFORE logging this payout — the new payout
