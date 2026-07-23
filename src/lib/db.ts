@@ -23,8 +23,9 @@ export async function saveProfile(fields: {
 }) {
   const userId = await getCurrentUserId();
   if (!userId) return;
-  const { data, error } = await supabase.from('profiles').update(fields).eq('id', userId);
-  console.log('[DB] saveProfile data:', data, 'error:', error);
+  const { error } = await supabase.from('profiles').update(fields).eq('id', userId);
+  // Don't log `fields` — a PIN-set write carries parent_pin. Errors only.
+  if (error) console.warn('[DB] saveProfile error:', error.message);
 }
 
 export async function saveGoals(goals: unknown[]): Promise<void> {
@@ -92,6 +93,76 @@ export async function saveDisplayName(name: string): Promise<void> {
   if (error) console.warn('[DB] saveDisplayName (auth) error:', error.message);
   // 2. Mirror to profiles table for consistency
   await saveProfile({ name });
+}
+
+// ─── Subscription / paywall (Monstir Premium) ────────────────────────────────
+
+export type SubscriptionStatus = 'trialing' | 'active' | 'expired' | 'cancelled';
+
+export interface SubscriptionState {
+  converted: boolean;
+  subscription_status: SubscriptionStatus | null;
+  subscription_product_id: string | null;
+  subscription_expires_at: string | null;
+  trial_ends_at: string | null;
+  paywall_seen_at: string | null;
+  last_paywall_dismissed_at: string | null;
+  winback_shown_count: number;
+  last_winback_shown_at: string | null;
+}
+
+export async function loadSubscriptionState(): Promise<SubscriptionState | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+  const { data } = await supabase
+    .from('profiles')
+    .select('converted, subscription_status, subscription_product_id, subscription_expires_at, trial_ends_at, paywall_seen_at, last_paywall_dismissed_at, winback_shown_count, last_winback_shown_at')
+    .eq('id', userId)
+    .single();
+  return data as SubscriptionState | null;
+}
+
+/** Marks the paywall as shown (screen 6A, onboarding or otherwise) — drives the
+ *  win-back cooldown regardless of whether the user converted. */
+export async function markPaywallSeen(): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { error } = await supabase.from('profiles').update({ paywall_seen_at: new Date().toISOString() }).eq('id', userId);
+  if (error) console.warn('[DB] markPaywallSeen error:', error.message);
+}
+
+/** Dismissed the paywall or win-back modal without subscribing. */
+export async function recordPaywallDismissed(): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { error } = await supabase.from('profiles').update({ last_paywall_dismissed_at: new Date().toISOString() }).eq('id', userId);
+  if (error) console.warn('[DB] recordPaywallDismissed error:', error.message);
+}
+
+/** A StoreKit purchase completed — persist entitlement + flip converted=true
+ *  (this never flips back to false; a lapsed subscription is expressed via
+ *  subscription_status/subscription_expires_at, not by reverting converted). */
+export async function saveSubscriptionPurchase(fields: {
+  subscription_status: SubscriptionStatus;
+  subscription_product_id: string;
+  subscription_expires_at?: string | null;
+  trial_ends_at?: string | null;
+}): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { error } = await supabase.from('profiles').update({ converted: true, ...fields }).eq('id', userId);
+  if (error) console.warn('[DB] saveSubscriptionPurchase error:', error.message);
+}
+
+/** Recorded a win-back paywall presentation, for the lifetime-cap trigger rule. */
+export async function recordWinbackShown(currentCount: number): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { error } = await supabase.from('profiles').update({
+    winback_shown_count: currentCount + 1,
+    last_winback_shown_at: new Date().toISOString(),
+  }).eq('id', userId);
+  if (error) console.warn('[DB] recordWinbackShown error:', error.message);
 }
 
 // ─── Kids ──────────────────────────────────────────────────────────────────

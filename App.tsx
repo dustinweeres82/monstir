@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, Platform, Image, TextInput, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
-  ActivityIndicator, LogBox, AccessibilityInfo, AppState, Linking, type LayoutChangeEvent,
+  ActivityIndicator, LogBox, AccessibilityInfo, AppState, Linking, Alert, type LayoutChangeEvent,
 } from 'react-native';
 
 // Suppress spurious dev-mode RN warning — not a real bug in this codebase
@@ -17,6 +17,10 @@ import { ChoreSuccessScreen } from './src/components/ChoreSuccessScreen';
 import { pickForTier, COLLECTIBLES } from './src/data/collectibles';
 import { MascotBanner } from './src/components/MascotBanner';
 import { CreamBg } from './src/components/CreamBg';
+import { StatTile } from './src/components/StatTile';
+import { RhythmGrid, type RhythmKidRow, type CellStatus } from './src/components/RhythmGrid';
+import { ApprovalCard } from './src/components/ApprovalCard';
+import { ScreenHeader, SwitchPill, BalancePill, AvatarLeading } from './src/components/ScreenHeader';
 import { KidProfileCreation, getAvatarImage } from './src/screens/KidProfileCreation';
 
 const PARENT_AVATAR_DAD = require('./assets/icons/Avatars/parentProfileDad.png');
@@ -31,6 +35,10 @@ import {
 import { canonicalizeEmail } from './src/lib/email';
 import { ParentOnboarding, BASE_PAY_STEPS } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
+import { Paywall, type PaywallResult } from './src/screens/Paywall';
+import { TrialSuccess } from './src/screens/TrialSuccess';
+import { WinBackPaywallModal } from './src/components/WinBackPaywallModal';
+import { usePaywallTriggers } from './src/hooks/usePaywallTriggers';
 import { obc, obText, cardShadow, DotGridBg, ObButton, StepDots as ObStepDots, Tag, InfoDot, CodeCells, Keypad, ScreenEnter, Rise } from './src/screens/onboarding/obkit';
 import { TrophyRoom } from './src/screens/TrophyRoom';
 import { ParentMilestoneDetail } from './src/screens/ParentMilestoneDetail';
@@ -100,6 +108,40 @@ type MonsterIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type ParentTab    = 'home' | 'chores' | 'money' | 'settings';
 type ParentScreen = 'parentHome' | 'chores' | 'choreLibrary' | 'addChore' | 'editChore' | 'payRates' | 'rateGuide' | 'rewards' | 'settings' | 'parentPayout' | 'moneyLedger' | 'parentMilestones' | 'kidMilestones';
 type ViewMode     = 'kid' | 'parent';
+
+/** Plain page titles for the persistent parent header — replaces the old
+ *  avatar + "Parent view ▾" switcher (switching now lives only on Home). */
+const PARENT_SCREEN_TITLES: Record<ParentScreen, string> = {
+  parentHome: 'Home',
+  chores: 'Chores',
+  choreLibrary: 'Chore Library',
+  addChore: 'Chores',
+  editChore: 'Chores',
+  payRates: 'Pay Rates',
+  rateGuide: 'Rate Guide',
+  rewards: 'Rewards',
+  settings: 'Settings',
+  parentPayout: 'Pay Out',
+  moneyLedger: 'Money',
+  parentMilestones: 'Milestones',
+  kidMilestones: 'Milestones',
+};
+
+/** Parent screens whose own component already renders its own header — either
+ *  the old back+title bar (ChoreLibraryScreen, PayRatesScreen, etc.) or the
+ *  new standardized three-slot ScreenHeader (parentHome, chores). The
+ *  persistent parent header hides itself for these so there's only ever one
+ *  heading, never two stacked. */
+const PARENT_SCREENS_WITH_OWN_HEADER = new Set<ParentScreen>([
+  'choreLibrary', 'payRates', 'rateGuide', 'parentPayout', 'parentMilestones', 'kidMilestones',
+  'chores', 'addChore', 'editChore', 'parentHome', 'settings', 'moneyLedger',
+]);
+
+// ─── Shared heading typography ("Playful top, structured body") ──────────────
+// Section-header style used below the standardized ScreenHeader (e.g. "Chores
+// to Approve") — Inter Black, left-aligned, structure rather than identity
+// (identity/game-feel is the ScreenHeader's Fredoka title, above it).
+const HEADING_SECTION = { fontFamily: 'Inter_800ExtraBold', fontSize: scale(21), color: '#1A1A1A' };
 
 interface Chore   { id: ChoreId; name: string; icon: string | number; bg: string; xp: number; multiplier: number; }
 interface Monster { name: string; level: number; needed: number; }
@@ -764,6 +806,50 @@ function weekMondayKeyForDate(date: Date): string {
 /** "Week of Jun 2" label from a Monday date-string. */
 function weekOfLabel(mondayKey: string): string {
   return 'Week of ' + new Date(mondayKey).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/** Per-kid Monday→Sunday completion rhythm for the Weekly Home rhythm grid.
+ *  A day's cell is driven by that kid's "every day" chores — the only chore
+ *  type actually due on a specific day. Any OTHER chore (weekly / N×-per-week,
+ *  which isn't due on any particular day) completed that day only ever helps —
+ *  it can push a day from missed→partial or partial→done, but its absence
+ *  never creates a false "missed". Days after today render 'future'.
+ *  Matches history entries to daily chores by name (chore_id isn't carried on
+ *  chore_history) — a cosmetic-only approximation, fine for this at-a-glance grid. */
+function computeWeeklyRhythm(
+  chores: ManagedChore[],
+  kidName: string,
+  allKidNames: string[],
+  history: { kidName: string; choreName: string; approvedAt: string }[],
+  debugDayOffset: number = 0,
+): CellStatus[] {
+  const monday = new Date(getWeekMondayKey(debugDayOffset));
+  const today = new Date(Date.now() + debugDayOffset * 86_400_000);
+  today.setHours(0, 0, 0, 0);
+
+  const dailyNames = new Set(
+    chores.filter(c => isDailyChore(c) && choreEligibleKids(c, allKidNames).includes(kidName)).map(c => c.name)
+  );
+  const expected = dailyNames.size;
+  const kidHistory = history.filter(e => e.kidName === kidName);
+
+  const days: CellStatus[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    if (d.getTime() > today.getTime()) { days.push('future'); continue; }
+
+    const dayKey = d.toDateString();
+    const entriesThatDay = kidHistory.filter(e => new Date(e.approvedAt).toDateString() === dayKey);
+    const doneToday = entriesThatDay.filter(e => dailyNames.has(e.choreName)).length;
+    const anyOtherToday = entriesThatDay.some(e => !dailyNames.has(e.choreName));
+
+    if (expected === 0)              days.push((doneToday > 0 || anyOtherToday) ? 'done' : 'future');
+    else if (doneToday >= expected)  days.push('done');
+    else if (doneToday > 0 || anyOtherToday) days.push('partial');
+    else                              days.push('missed');
+  }
+  return days;
 }
 
 type UnpaidWeek = { weekKey: string; label: string; choreCount: number; earnedCents: number };
@@ -1517,11 +1603,15 @@ const BOSS_SVGS = [BossGrumbloth, BossMireflax, BossVorthak];
 
 interface SwitcherOption { label: string; emoji?: string; bg: string; image?: number | ReturnType<typeof require>; }
 
-function ViewSwitcher({ selected, options, onSelect, dark = false }: {
+function ViewSwitcher({ selected, options, onSelect, dark = false, trigger }: {
   selected: string;
   options: SwitcherOption[];
   onSelect: (opt: SwitcherOption) => void;
   dark?: boolean;
+  /** Custom trigger content (e.g. a header avatar doubling as the switch
+   *  button) — replaces the default "{selected} ▾" text trigger. Tapping it
+   *  still opens the same switch sheet. */
+  trigger?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const scrimOpacity = useRef(new Animated.Value(0)).current;
@@ -1543,8 +1633,8 @@ function ViewSwitcher({ selected, options, onSelect, dark = false }: {
 
   return (
     <>
-      <TouchableOpacity onPress={openSheet} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <Text style={[sw.trigger, dark && sw.triggerDark]}>{selected} ▾</Text>
+      <TouchableOpacity onPress={openSheet} activeOpacity={trigger ? 0.85 : 0.7} style={trigger ? undefined : { flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        {trigger ?? <Text style={[sw.trigger, dark && sw.triggerDark]}>{selected} ▾</Text>}
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet()}>
@@ -1648,67 +1738,48 @@ function KidAvatarBadge({ idx }: { idx: number }) {
   );
 }
 
-function ChoreIconPickerSheet({ selected, onSelect }: {
+// Inline icon row, directly selectable — mirrors the Add-a-kid avatar picker
+// (a horizontal row of options with a purple ring on the active one) instead
+// of opening a separate "choose icon" sheet.
+function ChoreIconPicker({ selected, onSelect }: {
   selected: { icon: string | number; bg: string };
   onSelect: (item: { icon: string | number; bg: string }) => void;
 }) {
-  const { open, openSheet, closeSheet, scrimOpacity, sheetY } = useSheet();
   const scrollRef = useRef<ScrollView>(null);
   const selectedIdx = CHORE_ICONS.findIndex(i => i.icon === selected.icon);
 
-  // Land the carousel on the current icon each time it opens.
+  // Land the row on the current icon on mount (e.g. editing a chore whose
+  // icon sits further along the row than the first screenful).
   useEffect(() => {
-    if (open && selectedIdx >= 0) {
+    if (selectedIdx >= 0) {
       requestAnimationFrame(() =>
         scrollRef.current?.scrollTo({ x: Math.max(0, selectedIdx * ICON_CELL_STRIDE - ICON_CELL_STRIDE), animated: false })
       );
     }
-  }, [open, selectedIdx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <>
-      <TouchableOpacity
-        style={{ width: 88, height: 88, borderRadius: 20, backgroundColor: selected.bg, alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: '#1A1A1A' }}
-        onPress={openSheet}
-        activeOpacity={0.8}
-      >
-        <ChoreIcon icon={selected.icon} size={56} />
-        <View style={[p.iconEditBadge, { position: 'absolute', bottom: -2, right: -2 }]}>
-          <Image source={require('./assets/icons/icon-pencil.png')} style={{ width: scale(14), height: scale(14) }} resizeMode="contain" />
-        </View>
-      </TouchableOpacity>
-
-      <Modal visible={open} transparent animationType="none" onRequestClose={() => closeSheet()}>
-        <Animated.View style={[av.scrim, { opacity: scrimOpacity }]}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => closeSheet()} />
-          <Animated.View style={[av.sheet, { transform: [{ translateY: sheetY }] }]} onStartShouldSetResponder={() => true}>
-            <View style={av.handle} />
-            <Text style={av.title}>Choose icon</Text>
-            <ScrollView
-              ref={scrollRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={av.avatarRow}
-            >
-              {CHORE_ICONS.map((item, idx) => {
-                const isSelected = idx === selectedIdx;
-                return (
-                  <TouchableOpacity
-                    key={idx}
-                    style={[av.avatarCell, { backgroundColor: item.bg, alignItems: 'center', justifyContent: 'center' }, isSelected && av.cellActive]}
-                    onPress={() => { onSelect(item); closeSheet(); }}
-                    activeOpacity={0.8}
-                  >
-                    <ChoreIcon icon={item.icon} size={52} />
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <View style={{ height: Platform.OS === 'ios' ? 28 : 12 }} />
-          </Animated.View>
-        </Animated.View>
-      </Modal>
-    </>
+    <ScrollView
+      ref={scrollRef}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={av.avatarRow}
+    >
+      {CHORE_ICONS.map((item, idx) => {
+        const isSelected = idx === selectedIdx;
+        return (
+          <TouchableOpacity
+            key={idx}
+            onPress={() => onSelect(item)}
+            activeOpacity={0.8}
+            style={[av.avatarCell, { backgroundColor: item.bg, alignItems: 'center', justifyContent: 'center' }, isSelected && av.cellActive]}
+          >
+            <ChoreIcon icon={item.icon} size={52} />
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -2218,21 +2289,30 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   }, [coins, xp]);
 
   // ── Coins-fly-to-pill (MON-96) ──────────────────────────────────────────────
-  // Measured in the SAME coordinate space (both relative to homeRoot's own
-  // top-left) so a straight-line delta between them is meaningful: homeHeader
-  // is homeRoot's first non-absolute child, so the pill's onLayout position is
-  // already relative to homeRoot with no further offset math needed.
+  // The pill now nests inside ScreenHeader's flex layout (leading/title/trailing
+  // slots), so its onLayout x/y is relative to the trailing slot, not homeRoot
+  // — no longer a simple "first non-absolute child" offset. Measure both
+  // elements' ABSOLUTE screen position at fire-time instead (measureInWindow)
+  // and take the difference — correct regardless of how deep the pill is nested.
   const [rootHeight, setRootHeight] = useState(0);
-  const [pillLayout, setPillLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const homeRootRef = useRef<View>(null);
+  const pillRef = useRef<View>(null);
+  const [homeHeaderHeight, setHomeHeaderHeight] = useState(0);
   const pillBounce = useRef(new Animated.Value(1)).current;
   type FlyingCoin = { id: number; dx: Animated.Value; dy: Animated.Value; opacity: Animated.Value; scale: Animated.Value; startX: number; startY: number };
   const [flyingCoins, setFlyingCoins] = useState<FlyingCoin[]>([]);
   const flyCoinIdRef = useRef(0);
 
   const launchFlyingCoins = useCallback(() => {
-    if (!pillLayout || !rootHeight) return;
-    const endX = pillLayout.x + pillLayout.width / 2;
-    const endY = pillLayout.y + pillLayout.height / 2;
+    if (!rootHeight) return;
+    pillRef.current?.measureInWindow((px, py, pw, ph) => {
+      homeRootRef.current?.measureInWindow((rx, ry) => {
+        launchFlyingCoinsTo(px - rx + pw / 2, py - ry + ph / 2);
+      });
+    });
+  }, [rootHeight]);
+
+  const launchFlyingCoinsTo = useCallback((endX: number, endY: number) => {
     const baseStartX = Dimensions.get('window').width / 2;
     const baseStartY = rootHeight - 200; // mirrors homeXpPopLayer's anchor
     const coinsToLaunch = [0, 1, 2].map(i => {
@@ -2277,7 +2357,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         }
       });
     });
-  }, [pillLayout, rootHeight]);
+  }, [rootHeight, pillBounce]);
 
   const pct        = Math.min(100, Math.round((animXp / need) * 100));
   // MON-6 — evolution eligibility is derived live so the "Ready to evolve" pill
@@ -2419,17 +2499,29 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
     }, delay + 700);
   }, []);
 
+  // Submitted-but-awaiting-approval celebration (the `pending` ChoreSuccessScreen
+  // instance below) — local-only, same-device: the kid is looking right at
+  // their own screen when they tap a chore, no cross-device delivery needed.
+  const [pendingSubmission, setPendingSubmission] = useState<{ choreTitle: string; coinsGained: number; xpGained: number } | null>(null);
+
   const handleCompleteManaged = useCallback((c: ManagedChore) => {
     if (requireApproval) {
-      // No reward yet — nothing to celebrate until a parent approves it.
+      // No reward yet — nothing to celebrate until a parent approves it. Same
+      // full-screen celebration as the auto-approve path, just in its
+      // "pending" dress (locked pills + a pending-approval banner) since
+      // nothing was actually credited — see the ChoreSuccessScreen render
+      // below, `pending` instance.
       pulseMonster();
-      showPop('Submitted! ✋', 'xp');
+      setPendingSubmission({
+        choreTitle: c.name,
+        coinsGained: Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[c.difficulty]),
+        xpGained: XP_BY_DIFFICULTY[c.difficulty],
+      });
     }
     // else: the reward lands immediately, so the full-screen "Quest complete!"
-    // celebration (driven by `pendingReward`) takes over instead of the small
-    // floating pops — see the ChoreSuccessScreen render below.
+    // celebration (driven by `pendingReward`) takes over instead.
     onCompleteManaged(c.id);
-  }, [pulseMonster, showPop, onCompleteManaged, requireApproval]);
+  }, [pulseMonster, onCompleteManaged, requireApproval, baseRate]);
 
   // Kid taps the celebration's fun-word button — dismiss it and let the coin
   // pill / XP bar catch up to the real totals with a felt animation + a
@@ -2450,17 +2542,20 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
   }, [coins, xp, onDismissChoreReward, pendingReward, pulseMonster, showPop, launchFlyingCoins]);
 
   return (
-    <View style={s.homeRoot} onLayout={(e) => setRootHeight(e.nativeEvent.layout.height)}>
+    <View style={s.homeRoot} ref={homeRootRef} onLayout={(e) => setRootHeight(e.nativeEvent.layout.height)}>
       <Image
         source={require('./assets/appBG.png')}
         style={{ position: 'absolute', width: '100%', aspectRatio: 1024 / 1536, bottom: 0 }}
         resizeMode="contain"
       />
-      {/* Header */}
-      <View style={s.homeHeader}>
-        <View style={s.homeHeaderLeft}>
-          <KidAvatarBadge idx={initialAvatarIdx} />
-          <View style={{ gap: 4 }}>
+      {/* Header — fixed three-slot bar, doesn't scroll with content */}
+      <View
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}
+        onLayout={(e) => setHomeHeaderHeight(e.nativeEvent.layout.height)}
+      >
+        <ScreenHeader
+          variant="root"
+          leading={
             <ViewSwitcher
               selected={currentKidName || 'Kid view'}
               options={[
@@ -2468,21 +2563,31 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
                 { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
               ]}
               onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
+              trigger={<AvatarLeading source={getAvatarImage(initialAvatarIdx)} />}
             />
-          </View>
-        </View>
-        <Animated.View
-          onLayout={(e) => setPillLayout(e.nativeEvent.layout)}
-          style={{ transform: [{ scale: pillBounce }] }}
-        >
-          <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
-            <Text style={s.homeBalanceText}>${dollars}</Text>
-            <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
-          </TouchableOpacity>
-        </Animated.View>
+          }
+          overline={currentKidName}
+          title="Home"
+          backgroundColor="#C5F215"
+          trailing={
+            <Animated.View ref={pillRef} style={{ transform: [{ scale: pillBounce }] }}>
+              <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
+                <Text style={s.homeBalanceText}>${dollars}</Text>
+                <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(18), height: scale(18) }} resizeMode="contain" />
+              </TouchableOpacity>
+            </Animated.View>
+          }
+        />
       </View>
 
-      <ScrollView style={{ flex: 1, overflow: 'visible' }} showsVerticalScrollIndicator={false} contentContainerStyle={s.homeScroll}>
+      {/* Clips the scroll region only (so over-scrolled content can't bleed
+          above the now-fixed header into the status bar) — a sibling wrapper
+          rather than clipping homeRoot itself, since ChoreSuccessScreen and the
+          pop/flying-coin layers below are homeRoot children that intentionally
+          bleed outside normal bounds (ChoreSuccessScreen negative-offsets itself
+          into the status bar on purpose for its full-bleed background). */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+      <ScrollView style={{ flex: 1, overflow: 'visible' }} showsVerticalScrollIndicator={false} contentContainerStyle={[s.homeScroll, { paddingTop: homeHeaderHeight + 12 }]}>
         {/* Character Card — long press opens debug menu. During the evolution
             moment, EvolutionFX paints over the card in place (cosmic background +
             monster cross-fade), so the normal monster + stat plate fade out. */}
@@ -2600,6 +2705,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
           ))
         )}
       </ScrollView>
+      </View>
 
       {/* floating reward popups */}
       <View style={s.homeXpPopLayer} pointerEvents="none">
@@ -2711,6 +2817,22 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         xpNeeded={pendingReward?.xpNeeded ?? need}
         readyToEvolve={pendingReward?.readyToEvolve ?? false}
         onDone={handleDismissChoreReward}
+      />
+
+      {/* Submitted, awaiting parent approval — locked pills, no catch-up
+          animation on dismiss since nothing was actually credited. */}
+      <ChoreSuccessScreen
+        pending
+        visible={!!pendingSubmission}
+        choreTitle={pendingSubmission?.choreTitle ?? ''}
+        monsterImg={monsterImg}
+        monsterName={monsterName}
+        coinsGained={pendingSubmission?.coinsGained ?? 0}
+        xpGained={pendingSubmission?.xpGained ?? 0}
+        xpIntoLevel={0}
+        xpNeeded={need}
+        readyToEvolve={false}
+        onDone={() => setPendingSubmission(null)}
       />
     </View>
   );
@@ -2862,26 +2984,24 @@ function WorldScreen({ monsterIdx, coins, done, xp, weeklyXp, managedChores, onS
     <View style={{ flex: 1, backgroundColor: '#C5F215' }}>
       {/* Texture overlay — mirrors CreamBg but with lime green */}
       <Image source={require('./assets/appBG.png')} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }} resizeMode="cover" />
-      {/* Header */}
-      <View style={s.homeHeader}>
-        <View style={s.homeHeaderLeft}>
-          <KidAvatarBadge idx={initialAvatarIdx} />
-          <View style={{ gap: 4 }}>
-            <ViewSwitcher
-              selected={currentKidName || 'Kid view'}
-              options={[
-                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
-                { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
-              ]}
-              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
-            />
-          </View>
-        </View>
-        <TouchableOpacity onPress={onNavigateToWallet} activeOpacity={0.75} style={s.homeBalancePill}>
-          <Text style={s.homeBalanceText}>${dollars}</Text>
-          <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        variant="root"
+        leading={
+          <ViewSwitcher
+            selected={currentKidName || 'Kid view'}
+            options={[
+              ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
+              { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
+            ]}
+            onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
+            trigger={<AvatarLeading source={getAvatarImage(initialAvatarIdx)} />}
+          />
+        }
+        overline={currentKidName}
+        title="World"
+        backgroundColor="#C5F215"
+        trailing={<BalancePill amountLabel={`$${dollars}`} onPress={onNavigateToWallet} />}
+      />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -3320,7 +3440,7 @@ const SHARD_CAP = 12; // max shards a player can bring into a battle
 // MON-19 Shard Economy: a flat, completely-random chance to drop one battle shard
 // each time a chore is completed (independent of difficulty/streak). Tunable;
 // TODO(MON-81) move to app_config.
-const SHARD_DROP_CHANCE = 0.18;
+const SHARD_DROP_CHANCE = 0.06; // 3x less frequent than the original 0.18
 
 // MON-19 Rev 7: canonical Unified Combo Payoff ladder, reconciled to ONE set
 // (weak → nice → huge → out of this world → UNSTOPPABLE!!). `stars` (1–5) lights
@@ -5567,8 +5687,18 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
         <TouchableOpacity onPress={onEdit} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
           <Image source={require('./assets/icons/icon-pencil.png')} style={{ width: scale(24), height: scale(24) }} resizeMode="contain" />
         </TouchableOpacity>
-        <TouchableOpacity onPress={onBack} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-          <Text style={{ fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A', lineHeight: scale(20) }}>✕</Text>
+        <TouchableOpacity
+          onPress={onBack}
+          style={{
+            width: 44, height: 44, borderRadius: 22,
+            borderWidth: 2, borderColor: '#1A1A1A',
+            backgroundColor: '#FFFFFF',
+            alignItems: 'center', justifyContent: 'center',
+            shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={{ fontSize: scale(20), fontFamily: 'Inter_700Bold', color: '#1A1A1A', lineHeight: scale(22) }}>✕</Text>
         </TouchableOpacity>
       </View>
 
@@ -5698,26 +5828,24 @@ function WalletScreen({ coins, weeklyEarnedCents, weeklyHistory, done, battleRes
         style={{ position: 'absolute', width: '100%', aspectRatio: 1024 / 1536, bottom: 0 }}
         resizeMode="contain"
       />
-      {/* Same header as Home / World tabs */}
-      <View style={[s.homeHeader, { backgroundColor: 'transparent' }]}>
-        <View style={s.homeHeaderLeft}>
-          <KidAvatarBadge idx={initialAvatarIdx} />
-          <View style={{ gap: 4 }}>
-            <ViewSwitcher
-              selected={currentKidName || 'Kid view'}
-              options={[
-                ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
-                { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
-              ]}
-              onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
-            />
-          </View>
-        </View>
-        <View style={s.homeBalancePill}>
-          <Text style={s.homeBalanceText}>${dollars}</Text>
-          <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
-        </View>
-      </View>
+      <ScreenHeader
+        variant="root"
+        leading={
+          <ViewSwitcher
+            selected={currentKidName || 'Kid view'}
+            options={[
+              ...kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
+              { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
+            ]}
+            onSelect={(opt) => { if (opt.label === 'Parent view') onSwitchToParent(); else onSwitchToKid(opt.label); }}
+            trigger={<AvatarLeading source={getAvatarImage(initialAvatarIdx)} />}
+          />
+        }
+        overline={currentKidName}
+        title="Wallet"
+        backgroundColor={C.bg}
+        trailing={<BalancePill amountLabel={`$${dollars}`} />}
+      />
 
       <ScrollView
         style={{ flex: 1, backgroundColor: C.bg }}
@@ -5972,22 +6100,12 @@ function ParentPayoutScreen({ kidCoins, kidProfiles, payoutLog, onConfirm, onBac
   onConfirm: (kidName: string) => void;
   onBack: () => void;
 }) {
-  const { scaleAnim: backScl, pressIn: backPI, pressOut: backPO } = useScaleAnimation({ toScale: 0.85 });
   const kidsWithBalance = kidProfiles.filter(k => (kidCoins[k.name] ?? 0) > 0);
   const hasAnyBalance   = kidsWithBalance.length > 0;
 
   return (
     <CreamBg>
-      {/* Header */}
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} onPressIn={backPI} onPressOut={backPO} activeOpacity={1} style={p.backBtn}>
-          <Animated.View style={{ transform: [{ scale: backScl }] }}>
-            <Text style={p.backBtnText}>←</Text>
-          </Animated.View>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Pay out</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Pay out" backgroundColor="#FAF9F4" />
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }}>
         {!hasAnyBalance && (
@@ -6076,6 +6194,8 @@ function MoneyScreen({
   onConfirm,
   debugDayOffset = 0,
   managedChores = [],
+  onSwitchToKid,
+  parentRole,
 }: {
   kidCoins: Record<string, number>;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
@@ -6086,6 +6206,8 @@ function MoneyScreen({
   debugDayOffset?: number;
   /** Live board — used to heal activity rows whose icon was lost to the '✅' fallback. */
   managedChores?: ManagedChore[];
+  onSwitchToKid: (name: string) => void;
+  parentRole?: string;
 }) {
   const insets = useSafeAreaInsets();
 
@@ -6305,6 +6427,20 @@ function MoneyScreen({
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F7F6F2' }}>
+      <ScreenHeader
+        variant="root"
+        leading={<AvatarLeading source={getParentAvatar(parentRole ?? '')} />}
+        title="Money"
+        backgroundColor="#F7F6F2"
+        trailing={
+          <ViewSwitcher
+            selected="Switch"
+            options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
+            onSelect={(opt) => onSwitchToKid(opt.label)}
+            trigger={<SwitchPill />}
+          />
+        }
+      />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 120 + insets.bottom }}
@@ -6643,95 +6779,35 @@ function MoneyScreen({
   );
 }
 
-function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedChores, onApprove, onApproveAll, onReject, baseRate, onPayKid, onConfirmPayout, kidName, totalCoins, kidProfiles, kidCoins, choreHistory, payoutLog, weekApprovalDays, kidJoinDates = {}, debugDayOffset = 0, currentBossName = '', kidBossStatus = {} }: {
+function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onAddChore, managedChores, onApprove, onApproveAll, onApproveAllPending, onReject, baseRate, kidProfiles, kidCoins, choreHistory, payoutLog, kidJoinDates = {}, debugDayOffset = 0, sessionUser, parentRole = '' }: {
   onNav: (s: ParentScreen) => void;
   onSwitchToKid: (name: string) => void;
   onAddKid: () => void;
-  onEditKid: (k: { name: string; avatarColor: string; avatarIdx: number }) => void;
+  onAddChore: () => void;
   managedChores: ManagedChore[];
   onApprove: (id: string, kidName: string) => void;
   onApproveAll: (id: string, kidName: string) => void;
+  onApproveAllPending: () => void;
   onReject: (id: string, note: string, kidName: string) => void;
   baseRate: string;
-  onPayKid: () => void;
-  onConfirmPayout: (kidName: string) => void;
-  kidName: string;
-  totalCoins: number;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
   kidCoins: Record<string, number>;
   choreHistory: { id: string; choreName: string; kidName: string; earnedCents: number; approvedAt: string; icon: string | number; bg: string }[];
   payoutLog: { kidName: string; amount: number; paidAt: string }[];
-  weekApprovalDays: string[];
   /** Kid name → DB join date (ISO) for the date-aware funnel denominator. */
   kidJoinDates?: Record<string, string>;
   debugDayOffset?: number;
-  currentBossName?: string;
-  // MON-84 (per-child): the week's shared boss identity + each kid's own outcome
-  // (kid name → 'captured' | 'got-away'); absent = hasn't fought yet.
-  kidBossStatus?: Record<string, 'captured' | 'got-away'>;
+  sessionUser?: SessionUser | null;
+  parentRole?: string;
 }) {
-  const [earnedMilestones, setEarnedMilestones] = useState<EarnedMilestone[]>([]);
-  useEffect(() => { getEarnedMilestones(PARENT_OWNER).then(setEarnedMilestones); }, []);
-  // Recent kid achievements (most-recent first) for the dashboard card.
-  const [recentKidMilestones, setRecentKidMilestones] = useState<{ kidName: string; avatarIdx: number; def: MilestoneDef; earnedAt: string }[]>([]);
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const all = await Promise.all(kidProfiles.map(async k => {
-        const earned = await getEarnedMilestones(k.name);
-        return earned
-          .map(e => { const def = getMilestone(e.id); return def ? { kidName: k.name, avatarIdx: k.avatarIdx, def, earnedAt: e.earnedAt } : null; })
-          .filter((x): x is { kidName: string; avatarIdx: number; def: MilestoneDef; earnedAt: string } => x != null);
-      }));
-      if (alive) setRecentKidMilestones(all.flat().sort((a, b) => b.earnedAt.localeCompare(a.earnedAt)));
-    })();
-    return () => { alive = false; };
-  }, [kidProfiles]);
-  const parentMilestoneDefs = MILESTONES.filter(m => m.audience === 'parent');
-  const earnedIds = new Set(earnedMilestones.map(m => m.id));
-  // Newest earned = show yellow dot
-  const newestEarnedId = earnedMilestones[0]?.id ?? null;
-
-  // ── Week progress for the hero ─────────────────────────────────────────────
-  const today      = new Date();
-  const dayOfWeek  = today.getDay();                          // 0=Sun, 1=Mon … 6=Sat
-  const todayBarIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;     // Mon=0 … Sat=5, Sun=6
-
   const allKidNames = kidProfiles.map(k => k.name);
-  // Independent "Everyone" chores count once per eligible kid toward the household total.
   const { target: totalWeeklyTarget, done: totalCompleted } = householdChoreTotals(managedChores, allKidNames, kidJoinDates);
-  const daysLeft = daysUntilSunday();
+  const donePct = totalWeeklyTarget > 0 ? Math.round((totalCompleted / totalWeeklyTarget) * 100) : 0;
 
-  // ── Per-kid stats ─────────────────────────────────────────────────────────
-  type KidStats = {
-    profile: { name: string; avatarColor: string; avatarIdx: number };
-    completed: number;
-    target: number;
-    pendingCount: number;
-    earningsCents: number;
-  };
-
-  const kidStats: KidStats[] = kidProfiles.map(k => {
-    const assignedChores = managedChores.filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(k.name));
-    // Individual readiness via the SAME helper as the kid's own card (full-week window),
-    // so the per-kid funnel row matches that kid's card to the digit — shared
-    // everyone-chores count per-doer, non-doers excluded from both halves.
-    const { done: completed, expected } = weeklyCompletion(assignedChores, k.name, kidJoinDates[k.name], thisWeekSunday());
-    const target     = Math.max(1, Math.round(expected));
-    const pendingCount = assignedChores.reduce((s, c) => s + getPendingCount(c, k.name), 0);
-    const earningsCents = assignedChores.reduce((s, c) => {
-      const approved = getChoreCompletions(c, k.name);
-      return s + approved * Math.round(baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[c.difficulty]);
-    }, 0);
-    return { profile: k, completed, target, pendingCount, earningsCents };
-  });
-
-  // ── Single ledger + payday (MON-77) ────────────────────────────────────────
-  // Same selectors as the Money tab, so the owed figure on Home and Money can
-  // never disagree (the "two witnesses" bug). `owedCents` is the action number
-  // the hero footer and the adaptive bar both surface.
-  const ledger    = computeFamilyLedger(allKidNames, kidCoins, choreHistory, payoutLog, debugDayOffset);
-  const owedCents  = ledger.owedCents;
+  // Same selectors as the Money tab, so the owed figure here can never
+  // disagree with it (the "two witnesses" bug).
+  const ledger = computeFamilyLedger(allKidNames, kidCoins, choreHistory, payoutLog, debugDayOffset);
+  const owedCents = ledger.owedCents;
 
   // Pending review count — MUST equal the Chores tab "Pending" tile (single
   // source of truth). Computed with the exact same formula it uses: the sum of
@@ -6741,282 +6817,218 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onEditKid, managedCh
       .filter(c => c.assignedTo.length === 0 || c.assignedTo.includes(k.name))
       .reduce((s, c) => s + getPendingCount(c, k.name), 0), 0);
 
-  // Adaptive next-action bar — one fixed-height slot, highest applicable wins:
-  //   1. reviews pending → route to Chores
-  //   2. owed > 0        → route to Money ("Pay out $X")
-  //   3. nothing pending or owed → calm "all settled"
-  // MON-77 Rev 5: there is no scheduled payday. The owed total persists until the
-  // parent settles it, so the payout nudge shows every day a balance exists —
-  // never gated on a date (no Sunday "it's payday" treatment), never scolding, and
-  // reviews still outrank payout.
-  type ActionBar = { kind: 'review' | 'payNow' | 'settled'; label: string; sub?: string; target?: ParentScreen; tone: 'amber' | 'lime' | 'calm' };
-  const actionBar: ActionBar = pendingReviewCount > 0
-    ? { kind: 'review', tone: 'amber', target: 'chores',
-        label: `${pendingReviewCount} chore${pendingReviewCount === 1 ? '' : 's'} to review` }
-    : owedCents > 0
-      ? { kind: 'payNow', tone: 'lime', target: 'moneyLedger',
-          label: `Pay out ${fmtDollars(owedCents)}` }
-      : { kind: 'settled', tone: 'calm', label: 'All settled this week' };
+  // ── State treatments — derived from real data, never a manual switch ──────
+  const simToday    = new Date(Date.now() + debugDayOffset * 86_400_000);
+  const dow         = simToday.getDay();                            // 0=Sun … 6=Sat
+  const isMonday    = dow === 1;
+  const isLateWeek  = dow === 4 || dow === 5 || dow === 6 || dow === 0;   // Thu..Sun
+  const isPayday    = donePct >= 100;
+  const isRough     = donePct < 40 && isLateWeek;
+  const isBackedUp  = pendingReviewCount >= 10;
+  const isFresh     = pendingReviewCount === 0 && isMonday && totalCompleted === 0;
+
+  const weekMonday = new Date(getWeekMondayKey(debugDayOffset));
+  const weekSunday = new Date(weekMonday); weekSunday.setDate(weekMonday.getDate() + 6);
+  const weekRangeLabel = `${weekMonday.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()} ${weekMonday.getDate()}–${weekSunday.getDate()}`;
+  const parentName = sessionUser?.name || (parentRole ? parentRole.charAt(0).toUpperCase() + parentRole.slice(1) : 'Parent');
+
+  // ── Weekly Rhythm grid rows ────────────────────────────────────────────────
+  const rhythmRows: RhythmKidRow[] = kidProfiles.map(k => ({
+    name: k.name,
+    emoji: '🧒',
+    autoApprove: false,
+    days: computeWeeklyRhythm(managedChores, k.name, allKidNames, choreHistory, debugDayOffset),
+  }));
+
+  // ── Approval queue — same source ParentChoresScreen's queue is built from ──
+  type PendingReview = { chore: ManagedChore; kidName: string; submittedAt?: string };
+  const allPendingReviews: PendingReview[] = [];
+  managedChores.forEach(c => {
+    choreEligibleKids(c, allKidNames).forEach(name => {
+      if (getPendingCount(c, name) > 0) {
+        allPendingReviews.push({ chore: c, kidName: name, submittedAt: c.childSubmittedAt?.[name] });
+      }
+    });
+  });
+  allPendingReviews.sort((a, b) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''));
+  const QUEUE_VISIBLE = 5;
+  const visibleReviews = allPendingReviews.slice(0, QUEUE_VISIBLE);
+
+  const formatWhen = (iso?: string) => {
+    if (!iso) return 'today';
+    const d = new Date(iso);
+    const now = new Date(Date.now() + debugDayOffset * 86_400_000);
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    if (d.toDateString() === now.toDateString()) return 'today';
+    if (d.toDateString() === yesterday.toDateString()) return 'yesterday';
+    return d.toLocaleDateString('en-US', { weekday: 'long' });
+  };
+
+  // ── Review sheet + local toast — mirrors ParentChoresScreen's pattern ─────
+  const [reviewingChore, setReviewingChore] = useState<{ chore: ManagedChore; kidName: string } | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showLocalToast = (msg: string) => {
+    setToastMsg(null);
+    requestAnimationFrame(() => {
+      setToastMsg(msg);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToastMsg(null), 3000);
+    });
+  };
+  const handleApprove = (id: string, kn: string) => { onApprove(id, kn); setReviewingChore(null); showLocalToast(`✓ Approved for ${kn}!`); };
+  const handleApproveAll = (id: string, kn: string) => { onApproveAll(id, kn); setReviewingChore(null); showLocalToast(`✓ Approved all for ${kn}!`); };
+  const handleReject = (id: string, note: string, kn: string) => { onReject(id, note, kn); setReviewingChore(null); showLocalToast(`✕ Sent back to ${kn}`); };
+
+  const handleApproveAllPending = () => {
+    Alert.alert(
+      `Approve all ${allPendingReviews.length} chores?`,
+      'This approves everything currently waiting for review, across every kid.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Approve all', onPress: () => { onApproveAllPending(); showLocalToast('✓ Approved everything!'); } },
+      ],
+    );
+  };
 
   return (
     <CreamBg>
-      {/* Kid avatar row removed (MON-77): kids appear only where they carry
-          information — Family Status cards below. "Add kid" lives in Settings. */}
+      {/* ── Fixed three-slot header — doesn't scroll with content ───────────── */}
+      <ScreenHeader
+        variant="root"
+        leading={<AvatarLeading source={getParentAvatar(parentRole)} />}
+        overline={`WEEK OF ${weekRangeLabel}`}
+        title={`Hi, ${parentName}`}
+        backgroundColor="#FAF9F4"
+        trailing={kidProfiles.length > 0 ? (
+          <ViewSwitcher
+            selected="Switch"
+            options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
+            onSelect={(opt) => onSwitchToKid(opt.label)}
+            trigger={<SwitchPill />}
+          />
+        ) : undefined}
+      />
+
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120, paddingTop: 8 }}>
 
-        {/* ── 1. Hero — "this week's battle" (monstir-home-final mockup) ──────── */}
-        {(() => {
-          // Mockup palette (Monstir Purple family) — kept local to the hero so it
-          // matches the approved design exactly without re-tinting the app.
-          const HERO_PURPLE = '#7B3FF2';
-          const HERO_FOOT   = '#5A23C8';
-          const HERO_TRACK  = '#4A1F9E';
-          const TRACK_EDGE  = '#3A1782';
-          const LIME        = '#D8F52F';
-          const MUTE        = '#B8A3E8';
-          const DAY_MUTE    = '#9C7AD9';
-          const INK         = '#111111';
-          const pct = Math.min(100, totalWeeklyTarget > 0 ? Math.round((totalCompleted / totalWeeklyTarget) * 100) : 0);
-          const heroDayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'SUN'];
-          return (
-            <View style={{ marginHorizontal: 16, marginBottom: 16, borderRadius: 18, borderWidth: 3, borderColor: INK, backgroundColor: HERO_PURPLE, overflow: 'hidden', ...SOLID_SHADOW }}>
-              <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 16 }}>
-                {/* Eyebrow */}
-                <Text style={{ fontFamily: 'SpaceMono_700Bold', fontSize: scale(12), letterSpacing: 1.6, textTransform: 'uppercase', color: LIME }}>
-                  This week's battle
+        {kidProfiles.length === 0 ? (
+          <TouchableOpacity style={{ marginHorizontal: 16, alignItems: 'center', paddingVertical: 40, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A' }} onPress={onAddKid} activeOpacity={0.7}>
+            <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: '#767676' }}>+ Add a kid to get started</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            {/* ── Stat trio ──────────────────────────────────────────────────── */}
+            <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 16, marginBottom: 16 }}>
+              <StatTile label="To Approve" value={String(pendingReviewCount)} variant="purple" badge={isBackedUp ? pendingReviewCount : undefined} />
+              <StatTile label="Owed Out" value={fmtDollars(owedCents)} variant="lime" />
+              <StatTile label="Done" value={`${donePct}%`} variant={isRough ? 'loss' : 'white'} />
+            </View>
+
+            {/* ── Payday banner ─────────────────────────────────────────────── */}
+            {isPayday && owedCents > 0 && (
+              <TouchableOpacity
+                onPress={() => onNav('parentPayout')}
+                activeOpacity={0.85}
+                style={{ marginHorizontal: 16, marginBottom: 16, borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A', backgroundColor: '#C5F215', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW }}
+              >
+                <Text style={{ fontSize: scale(22) }}>🎉</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Payday! {fmtDollars(owedCents)} owed</Text>
+                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#3A5A00' }}>Every kid finished this week — mark them paid.</Text>
+                </View>
+                <Text style={{ fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Mark all paid ›</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* ── Weekly Rhythm ──────────────────────────────────────────────── */}
+            <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+              <RhythmGrid kids={rhythmRows} />
+              {isRough && (
+                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676', marginTop: 10, textAlign: 'center' }}>
+                  A slow week happens — a quick reminder can help get things back on track. 💪
                 </Text>
+              )}
+            </View>
 
-                {/* Boss identity row — silhouette jar + name + "arrives Sunday" */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, marginBottom: 16 }}>
-                  <View style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 3, borderColor: LIME, backgroundColor: '#3F1D86', alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontSize: scale(22), color: '#8A6FC4', fontFamily: 'FredokaOne_400Regular' }}>?</Text>
+            {/* ── Chores to Approve ──────────────────────────────────────────── */}
+            <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <Text style={HEADING_SECTION}>Chores to Approve</Text>
+                {allPendingReviews.length > 0 && (
+                  <View style={{ backgroundColor: '#B9E8DD', borderRadius: 100, borderWidth: 1.5, borderColor: '#1A1A1A', paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: scale(11), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{allPendingReviews.length} waiting</Text>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text numberOfLines={1} style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), lineHeight: scale(29), color: '#FFFFFF' }}>
-                      {currentBossName || 'Boss'}
-                    </Text>
-                    <Text style={{ fontSize: scale(12), fontFamily: 'Nunito_700Bold', color: MUTE, marginTop: 4 }}>
-                      {(() => {
-                        const statuses = Object.values(kidBossStatus);
-                        if (statuses.length === 0) return 'arrives Sunday';
-                        const captured = statuses.filter(st => st === 'captured').length;
-                        return `${captured}/${kidProfiles.length} captured this week`;
-                      })()}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Statline — chore fraction is the focal stat; days-left right-aligned.
-                    The sub-label marks this as a HOUSEHOLD-completion metric (each shared
-                    chore counted once for the family), distinct from the per-kid
-                    individual readiness bars — so family-bar ≠ sum-of-kids never reads
-                    as a bug. */}
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <View>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-                      <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(44), lineHeight: scale(60), color: LIME }}>{totalCompleted}</Text>
-                      <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), lineHeight: scale(33), color: '#D9C9FF' }}>/{Math.round(totalWeeklyTarget)} chores</Text>
-                    </View>
-                    <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(11), color: MUTE, marginTop: 2 }}>family chores done this week</Text>
-                  </View>
-                  <Text style={{ fontFamily: 'SpaceMono_700Bold', fontSize: scale(12), color: LIME, paddingBottom: 8 }}>
-                    {daysLeft} day{daysLeft === 1 ? '' : 's'} left
-                  </Text>
-                </View>
-
-                {/* Progress bar — solid lime fill (no gradient, per spec) */}
-                <View style={{ height: 16, borderRadius: 999, backgroundColor: HERO_TRACK, borderWidth: 2, borderColor: TRACK_EDGE, overflow: 'hidden' }}>
-                  <View style={{ height: '100%', width: `${pct}%`, backgroundColor: LIME, borderRadius: 999 }} />
-                </View>
-
-                {/* Day markers — a time countdown to Sunday. Elapsed ≠ achieved:
-                    past days read solid-muted, never a "success" tick. */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
-                  {heroDayLabels.map((label, i) => {
-                    const isSun     = i === 6;
-                    const isToday   = i === todayBarIdx && !isSun;
-                    const isElapsed = i < todayBarIdx;
-                    const dotStyle = (isSun || isToday)
-                      ? { backgroundColor: LIME, borderWidth: 2.5, borderColor: INK }
-                      : isElapsed
-                        ? { backgroundColor: '#6A3FD0' }
-                        : { borderWidth: 2.5, borderColor: DAY_MUTE };
-                    return (
-                      <View key={i} style={{ alignItems: 'center', gap: 8, flex: 1 }}>
-                        <View style={{ width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...dotStyle }}>
-                          {isSun && <Text style={{ fontSize: scale(12), color: INK, fontFamily: 'Nunito_800ExtraBold' }}>⚔︎</Text>}
-                        </View>
-                        <Text style={{ fontSize: scale(12), fontFamily: 'SpaceMono_700Bold', color: isToday ? LIME : DAY_MUTE }}>{label}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
+                )}
               </View>
 
-              {/* Footer band — money (the coupled outcome); approvals live in the
-                  adaptive bar below. Tap routes to the Money ledger. */}
-              <TouchableOpacity
-                activeOpacity={owedCents > 0 ? 0.85 : 1}
-                onPress={() => owedCents > 0 && onNav('moneyLedger')}
-                style={{ backgroundColor: HERO_FOOT, borderTopWidth: 2, borderTopColor: TRACK_EDGE, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <Text style={{ fontSize: scale(12), fontFamily: 'Nunito_700Bold', color: '#E7DEFC' }}>
-                  {owedCents > 0
-                    ? <>💰  <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(18), color: LIME }}>{fmtDollars(owedCents)}</Text> to pay</>
-                    : <>✓  All paid up</>}
-                </Text>
-                {/* MON-77 Rev 5: no scheduled payday → no date, and the Edit link
-                    (it opened payday settings, now gone) is removed. The owed
-                    footer still taps through to the Money ledger. */}
-                {owedCents > 0 && (
-                  <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: LIME }}>›</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          );
-        })()}
-
-        {/* ── Adaptive next-action bar (MON-77) ────────────────────────────── */}
-        {/* One fixed-height slot, highest-priority action only — it routes, so it
-            can never grow into a list and push the hero off-screen. */}
-        <TouchableOpacity
-          activeOpacity={actionBar.target ? 0.85 : 1}
-          onPress={() => actionBar.target && onNav(actionBar.target)}
-          style={{
-            marginHorizontal: 16,
-            marginBottom: 16,
-            borderRadius: 16,
-            borderWidth: 2,
-            borderColor: '#1A1A1A',
-            paddingHorizontal: 16,
-            paddingVertical: 16,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 12,
-            backgroundColor: actionBar.tone === 'amber' ? '#FFF4D6' : actionBar.tone === 'lime' ? '#EAF7B0' : '#FFFFFF',
-            ...SOLID_SHADOW,
-          }}
-        >
-          <Text style={{ fontSize: scale(18) }}>
-            {actionBar.kind === 'review' ? '⏱' : actionBar.kind === 'payNow' ? '💸' : '🎉'}
-          </Text>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{actionBar.label}</Text>
-            {actionBar.sub && (
-              <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: actionBar.tone === 'lime' ? '#A0660A' : '#ABABAB', marginTop: 0 }}>
-                {actionBar.sub}
-              </Text>
-            )}
-          </View>
-          {actionBar.target && (
-            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: actionBar.tone === 'amber' ? '#E6A817' : '#3B8A3A' }}>›</Text>
-          )}
-        </TouchableOpacity>
-
-        {/* ── Family Status ────────────────────────────────────────────────── */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-          <Text style={{ fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', marginBottom: 12 }}>
-            Family Status
-          </Text>
-          <View style={{ gap: 12 }}>
-            {kidStats.length === 0 ? (
-              <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 20 }} onPress={onAddKid} activeOpacity={0.7}>
-                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676' }}>+ Add a kid to get started</Text>
-              </TouchableOpacity>
-            ) : kidStats.map((ks, i) => {
-              const progress = ks.target > 0 ? Math.min(1, ks.completed / ks.target) : 0;
-              const allDone  = ks.completed >= ks.target && ks.target > 0;
-              return (
-                <TouchableOpacity
-                  key={i}
-                  activeOpacity={0.8}
-                  onPress={() => onNav('moneyLedger')}
-                  style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, ...SOLID_SHADOW }}
-                >
-                  {/* Avatar */}
-                  <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: ks.profile.avatarColor, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', overflow: 'hidden', flexShrink: 0 }}>
-                    <Image source={getAvatarImage(ks.profile.avatarIdx)} style={{ width: 44, height: 44 }} resizeMode="cover" />
-                  </View>
-
-                  {/* Middle: name + progress */}
-                  <View style={{ flex: 1, gap: 4 }}>
-                    <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }}>{ks.profile.name}</Text>
-                    <View style={{ height: 8, borderRadius: 4, borderWidth: 1, borderColor: '#111111', backgroundColor: '#FFFFFF', overflow: 'hidden' }}>
-                      <View style={{ width: `${progress * 100}%`, height: '100%', backgroundColor: '#6B35F0' }} />
-                    </View>
-                    <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676' }}>
-                      {ks.completed} of {ks.target} chores
-                    </Text>
-                  </View>
-
-                  {/* Right: owed (coupled outcome) + status */}
-                  <View style={{ alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                    {(ledger.perKid[i]?.owedCents ?? 0) > 0 ? (
-                      <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#E6A817' }}>
-                        {fmtDollars(ledger.perKid[i].owedCents)} owed
-                      </Text>
-                    ) : (
-                      <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#3B8A3A' }}>
-                        Paid ✓
-                      </Text>
-                    )}
-                    {ks.pendingCount > 0 ? (
-                      <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#E6A817' }}>
-                        ⚠ {ks.pendingCount} pending
-                      </Text>
-                    ) : allDone ? (
-                      <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#3B8A3A' }}>
-                        ✓ All done
-                      </Text>
-                    ) : (
-                      <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676' }}>
-                        {ks.target - ks.completed} remaining
-                      </Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* Parent-milestones strip removed (MON-77): parent milestones are parked
-            off-Home for alpha — they live in the parent profile / "See all", never
-            on Home. Home celebrates kid wins only (below). */}
-
-        {/* ── Recent wins — kid milestone-unlock events, deterministic list ──── */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: recentKidMilestones.length > 0 ? 12 : 0 }}>
-              <Text style={{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Recent wins</Text>
-              <TouchableOpacity onPress={() => onNav('kidMilestones')} activeOpacity={0.7}>
-                <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: PURPLE }}>See all ›</Text>
-              </TouchableOpacity>
-            </View>
-            {recentKidMilestones.length === 0 ? (
-              <Text style={{ fontSize: scale(12), fontFamily: 'Inter_400Regular', color: '#767676', marginTop: 8 }}>
-                Your kids haven't earned any milestones yet — they'll appear here as they do.
-              </Text>
-            ) : (
-              recentKidMilestones.slice(0, 3).map((e, i) => (
-                <View key={`${e.kidName}-${e.def.id}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
-                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A', flexShrink: 0 }}>
-                    {e.def.image
-                      ? <Image source={e.def.image} style={{ width: 24, height: 24 }} resizeMode="contain" />
-                      : <Text style={{ fontSize: scale(18) }}>{e.def.icon}</Text>}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#1A1A1A' }} numberOfLines={1}>{e.def.name}</Text>
-                    <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: PURPLE }}>{e.kidName}</Text>
-                  </View>
-                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#767676', flexShrink: 0 }}>{timeAgo(e.earnedAt)}</Text>
+              {allPendingReviews.length === 0 ? (
+                <View style={{ alignItems: 'center', gap: 6, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 24 }}>
+                  <Text style={{ fontSize: scale(28) }}>{isFresh ? '🌱' : '🎉'}</Text>
+                  <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>
+                    {isFresh ? 'New week, fresh start!' : "You're all caught up!"}
+                  </Text>
+                  <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#767676', textAlign: 'center' }}>
+                    {isFresh ? "Nothing to review yet — it'll land here as your kids get going." : 'Nothing waiting on your review right now.'}
+                  </Text>
                 </View>
-              ))
-            )}
-          </View>
-        </View>
+              ) : (
+                <View style={{ gap: 10 }}>
+                  {isBackedUp && (
+                    <TouchableOpacity onPress={handleApproveAllPending} activeOpacity={0.85} style={{ alignSelf: 'flex-start', backgroundColor: '#FFFFFF', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 14, paddingVertical: 8 }}>
+                      <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>⚡ Approve all {allPendingReviews.length}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {visibleReviews.map(item => (
+                    <ApprovalCard
+                      key={`${item.chore.id}-${item.kidName}`}
+                      icon={<ChoreIcon icon={item.chore.icon} size={26} />}
+                      iconBg={item.chore.bg}
+                      title={item.chore.name}
+                      kidName={item.kidName}
+                      when={formatWhen(item.submittedAt)}
+                      onReview={() => setReviewingChore({ chore: item.chore, kidName: item.kidName })}
+                    />
+                  ))}
+                  {allPendingReviews.length > QUEUE_VISIBLE && (
+                    <TouchableOpacity
+                      onPress={() => onNav('chores')}
+                      activeOpacity={0.7}
+                      style={{ borderRadius: 12, borderWidth: 2, borderStyle: 'dashed', borderColor: '#C9C6BE', paddingVertical: 12, alignItems: 'center' }}
+                    >
+                      <Text style={{ fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#767676' }}>View all {allPendingReviews.length} in queue →</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
 
+            {/* ── Assign Chore ───────────────────────────────────────────────── */}
+            <View style={{ paddingHorizontal: 16 }}>
+              <TouchableOpacity
+                onPress={onAddChore}
+                activeOpacity={0.85}
+                style={{ backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center', ...SOLID_SHADOW }}
+              >
+                <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>+ Assign Chore</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </ScrollView>
+
+      {toastMsg && <Toast message={toastMsg} />}
+
+      <ChoreReviewSheet
+        chore={reviewingChore?.chore ?? null}
+        kidName={reviewingChore?.kidName ?? ''}
+        kidProfiles={kidProfiles}
+        baseRate={baseRate}
+        onApprove={(id) => reviewingChore && handleApprove(id, reviewingChore.kidName)}
+        onApproveAll={(id) => reviewingChore && handleApproveAll(id, reviewingChore.kidName)}
+        onReject={(id, note) => reviewingChore && handleReject(id, note, reviewingChore.kidName)}
+        onClose={() => setReviewingChore(null)}
+      />
     </CreamBg>
   );
 }
@@ -7163,14 +7175,14 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               {/* Action buttons */}
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <TouchableOpacity
-                  style={{ flex: 1, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF' }}
+                  style={{ flex: 1, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 16, padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', ...SOLID_SHADOW }}
                   onPress={handleReject}
                   activeOpacity={0.7}
                 >
                   <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#E84040' }}>✕ Reject</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' }}
+                  style={{ flex: 1, backgroundColor: '#6B35F0', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
                   onPress={handleApprove}
                   activeOpacity={0.7}
                 >
@@ -7181,7 +7193,7 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               {/* Approve all — only when a backlog has accumulated */}
               {pendingCount > 1 && (
                 <TouchableOpacity
-                  style={{ marginTop: 12, backgroundColor: '#27AE60', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center' }}
+                  style={{ marginTop: 12, backgroundColor: '#27AE60', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
                   onPress={handleApproveAll}
                   activeOpacity={0.7}
                 >
@@ -7368,7 +7380,7 @@ function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
 // ─── Parent Chores Screen (daily status view) ─────────────────────────────────
 
 
-function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, baseRate, onApprove, onApproveAll, onApproveAllPending, onReject, onOpenSettings, kidProfiles }: {
+function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, baseRate, onApprove, onApproveAll, onApproveAllPending, onReject, onOpenSettings, kidProfiles, onSwitchToKid, parentRole }: {
   chores: ManagedChore[];
   history: ChoreHistoryEntry[];
   onBack: () => void;
@@ -7382,6 +7394,8 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
   onReject: (id: string, note: string, kidName: string) => void;
   onOpenSettings: () => void;
   kidProfiles: { name: string; avatarColor: string; avatarIdx: number }[];
+  onSwitchToKid: (name: string) => void;
+  parentRole?: string;
 }) {
   const [activeTab, setActiveTab] = useState<'today' | 'history'>('today');
   // Kid filter pills on the review queue — "All kids" plus one pill per kid
@@ -7507,6 +7521,20 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
 
   return (
     <CreamBg>
+      <ScreenHeader
+        variant="root"
+        leading={<AvatarLeading source={getParentAvatar(parentRole ?? '')} />}
+        title="Chores"
+        backgroundColor="#FAF9F4"
+        trailing={
+          <ViewSwitcher
+            selected="Switch"
+            options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
+            onSelect={(opt) => onSwitchToKid(opt.label)}
+            trigger={<SwitchPill />}
+          />
+        }
+      />
       <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 12 }}>
         {/* Hero: purple review-queue card when there's something to approve,
             else a calm line (MON-96, supersedes the amber action bar). */}
@@ -7788,28 +7816,27 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
   };
 
   return (
-    <CreamBg>
-      {/* Header */}
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>{isEdit ? 'Edit chore' : 'Add chore'}</Text>
-        {isEdit ? (
-          <TouchableOpacity onPress={onDelete} style={p.backBtn} activeOpacity={0.7}>
-            <Text style={{ fontSize: scale(18) }}>🗑️</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={p.backBtn} activeOpacity={0.7}>
-            <Text style={{ fontSize: scale(18) }}>🔖</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+    <View style={{ flex: 1, backgroundColor: '#FAF9F4' }}>
+      <ScreenHeader
+        variant="pushed"
+        onBack={onBack}
+        closeIcon
+        title={isEdit ? 'Edit chore' : 'Add chore'}
+        backgroundColor="#FAF9F4"
+        trailing={isEdit ? (
+          <PressableShadow onPress={onDelete} depth={4} style={{ width: scale(44), height: scale(44) }}>
+            <View style={{ width: scale(44), height: scale(44), borderRadius: scale(22), backgroundColor: '#FFFFFF', borderWidth: 2.5, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: scale(18) }}>🗑️</Text>
+            </View>
+          </PressableShadow>
+        ) : undefined}
+      />
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 100 }}>
         {/* Icon Picker */}
-        <View style={{ alignItems: 'center', marginBottom: 8 }}>
-          <ChoreIconPickerSheet selected={selectedIcon} onSelect={setSelectedIcon} />
+        <View>
+          <Text style={p.formLabel}>Choose icon</Text>
+          <ChoreIconPicker selected={selectedIcon} onSelect={setSelectedIcon} />
         </View>
 
         {/* Form Fields */}
@@ -7906,7 +7933,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
 
         {/* Completion mode — only meaningful when 2+ kids are eligible */}
         {modeApplies && (
-          <View style={p.formCard}>
+          <View style={p.completionSection}>
             <Text style={p.formLabel}>How it's completed</Text>
             <View style={p.modeCard}>
               {([
@@ -7975,30 +8002,59 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
           </Animated.View>
         </Animated.View>
       </Modal>
-    </CreamBg>
+    </View>
   );
 }
 
-function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate }: {
+function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate, highlightChoreId, onHighlightConsumed }: {
   chores: ManagedChore[];
   onBack: () => void;
   onAdd: () => void;
   onEdit: (c: ManagedChore) => void;
   onDelete: (id: string) => void;
   baseRate: string;
+  /** A just-saved chore's id — scrolled to and briefly flashed lime so the
+   *  parent can find what they added (a fresh chore has nothing pending, so
+   *  it wouldn't otherwise stand out in this flat list). */
+  highlightChoreId?: string | null;
+  onHighlightConsumed?: () => void;
 }) {
+  const scrollRef = useRef<ScrollView>(null);
+  const rowY = useRef<Record<string, number>>({});
+  const glow = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!highlightChoreId) return;
+    // Layout of the just-mounted list settles a beat after this render; give it
+    // one frame before reading rowY / scrolling.
+    const t = setTimeout(() => {
+      const y = rowY.current[highlightChoreId];
+      if (y != null) scrollRef.current?.scrollTo({ y: Math.max(0, y - 24), animated: true });
+      glow.setValue(1);
+      Animated.sequence([
+        Animated.delay(700),
+        Animated.timing(glow, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ]).start(() => onHighlightConsumed?.());
+    }, 80);
+    return () => clearTimeout(t);
+  }, [highlightChoreId]);
+
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Chore Library</Text>
-        <TouchableOpacity onPress={onAdd} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={{ fontSize: scale(28), color: '#6B35F0' }}>+</Text>
-        </TouchableOpacity>
-      </View>
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120 }}>
+      <ScreenHeader
+        variant="pushed"
+        onBack={onBack}
+        title="Chore Library"
+        backgroundColor="#FAF9F4"
+        trailing={
+          <PressableShadow onPress={onAdd} depth={4} style={{ width: scale(44), height: scale(44) }}>
+            <View style={{ width: scale(44), height: scale(44), borderRadius: scale(22), backgroundColor: '#FFFFFF', borderWidth: 2.5, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: scale(22), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' }}>+</Text>
+            </View>
+          </PressableShadow>
+        }
+      />
+      <ScrollView ref={scrollRef} style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120 }}>
         {chores.length === 0 ? (
           <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
             <Text style={{ fontSize: scale(28) }}>🧹</Text>
@@ -8008,15 +8064,20 @@ function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate 
           </View>
         ) : chores.map(chore => {
           const earnAmt = (baseRateCents(baseRate) * DIFFICULTY_MULTIPLIERS[chore.difficulty] / 100).toFixed(2);
+          const isHighlighted = chore.id === highlightChoreId;
           return (
             <TouchableOpacity
               key={chore.id}
+              onLayout={(e) => { rowY.current[chore.id] = e.nativeEvent.layout.y; }}
               // Flat (no solid drop-shadow) treatment for the library list; keeps
               // the black border. shadowOpacity/elevation:0 neutralizes shadows.solid.
               style={[s.homeQuestCard, { marginBottom: 0, shadowOpacity: 0, elevation: 0 }]}
               onPress={() => onEdit(chore)}
               activeOpacity={0.8}
             >
+              {isHighlighted && (
+                <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: '#C5F215', borderRadius: 16, opacity: glow }]} />
+              )}
               <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
                 <ChoreIcon icon={chore.icon} size={45} />
               </View>
@@ -8044,14 +8105,7 @@ function PayRatesScreen({ onBack, onRateGuide, baseRate, setBaseRate }: {
 
   return (
     <CreamBg>
-      {/* Header */}
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={[p.screenTitle, { fontSize: scale(16) }]}>Pay rates & economy</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Pay rates & economy" backgroundColor="#FAF9F4" />
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
         {/* Default currency */}
@@ -8117,13 +8171,7 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
 
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Rate guide</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Rate guide" backgroundColor="#FAF9F4" />
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
 
@@ -8203,7 +8251,7 @@ function SettingsRow({ iconBg, iconEmoji, title, subtitle, badge, onPress }: {
   );
 }
 
-function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBattleCoinBonusEnabled, battleCoinBonusMultiplier, setBattleCoinBonusMultiplier, onAddKid, onEditKid, onRotateCode, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles, sessionUser, parentRole, pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName, onSignOut }: {
+function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBattleCoinBonusEnabled, battleCoinBonusMultiplier, setBattleCoinBonusMultiplier, onAddKid, onEditKid, onRotateCode, kids, kidApprovalSettings, setKidApprovalSettings, kidProfiles, sessionUser, parentRole, pinEnabled, savedPin, onSavePin, onDisablePin, onSaveName, onSignOut, onSwitchToKid, initialSub, onConsumeInitialSub }: {
   onNav: (s: ParentScreen) => void;
   baseRate: string;
   battleCoinBonusEnabled: boolean;
@@ -8225,8 +8273,14 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
   onDisablePin: () => void;
   onSaveName: (name: string) => void;
   onSignOut: () => void;
+  onSwitchToKid: (name: string) => void;
+  /** Deep-link straight into a sub-screen on mount (e.g. the Chores-queue gear
+   *  button jumps to Approval settings instead of the Settings root). */
+  initialSub?: SettingsSubScreen | null;
+  onConsumeInitialSub?: () => void;
 }) {
-  const [sub, setSub] = useState<SettingsSubScreen>('main');
+  const [sub, setSub] = useState<SettingsSubScreen>(initialSub ?? 'main');
+  useEffect(() => { if (initialSub) onConsumeInitialSub?.(); }, []);
   const [planCadence, setPlanCadence] = useState<'yearly' | 'monthly'>('yearly');
   const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
@@ -8238,6 +8292,20 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
 
   return (
     <CreamBg>
+      <ScreenHeader
+        variant="root"
+        leading={<AvatarLeading source={getParentAvatar(parentRole ?? '')} />}
+        title="Settings"
+        backgroundColor="#FAF9F4"
+        trailing={
+          <ViewSwitcher
+            selected="Switch"
+            options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
+            onSelect={(opt) => onSwitchToKid(opt.label)}
+            trigger={<SwitchPill />}
+          />
+        }
+      />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
         {/* Your plan */}
@@ -8292,10 +8360,6 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
         <Text style={ps.sectionLabel}>Account</Text>
         <View style={ps.group}>
           <SettingsRow iconBg="#8B5CF6" iconEmoji="👤" title="Account" subtitle="Email, password, notifications" onPress={() => setSub('account')} />
-          <View style={ps.divider} />
-          <SettingsRow iconBg="#64748B" iconEmoji="❓" title="Help & support" />
-          <View style={ps.divider} />
-          <SettingsRow iconBg="#94A3B8" iconEmoji="ℹ️" title="About Monstir" />
         </View>
 
         {/* Version label doubles as the hidden support gesture: press and hold
@@ -8320,16 +8384,8 @@ function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
   const earned = parentDefs.filter(m => earnedMap.has(m.id));
   const locked = parentDefs.filter(m => !earnedMap.has(m.id));
 
-  if (detailMilestone) {
-    return (
-      <ParentMilestoneDetail
-        milestone={detailMilestone}
-        earned={earnedMilestones.find(e => e.id === detailMilestone.id)}
-        allEarned={earnedMilestones}
-        onBack={() => setDetailMilestone(null)}
-      />
-    );
-  }
+  // Milestone detail renders in a bottom sheet modal below, not as a
+  // full-screen replace — see the <Modal> at the end of this component.
 
   const renderRow = (m: MilestoneDef, earnedAt?: string) => (
     <TouchableOpacity key={m.id} onPress={() => setDetailMilestone(m)} activeOpacity={0.8} style={{
@@ -8369,37 +8425,53 @@ function ParentMilestonesScreen({ onBack }: { onBack: () => void }) {
   );
 
   return (
-    <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Your Milestones</Text>
-        <View style={p.backBtn} />
-      </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
-        {/* Summary */}
-        <View style={{ backgroundColor: PURPLE, borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, marginBottom: 24, alignItems: 'center' }}>
-          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(44), color: '#FFFFFF' }}>{earned.length}</Text>
-          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: 'rgba(255,255,255,0.75)', letterSpacing: 0.5 }}>of {parentDefs.length} milestones earned</Text>
-        </View>
+    <>
+      <CreamBg>
+        <ScreenHeader variant="pushed" onBack={onBack} title="Your Milestones" backgroundColor="#FAF9F4" />
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
+          {/* Summary */}
+          <View style={{ backgroundColor: PURPLE, borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, marginBottom: 24, alignItems: 'center' }}>
+            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(44), color: '#FFFFFF' }}>{earned.length}</Text>
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: 'rgba(255,255,255,0.75)', letterSpacing: 0.5 }}>of {parentDefs.length} milestones earned</Text>
+          </View>
 
-        {earned.length > 0 && (
-          <>
-            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>EARNED</Text>
-            {earned.map(m => renderRow(m, earnedMap.get(m.id)))}
-            <View style={{ height: 20 }} />
-          </>
-        )}
+          {earned.length > 0 && (
+            <>
+              <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>EARNED</Text>
+              {earned.map(m => renderRow(m, earnedMap.get(m.id)))}
+              <View style={{ height: 20 }} />
+            </>
+          )}
 
-        {locked.length > 0 && (
-          <>
-            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>LOCKED</Text>
-            {locked.map(m => renderRow(m))}
-          </>
-        )}
-      </ScrollView>
-    </CreamBg>
+          {locked.length > 0 && (
+            <>
+              <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>LOCKED</Text>
+              {locked.map(m => renderRow(m))}
+            </>
+          )}
+        </ScrollView>
+      </CreamBg>
+
+      {/* Milestone detail — slides up as a bottom sheet */}
+      <Modal
+        visible={detailMilestone !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDetailMilestone(null)}
+      >
+        <SafeAreaProvider>
+          <StatusBar barStyle="dark-content" />
+          {detailMilestone && (
+            <ParentMilestoneDetail
+              milestone={detailMilestone}
+              earned={earnedMilestones.find(e => e.id === detailMilestone.id)}
+              allEarned={earnedMilestones}
+              onBack={() => setDetailMilestone(null)}
+            />
+          )}
+        </SafeAreaProvider>
+      </Modal>
+    </>
   );
 }
 
@@ -8466,13 +8538,7 @@ function ParentKidMilestonesScreen({ kidProfiles, onBack }: {
 
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Kids' Achievements</Text>
-        <View style={p.backBtn} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Kids' Achievements" backgroundColor="#FAF9F4" />
 
       {/* Filter chips: All + each kid */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 4 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
@@ -8658,13 +8724,7 @@ function SettingsKidsScreen({ onBack, onAddKid, onEditKid, onRotateCode, kidProf
   };
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Kids</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Kids" backgroundColor="#FAF9F4" />
       {kidProfiles.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16, paddingBottom: '20%' }}>
           <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center' }}>
@@ -8833,13 +8893,7 @@ function SettingsBattleScreen({ onBack, baseRate, battleCoinBonusEnabled, setBat
 
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Battle & bonuses</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Battle & bonuses" backgroundColor="#FAF9F4" />
       <ScrollView scrollEnabled={scrollEnabled} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120 }}>
         {/* Hero card */}
         <View style={ps.battleHero}>
@@ -8931,13 +8985,7 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
 
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Chore Approval</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Chore Approval" backgroundColor="#FAF9F4" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
         {/* Header card */}
@@ -9055,13 +9103,7 @@ function SettingsPlanBillingScreen({ onBack, planCadence, onChangeCadence }: {
 
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Plan & billing</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Plan & billing" backgroundColor="#FAF9F4" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
         {/* Hero */}
@@ -9178,13 +9220,7 @@ function ChangePlanScreen({ onBack, currentCadence, onConfirm }: {
 
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Change plan</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Change plan" backgroundColor="#FAF9F4" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
         <Text style={{ marginHorizontal: 16, marginTop: 16, fontSize: scale(14), fontFamily: 'Inter_500Medium', color: '#4A4A4A', lineHeight: scale(20) }}>
@@ -9247,13 +9283,7 @@ function SettingsAccountScreen({ onBack, sessionUser, parentRole = '', pinEnable
 
   return (
     <CreamBg>
-      <View style={p.screenHeader}>
-        <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-          <Text style={p.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={p.screenTitle}>Account</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader variant="pushed" onBack={onBack} title="Account" backgroundColor="#FAF9F4" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
         {/* Avatar */}
         <View style={{ alignItems: 'center', paddingVertical: 28 }}>
@@ -9288,15 +9318,7 @@ function SettingsAccountScreen({ onBack, sessionUser, parentRole = '', pinEnable
 
 /** Shared header for account sub-screens. */
 function AccountSubHeader({ title, onBack }: { title: string; onBack: () => void }) {
-  return (
-    <View style={p.screenHeader}>
-      <TouchableOpacity onPress={onBack} style={p.backBtn} activeOpacity={0.7}>
-        <Text style={p.backBtnText}>←</Text>
-      </TouchableOpacity>
-      <Text style={p.screenTitle}>{title}</Text>
-      <View style={{ width: 40 }} />
-    </View>
-  );
+  return <ScreenHeader variant="pushed" onBack={onBack} title={title} backgroundColor="#FAF9F4" />;
 }
 
 /** A single labelled toggle row inside a grouped card. */
@@ -10950,7 +10972,7 @@ function ForgotPasswordScreen({ onBack, onSent }: { onBack: () => void; onSent: 
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
-type AppMode = 'splash' | 'onboarding' | 'roleSelect' | 'kidPairing' | 'landing' | 'login' | 'signup' | 'checkEmail' | 'forgotPassword' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'app';
+type AppMode = 'splash' | 'onboarding' | 'roleSelect' | 'kidPairing' | 'landing' | 'login' | 'signup' | 'checkEmail' | 'forgotPassword' | 'parentOnboarding' | 'kidWelcome' | 'kidProfile' | 'paywall' | 'trialSuccess' | 'app';
 
 // Marketing-site page that receives the Supabase recovery token (MON-54).
 const RESET_PASSWORD_REDIRECT = 'https://monstirapp.com/reset-password';
@@ -11156,6 +11178,9 @@ function AppInner() {
   const [parentScreen, setParentScreen]       = useState<ParentScreen>('parentHome');
   const [prevParentScreen, setPrevParentScreen] = useState<ParentScreen>('parentHome');
   const [parentTab, setParentTab]             = useState<ParentTab>('home');
+  // Deep-link into a Settings sub-screen (e.g. the gear on the Chores approval
+  // queue jumps straight to Approval settings instead of the Settings root).
+  const [settingsInitialSub, setSettingsInitialSub] = useState<SettingsSubScreen | null>(null);
 
   // ── Nav breadcrumbs for the debug-log buffer ─────────────────────────────
   // This app has no NavigationContainer (screen is plain state), so the
@@ -11168,6 +11193,9 @@ function AppInner() {
   const [choreHistory, setChoreHistory]       = useState<{ id: string; choreName: string; kidName: string; earnedCents: number; approvedAt: string; icon: string | number; bg: string }[]>([]);
   const [appDataLoaded, setAppDataLoaded]     = useState(false);
   const [editingChore, setEditingChore]       = useState<ManagedChore | null>(null);
+  // Chore Library scroll-to-and-flash target — set to the freshly saved chore's id
+  // right after Assign Chore, cleared once ChoreLibraryScreen finishes the highlight.
+  const [newlyAddedChoreId, setNewlyAddedChoreId] = useState<string | null>(null);
   const [baseRate, setBaseRate]               = useState('0.50');
   const [parentRole, setParentRole]           = useState('');
   const [setupChildren, setSetupChildren]     = useState<import('./src/screens/ParentOnboarding').OnboardingChild[]>([]);
@@ -11191,6 +11219,16 @@ function AppInner() {
   const [parentPin, setParentPin]             = useState('');
   const [parentPinEnabled, setParentPinEnabled] = useState(false);
   const [pinModalOpen, setPinModalOpen]       = useState(false);
+  // Monstir Premium — hydrated from profiles.* at bootstrap (loadProfile()
+  // already selects '*', so this rides the same fetch). Drives the win-back
+  // paywall trigger (usePaywallTriggers) and the pending TrialSuccess hand-off.
+  const [subState, setSubState] = useState<{
+    converted: boolean;
+    paywallSeenAt: string | null;
+    lastDismissedAt: string | null;
+    winbackShownCount: number;
+  }>({ converted: false, paywallSeenAt: null, lastDismissedAt: null, winbackShownCount: 0 });
+  const [pendingTrialEnd, setPendingTrialEnd] = useState<Date | null>(null);
   // Per-kid approval settings — true = needs parent sign-off, false = auto-approve
   const [kidApprovalSettings, setKidApprovalSettings] = useState<Record<string, boolean>>({});
   // Missing entry defaults to TRUE (requires approval) — must match the settings
@@ -11199,12 +11237,19 @@ function AppInner() {
   const [showKidProfile, setShowKidProfile]   = useState(false);
   const [kidModalVisible, setKidModalVisible] = useState(false);
   const [kidModalInitial, setKidModalInitial] = useState<import('./src/screens/ParentOnboarding').OnboardingChild | null>(null);
-  const [parentToast, setParentToast]         = useState<string | null>(null);
+  const [parentToast, setParentToast]         = useState<{ id: number; msg: string } | null>(null);
   const parentToastTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const parentToastSeq                        = useRef(0);
   const showParentToast = (msg: string) => {
     setParentToast(null);
     setTimeout(() => {
-      setParentToast(msg);
+      // Stable id generated once per call — NOT Date.now() read at render time.
+      // A toast that outlives several re-renders (e.g. add-chore fires
+      // setManagedChores/setNewlyAddedChoreId/setParentScreen in quick
+      // succession) would otherwise get a fresh key on every one of those
+      // renders, remounting <Toast> and replaying its entrance animation each
+      // time — reading as the same toast "showing 3 times".
+      setParentToast({ id: ++parentToastSeq.current, msg });
       if (parentToastTimer.current) clearTimeout(parentToastTimer.current);
       parentToastTimer.current = setTimeout(() => setParentToast(null), 2100);
     }, 30);
@@ -11337,6 +11382,18 @@ function AppInner() {
 
   const [kidPayoutPending, setKidPayoutPending] = useState<Record<string, boolean>>({});
   const [payoutLog, setPayoutLog] = useState<{ kidName: string; amount: number; paidAt: string }[]>([]);
+  // Screen-12 win-back paywall gate — pure trigger evaluation over already-
+  // loaded state (chore/payout history, subState from bootstrap); no data
+  // fetching of its own. Rendered unconditionally so hook order stays stable
+  // across the early-return chain below (splash/onboarding/login/etc.) —
+  // the modal itself only ever mounts from the 'app' branch.
+  const winBackTrigger = usePaywallTriggers({
+    converted: subState.converted,
+    paywallSeenAt: subState.paywallSeenAt,
+    lastDismissedAt: subState.lastDismissedAt,
+    winbackShownCount: subState.winbackShownCount,
+    engagement: { approvedChoreCount: choreHistory.length, payoutCount: payoutLog.length },
+  });
   // Keyed by kid name: paying two kids back-to-back must not overwrite the
   // first kid's celebration data before they've seen it.
   const [payoutSnapshot, setPayoutSnapshot] = useState<Record<string, {
@@ -11352,7 +11409,7 @@ function AppInner() {
     const pairedKid = opts?.pairedKid ?? null;
     try {
         const { data: { session } } = await supabase.auth.getSession();
-        console.log('[bootstrap] session:', session?.user?.email ?? 'none');
+        if (__DEV__) console.log('[bootstrap] session:', session ? 'present' : 'none');
         if (!session) return false;
 
         setSessionUser({ name: session.user.user_metadata?.name ?? '', email: session.user.email ?? '' });
@@ -11398,9 +11455,10 @@ function AppInner() {
         // Show the cached boss identity instantly; the DB pin effect confirms /
         // overrides it once the household tier is known (MON-84 per-child model).
         if (savedBossName) setHouseholdBossName(savedBossName);
-        console.log('[bootstrap] profile:', JSON.stringify(profile));
-        console.log('[bootstrap] dbKids:', JSON.stringify(dbKids));
-        console.log('[bootstrap] dbChores count:', dbChores?.length);
+        // Never log full profile/kids JSON: profile is select('*') (includes the
+        // plaintext parent_pin) and dbKids carries kid names — both would land in
+        // release device logs. Counts only, and only in dev.
+        if (__DEV__) console.log('[bootstrap] loaded — profile:', profile ? 'yes' : 'no', 'kids:', dbKids?.length ?? 0, 'chores:', dbChores?.length ?? 0);
 
         if (profile) {
           if (profile.parent_role)                             setParentRole(profile.parent_role);
@@ -11409,6 +11467,12 @@ function AppInner() {
           if (profile.battle_coin_bonus_multiplier)            setBattleCoinBonusMultiplier(Number(profile.battle_coin_bonus_multiplier));
           if (profile.parent_pin)                              setParentPin(profile.parent_pin);
           if (profile.parent_pin_enabled !== undefined)        setParentPinEnabled(profile.parent_pin_enabled);
+          setSubState({
+            converted: !!profile.converted,
+            paywallSeenAt: profile.paywall_seen_at ?? null,
+            lastDismissedAt: profile.last_paywall_dismissed_at ?? null,
+            winbackShownCount: profile.winback_shown_count ?? 0,
+          });
         }
 
         // Per-kid goals are built from dbKids.goals_json inside the kids block
@@ -11910,6 +11974,15 @@ function AppInner() {
   kidMonsterStateRef.current = kidMonsterState;
   const kidCoinsRef = useRef(kidCoins);
   kidCoinsRef.current = kidCoins;
+  // Whether THIS device is currently looking at the recipient kid's own Home
+  // screen — the cross-device celebration only fires live, never as a stale
+  // replay when the kid switches back to a profile after being away.
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  const currentKidNameRef = useRef(currentKidName);
+  currentKidNameRef.current = currentKidName;
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
   const localChoreWriteRef = useRef(0);
   const localGoalWriteRef = useRef(0);
   // Any local write to a realtime-synced table (payout, boss, milestone,
@@ -11988,8 +12061,12 @@ function AppInner() {
                 const recentlyOurs = Date.now() - localChoreWriteRef.current < 3000;
                 const kidName = recentlyOurs ? undefined : setupChildrenRef.current.find(c => c.id === row.kid_id)?.name;
                 const chore = kidName ? managedChoresRef.current.find(c => c.id === row.chore_id) : undefined;
-                log('chore.reward.cross_device_check', { recentlyOurs, hasKidName: !!kidName, hasChore: !!chore, earnedCents: row.earned_cents });
-                if (kidName && chore && typeof row.earned_cents === 'number') {
+                const kidIsWatching = !!kidName
+                  && viewModeRef.current === 'kid'
+                  && currentKidNameRef.current === kidName
+                  && screenRef.current === 'home';
+                log('chore.reward.cross_device_check', { recentlyOurs, hasKidName: !!kidName, hasChore: !!chore, kidIsWatching, earnedCents: row.earned_cents });
+                if (kidName && chore && kidIsWatching && typeof row.earned_cents === 'number') {
                   const kmNow = kidMonsterStateRef.current[kidName] ?? DEFAULT_KID_MONSTER_STATE;
                   const earnedXp = XP_BY_DIFFICULTY[chore.difficulty];
                   const prevCoins = kidCoinsRef.current[kidName] ?? 0;
@@ -13031,10 +13108,13 @@ function AppInner() {
     // Same "Quest complete!" celebration the auto-approve path shows the instant
     // a kid submits — approval-required households only credit coins/xp HERE (on
     // the parent's approve tap), so this is the equivalent "money hit the wallet"
-    // moment for them. Snapshotted off kmAtClick (pre-award), mirroring the
-    // auto-approve block above; shows next time this kid's Home screen is active
-    // (pendingReward is gated to currentKidName there).
-    {
+    // moment for them. Only fires while the kid is ACTIVELY watching their own
+    // Home screen right now — a stale pendingChoreReward would otherwise sit
+    // around and replay as a surprise popup (or a stack of them, one per
+    // approval that happened while they were away) the next time they switch
+    // back to this profile. Coins/xp below still update unconditionally; only
+    // the celebration itself is gated.
+    if (viewMode === 'kid' && currentKidName === kidName && screen === 'home') {
       const prevCoins = getKidCoins(kidName);
       const newXpTotal = kmAtClick.xp + earnedXp;
       const neededXp = MONSTERS[kmAtClick.monsterIdx].needed;
@@ -13116,7 +13196,7 @@ function AppInner() {
         if (!awarded) logWarn('chore.approve.no_completion_row', { choreId: realId, kidId: kidDbId });
       }).catch(e => logDbError('db.chore.approve', e));
     }
-  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, getKidCoins, setupChildren, kidOnboardingDone, ensureChoreInDb]);
+  }, [managedChores, choreHistory, baseRate, viewMode, currentKidName, screen, debugDayOffset, checkMilestone, kidCoins, kidMonsterState, addKidCoins, getKidCoins, setupChildren, kidOnboardingDone, ensureChoreInDb]);
 
   // Approve a single day (the oldest pending submission).
   const approveManagedChore = useCallback((id: string, kidName: string) => {
@@ -13256,10 +13336,6 @@ function AppInner() {
       if (amount !== 0) incrementKidCoins(kidDbId, -amount).catch(e => logDbError('db.coins.payout', e));
     }
   }, [kidCoins, resetKidCoins, choreHistory, payoutLog, managedChores, setupChildren, checkMilestone]);
-
-  const openPayout = useCallback(() => {
-    setParentScreen('parentPayout');
-  }, []);
 
   const tierFromPct = (pct: number): ChestTier => {
     if (pct >= 90) return 'Legendary';
@@ -13451,6 +13527,10 @@ function AppInner() {
     });
     // The Negotiator — parent created their first custom chore from the editor.
     if (isNew) checkMilestone('parent-negotiator');
+    if (isNew) {
+      setNewlyAddedChoreId(chore.id);
+      showParentToast(`"${chore.name}" added! 🎉`);
+    }
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
 
     const iconStr = serializeChoreIcon(chore.icon);
@@ -13460,7 +13540,11 @@ function AppInner() {
     // IDs prefixed with '_' are local-only (not yet in Supabase); bare UUIDs are already saved
     if (chore.id.startsWith('_')) {
       addChore(fields).then(row => {
-        if (row?.id) setManagedChores(prev => prev.map(c => c.id === chore.id ? { ...c, id: row.id } : c));
+        if (row?.id) {
+          setManagedChores(prev => prev.map(c => c.id === chore.id ? { ...c, id: row.id } : c));
+          // Keep the highlight pointed at the right row through the temp→real id swap.
+          setNewlyAddedChoreId(prev => prev === chore.id ? row.id : prev);
+        }
       }).catch(e => logDbError('db.chore.add', e));
     } else {
       updateChoreDb(chore.id, fields).catch(e => logDbError('db.chore.update', e));
@@ -13468,8 +13552,10 @@ function AppInner() {
   };
   const deleteChore = (id: string) => {
     noteLocalWrite();   // chores delete is ours — skip our household-sync echo
+    const deletedName = managedChores.find(c => c.id === id)?.name;
     setManagedChores(prev => prev.filter(c => c.id !== id));
     setParentScreen(prevParentScreen === 'choreLibrary' ? 'choreLibrary' : 'chores');
+    if (deletedName) showParentToast(`"${deletedName}" deleted`);
     if (!id.startsWith('_')) deleteChoreDb(id).catch(e => logDbError('db.chore.delete', e));
   };
 
@@ -13822,7 +13908,11 @@ function AppInner() {
             AsyncStorage.removeItem('monstir:weekApprovalDays').catch(() => {});
 
             setViewMode('parent');
-            setAppMode('app');
+            // Paywall (6A) is the last onboarding step — dismissing it (or
+            // finishing a purchase, via TrialSuccess) is what actually lands
+            // on 'app'. Not a hard gate: dismissing lets them through as free
+            // tier (Paywall.onDismiss records paywall_seen_at, never blocks).
+            setAppMode('paywall');
 
             // Save to Supabase in background
             try {
@@ -13843,6 +13933,35 @@ function AppInner() {
             }
           }}
         />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'paywall') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" />
+        <Paywall
+          onDismiss={() => setAppMode('app')}
+          onSubscribed={(result: PaywallResult) => {
+            setSubState(prev => ({ ...prev, converted: true }));
+            setPendingTrialEnd(result.trialEndsAt);
+            setAppMode('trialSuccess');
+          }}
+          onRestored={() => {
+            setSubState(prev => ({ ...prev, converted: true }));
+            setAppMode('app');
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (appMode === 'trialSuccess') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" />
+        <TrialSuccess trialEndsAt={pendingTrialEnd} onContinue={() => setAppMode('app')} />
       </SafeAreaProvider>
     );
   }
@@ -13904,7 +14023,7 @@ function AppInner() {
 
   return (
     <SafeAreaProvider>
-    <SafeAreaView edges={['top']} style={[s.root, (screen === 'home' || screen === 'world' || viewMode === 'parent') && { backgroundColor: viewMode === 'parent' ? '#FFFFFF' : '#C5F215' }, (viewMode === 'kid' && screen === 'wallet') && { backgroundColor: C.bg }]}>
+    <SafeAreaView edges={['top']} style={[s.root, (screen === 'home' || screen === 'world' || viewMode === 'parent') && { backgroundColor: viewMode === 'parent' ? '#FAF9F4' : '#C5F215' }, (viewMode === 'kid' && screen === 'wallet') && { backgroundColor: C.bg }]}>
       <StatusBar barStyle="dark-content" backgroundColor={viewMode === 'parent' ? '#FFFFFF' : (screen === 'home' || screen === 'world' ? '#C5F215' : viewMode === 'kid' && screen === 'wallet' ? C.bg : C.surface)} />
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         {viewMode === 'kid' ? (
@@ -13983,25 +14102,24 @@ function AppInner() {
             {screen === 'wallet'   && <ErrorBoundary key={`wallet-${currentKidName}`}><WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={getKidCoins(currentKidName)} weeklyEarnedCents={computeKidLedger(currentKidName, getKidCoins(currentKidName), choreHistory, payoutLog, debugDayOffset).earnedThisWeekCents} weeklyHistory={getKidWeeklyHistory(currentKidName, choreHistory, payoutLog, debugDayOffset)} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={getKidGoals(currentKidName)} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={liveCurrentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={requestParentMode} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} onOpenTrophyRoom={() => { setTrophyInitialKey(undefined); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }}
                 onOpenRelicDetail={(key) => { setTrophyInitialKey(key); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }} parentRole={parentRole} /></ErrorBoundary>}
             {screen === 'trophies' && <ErrorBoundary key={`trophies-${currentKidName}`}><TrophyRoom monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} xp={xp} currentKidName={currentKidName} isTab header={
-                <View style={[s.homeHeader, { backgroundColor: 'transparent' }]}>
-                  <View style={s.homeHeaderLeft}>
-                    <KidAvatarBadge idx={currentKidAvatarIdx} />
-                    <View style={{ gap: 4 }}>
-                      <ViewSwitcher
-                        selected={currentKidName || 'Kid view'}
-                        options={[
-                          ...setupChildren.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
-                          { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
-                        ]}
-                        onSelect={(opt) => { if (opt.label === 'Parent view') requestParentMode(); else switchToKid(opt.label); }}
-                      />
-                    </View>
-                  </View>
-                  <View style={s.homeBalancePill}>
-                    <Text style={s.homeBalanceText}>${(getKidCoins(currentKidName) / 100).toFixed(2)}</Text>
-                    <Image source={require('./assets/icons/icon-coin.png')} style={{ width: scale(20), height: scale(20) }} resizeMode="contain" />
-                  </View>
-                </View>
+                <ScreenHeader
+                  variant="root"
+                  leading={
+                    <ViewSwitcher
+                      selected={currentKidName || 'Kid view'}
+                      options={[
+                        ...setupChildren.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
+                        { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
+                      ]}
+                      onSelect={(opt) => { if (opt.label === 'Parent view') requestParentMode(); else switchToKid(opt.label); }}
+                      trigger={<AvatarLeading source={getAvatarImage(currentKidAvatarIdx)} />}
+                    />
+                  }
+                  overline={currentKidName}
+                  title="Trophies"
+                  backgroundColor="#FAF9F4"
+                  trailing={<BalancePill amountLabel={`$${(getKidCoins(currentKidName) / 100).toFixed(2)}`} />}
+                />
               } currentBossName={householdIdentity.name} {...(() => { const { target, done } = householdChoreTotals(managedChores, setupChildren.map(c => c.name), kidJoinDates); return { familyPowerPct: Math.min(100, Math.round((done / (target || 1)) * 100)), choresLeft: Math.max(0, Math.round(target - done)) }; })()} daysLeft={daysUntilSunday(debugDayOffset)} onViewBoss={() => { setTab('world'); setScreen('world'); }} onBack={() => { setTab('wallet'); setScreen('wallet'); }} /></ErrorBoundary>}
             {screen === 'goalFlow' && <GoalCreationFlow onDone={() => setScreen('home')} onCancel={() => setScreen('home')} onGoalCreated={addGoal} monsterName={effectiveMonsterName} />}
             {screen === 'kidPayout' && (() => { const lastPayout = payoutLog.find(p => p.kidName === currentKidName); const snap = payoutSnapshot[currentKidName]; return lastPayout ? <KidPayoutScreen amount={lastPayout.amount} completedCount={snap?.completedCount ?? 0} weeks={snap?.weeks ?? []} battleWon={snap?.battleWon ?? null} battleBonus={snap?.battleBonus ?? null} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} onDismiss={() => { setScreen('home'); setTab('home'); }} /> : null; })()}
@@ -14015,36 +14133,33 @@ function AppInner() {
           </>
         ) : (
           <View style={{ flex: 1 }}>
-            {/* Persistent parent header — shows on all parent screens */}
-            <View style={[p.homeHeader, { backgroundColor: '#FFFFFF', zIndex: 10 }]}>
-              <View style={p.homeHeaderLeft}>
-                <View style={p.homeAvatar}>
-                  <Image source={getParentAvatar(parentRole)} style={{ width: '100%', height: '100%', borderRadius: 999 }} resizeMode="cover" />
-                </View>
-                <ViewSwitcher
-                  selected="Parent view"
-                  dark
-                  options={[
-                    { label: 'Parent view', image: getParentAvatar(parentRole ?? ''), bg: '#C5F215' },
-                    ...setupChildren.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) })),
-                  ]}
-                  onSelect={(opt) => { if (opt.label !== 'Parent view') switchToKid(opt.label); }}
-                />
+            {/* Persistent parent header — shows on all parent screens EXCEPT
+                ones whose own component already renders its own header (that
+                header takes over rather than stacking under this one). */}
+            {!PARENT_SCREENS_WITH_OWN_HEADER.has(parentScreen) && (
+              <View style={[p.homeHeader, { backgroundColor: '#FAF9F4', zIndex: 10, justifyContent: 'center' }]}>
+                <Text style={{ fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', textAlign: 'center' }}>
+                  {PARENT_SCREEN_TITLES[parentScreen]}
+                </Text>
               </View>
-              <TouchableOpacity style={p.homeBell} activeOpacity={0.7}>
-                <Text style={{ fontSize: scale(22) }}>🔔</Text>
-              </TouchableOpacity>
-            </View>
+            )}
 
-            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onReject={rejectManagedChore} baseRate={baseRate} onPayKid={openPayout} onConfirmPayout={(kn) => { confirmPayout(kn); showParentToast(`✓ Paid ${kn}!`); }} kidName={currentKidName} totalCoins={Object.values(kidCoins).reduce((s, v) => s + v, 0)} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} weekApprovalDays={weekApprovalDays} kidJoinDates={kidJoinDates} debugDayOffset={debugDayOffset} currentBossName={householdIdentity.name} kidBossStatus={kidBossStatus} /></ErrorBoundary>}
+            {parentScreen === 'parentHome' && <ErrorBoundary key="parentHome"><ParentHomeScreen onNav={navParent} onSwitchToKid={switchToKid} onAddKid={() => openKidModal(null)} onAddChore={() => {
+              // Route through Chore Library, not straight back to 'parentHome': saveChore
+              // always lands on 'chores' (App.tsx saveChore) unless prevParentScreen is
+              // 'choreLibrary' — and 'chores' is the pending-REVIEW queue, which a brand
+              // new chore (nothing submitted yet) never appears in. Chore Library lists
+              // every chore unconditionally, so the parent actually sees what they just added.
+              setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore');
+            }} managedChores={managedChores} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onApproveAllPending={approveAllPendingChores} onReject={rejectManagedChore} baseRate={baseRate} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} kidCoins={kidCoins} choreHistory={choreHistory} payoutLog={payoutLog} kidJoinDates={kidJoinDates} debugDayOffset={debugDayOffset} sessionUser={sessionUser} parentRole={parentRole} /></ErrorBoundary>}
             {parentScreen === 'parentPayout' && <ErrorBoundary key="parentPayout"><ParentPayoutScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} payoutLog={payoutLog} onConfirm={confirmPayout} onBack={goBack} /></ErrorBoundary>}
-            {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onApproveAllPending={approveAllPendingChores} onReject={rejectManagedChore} onOpenSettings={() => { setPrevParentScreen(parentScreen); setParentScreen('settings'); }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} /></ErrorBoundary>}
-            {parentScreen === 'choreLibrary' && <ErrorBoundary key="choreLibrary"><ChoreLibraryScreen chores={managedChores} onBack={goBack} onAdd={() => { setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore'); }} onEdit={(c) => { setPrevParentScreen('choreLibrary'); openEditChore(c); }} onDelete={deleteChore} baseRate={baseRate} /></ErrorBoundary>}
+            {(parentScreen === 'chores' || parentScreen === 'addChore' || parentScreen === 'editChore') && <ErrorBoundary key="parentChores"><ParentChoresScreen chores={managedChores} history={choreHistory} onBack={goBack} showBack={prevParentScreen === 'settings'} onAdd={() => { setPrevParentScreen(parentScreen); setEditingChore(null); setParentScreen('addChore'); }} onEdit={openEditChore} baseRate={baseRate} onApprove={approveManagedChore} onApproveAll={approveAllManagedChore} onApproveAllPending={approveAllPendingChores} onReject={rejectManagedChore} onOpenSettings={() => { setPrevParentScreen(parentScreen); setSettingsInitialSub('approval'); setParentScreen('settings'); }} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} onSwitchToKid={switchToKid} parentRole={parentRole} /></ErrorBoundary>}
+            {parentScreen === 'choreLibrary' && <ErrorBoundary key="choreLibrary"><ChoreLibraryScreen chores={managedChores} onBack={goBack} onAdd={() => { setPrevParentScreen('choreLibrary'); setEditingChore(null); setParentScreen('addChore'); }} onEdit={(c) => { setPrevParentScreen('choreLibrary'); openEditChore(c); }} onDelete={deleteChore} baseRate={baseRate} highlightChoreId={newlyAddedChoreId} onHighlightConsumed={() => setNewlyAddedChoreId(null)} /></ErrorBoundary>}
             {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} /></ErrorBoundary>}
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} managedChores={managedChores} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} /></ErrorBoundary>}
-            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} onRotateCode={handleRotateCode} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx, pairingCode: c.pairingCode }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} /></ErrorBoundary>}
+            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} managedChores={managedChores} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} onSwitchToKid={switchToKid} parentRole={parentRole} /></ErrorBoundary>}
+            {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} onRotateCode={handleRotateCode} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx, pairingCode: c.pairingCode }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} onSwitchToKid={switchToKid} initialSub={settingsInitialSub} onConsumeInitialSub={() => setSettingsInitialSub(null)} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'kidMilestones' && <ErrorBoundary key="kidMilestones"><ParentKidMilestonesScreen kidProfiles={setupChildren.map(c => ({ name: c.name, avatarIdx: c.avatarIdx }))} onBack={goBack} /></ErrorBoundary>}
             {parentScreen !== 'parentPayout' && (
@@ -14092,7 +14207,7 @@ function AppInner() {
       onClose={() => setKidModalVisible(false)}
       onSave={handleKidModalSave}
     />
-    {parentToast && <Toast key={parentToast + Date.now()} message={parentToast} />}
+    {parentToast && <Toast key={parentToast.id} message={parentToast.msg} />}
 
     {/* Milestone toast — rendered at root so it shows in BOTH parent and kid views
         (kid milestones earned during a parent's approval now actually surface). */}
@@ -14116,9 +14231,13 @@ function AppInner() {
     )}
 
     {/* Single reward-popup host (weakness discovery + shard drop), queued so two
-        never present at once — see RewardPopup queue. */}
+        never present at once — see RewardPopup queue. Kid-facing only: a reward
+        can get queued while in kid view and then still be sitting in the queue
+        if the parent switches back to their own screen before it's dismissed —
+        gate on viewMode here (not just at enqueue time) so it never floats on
+        top of a parent screen; it reappears next time kid view is entered. */}
     <RewardModal
-      visible={reward !== null}
+      visible={reward !== null && viewMode === 'kid'}
       icon={reward?.kind === 'weakness' ? reward.weaknessIcon : reward?.kind === 'sharedClaimed' ? '🤝' : '💎'}
       title={reward?.kind === 'weakness' ? 'Weakness discovered!' : reward?.kind === 'sharedClaimed' ? 'Teamwork!' : 'Shard found!'}
       onClose={dismissReward}
@@ -14129,6 +14248,18 @@ function AppInner() {
           ? <><RewardModalStrong>{reward.byName}</RewardModalStrong> finished this one first!{'\n'}Nice teamwork — your family got it done. 🎉</>
           : <>You found a battle <RewardModalStrong>shard</RewardModalStrong>!{'\n'}Spend it on a special attack in your next battle.</>
       }
+    />
+
+    {/* Screen 12 — deferred win-back paywall (usePaywallTriggers gates when). */}
+    <WinBackPaywallModal
+      visible={winBackTrigger.shouldShow}
+      winbackShownCount={subState.winbackShownCount}
+      onDismiss={() => setSubState(prev => ({ ...prev, lastDismissedAt: new Date().toISOString(), winbackShownCount: prev.winbackShownCount + 1 }))}
+      onSubscribed={(result: PaywallResult) => {
+        setSubState(prev => ({ ...prev, converted: true }));
+        setPendingTrialEnd(result.trialEndsAt);
+        setAppMode('trialSuccess');
+      }}
     />
 
     {/* Global debug overlay */}
@@ -14665,11 +14796,8 @@ const s = StyleSheet.create({
   tabLabelActive:  { color: '#6B35F0' },
   // home screen
   homeRoot:           { flex: 1, backgroundColor: 'transparent' },
-  homeHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
-  homeHeaderLeft:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  homeKidView:        { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
-  homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  homeBalanceText:    { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
+  homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(14), paddingVertical: scale(9), gap: 6, shadowColor: '#111111', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4 },
+  homeBalanceText:    { fontSize: scale(15), fontFamily: 'SpaceMono_700Bold', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 12 },
   homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW, overflow: 'visible' },
   homeCharImage:      { height: 340, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: 'visible' },
@@ -14869,20 +14997,9 @@ const p = StyleSheet.create({
   tabLabel:         { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: C.muted },
   tabLabelActive:   { color: '#6B35F0', fontFamily: 'Inter_700Bold' },
 
-  // Screen header
-  screenHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#ECEAE4', backgroundColor: '#FFFFFF' },
-  screenTitle:      { fontSize: scale(18), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', flex: 1, textAlign: 'center' },
-  backBtn:          { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backBtnText:      { fontSize: scale(22), color: '#1A1A1A', fontFamily: 'Inter_600SemiBold' },
-  addBtn:           { width: 40, height: 40, borderRadius: 10, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
-  addBtnText:       { fontSize: scale(22), color: '#1A1A1A', fontFamily: 'Inter_700Bold', lineHeight: scale(26) },
 
   // Parent home
   homeHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16, backgroundColor: '#F7F6F2' },
-  homeHeaderLeft:   { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  homeAvatar:       { width: 48, height: 48, borderRadius: 24, backgroundColor: '#fff', borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
-  homeParentView:   { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A' },
-  homeBell:         { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 
   // Hero card
   heroCard:         { marginHorizontal: 16, marginTop: 8, borderRadius: 20, backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
@@ -14915,8 +15032,9 @@ const p = StyleSheet.create({
 
   // Add/Edit chore form
   iconDisplay:      { width: 96, height: 96, borderRadius: 20, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  iconEditBadge:    { position: 'absolute', bottom: 2, right: 2, width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEAE4', alignItems: 'center', justifyContent: 'center' },
-  formCard:         { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
+  // Plain field grouping (label + input), no card box — matches the Add-a-kid
+  // sheet's flat style instead of a bordered/shadowed container per field.
+  formCard:         {},
   formLabel:        { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#767676', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   formInput:        { borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 16, fontSize: scale(16), color: '#1A1A1A' },
   formDropdownRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 10, padding: 16 },
@@ -14935,6 +15053,10 @@ const p = StyleSheet.create({
   kidPillActive:    { backgroundColor: '#C5F215', borderColor: '#1A1A1A' },
   kidPillText:      { fontSize: scale(12), fontFamily: 'Inter_600SemiBold' as const, color: '#767676' },
   kidPillTextActive:{ color: '#1A1A1A' },
+  // "How it's completed" is the one form section that keeps a bordered/
+  // shadowed card box — its two options read as a real choice being made
+  // (like the difficulty/frequency pickers elsewhere), not a plain field.
+  completionSection: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
   // Completion-mode radio card
   modeCard:         { borderWidth: 2, borderColor: '#ECEAE4', borderRadius: 14, overflow: 'hidden', backgroundColor: '#FFFFFF' },
   modeRow:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, backgroundColor: '#FFFFFF' },

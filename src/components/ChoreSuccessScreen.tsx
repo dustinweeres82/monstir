@@ -41,11 +41,17 @@ export interface ChoreSuccessScreenProps {
   xpNeeded: number;      // xp required for the current level
   readyToEvolve: boolean;
   onDone: () => void;
+  /** Submitted but not yet approved — nothing was actually credited yet, so
+   *  the coin/XP pills render disabled with a "pending approval" banner
+   *  instead of the normal earned-it treatment. Caller must NOT run the
+   *  reward catch-up animation (flying coins etc.) on dismiss for this case,
+   *  since there's nothing real to catch up to. */
+  pending?: boolean;
 }
 
 export function ChoreSuccessScreen({
   visible, choreTitle, monsterImg, monsterName, coinsGained, xpGained,
-  xpIntoLevel, xpNeeded, readyToEvolve, onDone,
+  xpIntoLevel, xpNeeded, readyToEvolve, onDone, pending = false,
 }: ChoreSuccessScreenProps) {
   const [btnLabel, setBtnLabel] = useState(pickFunWord);
   const [closing, setClosing]   = useState(false);
@@ -54,6 +60,7 @@ export function ChoreSuccessScreen({
   // same technique ChestReveal uses for its full-bleed background.
   const insets = useSafeAreaInsets();
   const topBleed = insets.top + (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+  const bannerH = topBleed + scale(38);
   // `scale()` is phone-tuned (caps at 1.25× a 393px base), so on a tablet or a
   // large phone the monster would stay pinned near its phone size. Let it grow
   // with the actual window width instead, floored at the normal phone size.
@@ -71,7 +78,7 @@ export function ChoreSuccessScreen({
   useEffect(() => {
     if (!visible) return;
     setClosing(false);
-    setBtnLabel(pickFunWord());
+    setBtnLabel(pending ? 'Got it!' : pickFunWord());
     fade.setValue(0);
     monsterY.setValue(30);
     monsterScl.setValue(0.6);
@@ -105,11 +112,12 @@ export function ChoreSuccessScreen({
   const bobTranslate = bob.interpolate({ inputRange: [0, 1], outputRange: [0, -10] });
 
   const subText = useMemo(() => {
+    if (pending) return 'These land once your parent approves! 👍';
     if (readyToEvolve) return `${monsterName} is ready to evolve! ✨`;
     const remaining = Math.max(0, xpNeeded - xpIntoLevel);
     if (remaining <= 0) return `${monsterName} loved that! 😍`;
     return `${monsterName} loved that! 😍 ${remaining} XP to level up`;
-  }, [readyToEvolve, monsterName, xpNeeded, xpIntoLevel]);
+  }, [pending, readyToEvolve, monsterName, xpNeeded, xpIntoLevel]);
 
   const handlePress = () => {
     if (closing) return;
@@ -120,7 +128,22 @@ export function ChoreSuccessScreen({
   if (!visible) return null;
 
   return (
-    <Animated.View style={[s.root, { opacity: fade, top: -topBleed, paddingTop: scale(64) + topBleed }]} pointerEvents={closing ? 'none' : 'auto'}>
+    <Animated.View
+      style={[
+        s.root,
+        { opacity: fade, top: -topBleed },
+        pending ? { paddingTop: scale(28) + bannerH } : { paddingTop: scale(64) + topBleed },
+      ]}
+      pointerEvents={closing ? 'none' : 'auto'}
+    >
+      {/* "Pending parent approval" banner — pinned to the very top, bleeding
+          into the status bar the same way the purple body does. */}
+      {pending && (
+        <View style={[s.pendingBanner, { height: bannerH, paddingTop: topBleed }]}>
+          <Text style={s.pendingBannerText}>🔒 Pending parent approval</Text>
+        </View>
+      )}
+
       {/* Decorative sparkles / moon, matching the cosmic-purple reward moments used elsewhere */}
       <View style={[s.moon, { top: scale(70), left: scale(28) }]} />
       <Text style={[s.sparkle, { top: scale(44), left: scale(96), fontSize: scale(18) }]}>✨</Text>
@@ -129,7 +152,7 @@ export function ChoreSuccessScreen({
       <Text style={[s.sparkle, { top: scale(210), right: scale(90), fontSize: scale(14) }]}>✦</Text>
 
       <View style={s.body}>
-        <Text style={s.eyebrow}>QUEST COMPLETE!</Text>
+        <Text style={s.eyebrow}>{pending ? 'QUEST DONE!' : 'QUEST COMPLETE!'}</Text>
         <Text style={s.title} numberOfLines={2}>{choreTitle}</Text>
 
         <Animated.View style={{ transform: [{ translateY: Animated.add(monsterY, bobTranslate) }, { scale: monsterScl }] }}>
@@ -137,19 +160,19 @@ export function ChoreSuccessScreen({
         </Animated.View>
 
         <View style={s.pillRow}>
-          <Animated.View style={[s.pill, s.pillCoin, {
+          <Animated.View style={[s.pill, pending ? s.pillCoinDisabled : s.pillCoin, {
             opacity: pill1,
             transform: [{ scale: pill1 }],
           }]}>
-            <Image source={require('../../assets/icons/icon-coin.png')} style={s.pillIcon} resizeMode="contain" />
-            <Text style={s.pillTextDark}>+{fmtPillCoins(coinsGained)}</Text>
+            <Image source={require('../../assets/icons/icon-coin.png')} style={[s.pillIcon, pending && { opacity: 0.6 }]} resizeMode="contain" />
+            <Text style={pending ? s.pillTextDisabledCoin : s.pillTextDark}>+{fmtPillCoins(coinsGained)}</Text>
           </Animated.View>
-          <Animated.View style={[s.pill, s.pillXp, {
+          <Animated.View style={[s.pill, pending ? s.pillXpDisabled : s.pillXp, {
             opacity: pill2,
             transform: [{ scale: pill2 }],
           }]}>
-            <Image source={require('../../assets/icons/icon-star.png')} style={s.pillIcon} resizeMode="contain" />
-            <Text style={s.pillTextPurple}>+{xpGained} XP</Text>
+            <Image source={require('../../assets/icons/icon-star.png')} style={[s.pillIcon, pending && { opacity: 0.6 }]} resizeMode="contain" />
+            <Text style={pending ? s.pillTextDisabledXp : s.pillTextPurple}>+{xpGained} XP</Text>
           </Animated.View>
         </View>
 
@@ -227,9 +250,30 @@ const s = StyleSheet.create({
   },
   pillCoin: { backgroundColor: LIME },
   pillXp:   { backgroundColor: CREAM },
+  // Muted/desaturated versions of pillCoin/pillXp — "you'll get this, but not
+  // yet" rather than "you have this now".
+  pillCoinDisabled: { backgroundColor: '#ABA98A' },
+  pillXpDisabled:   { backgroundColor: '#BFB8D6' },
   pillIcon: { width: scale(18), height: scale(18) },
   pillTextDark:   { fontFamily: 'Inter_900Black', fontSize: scale(15), color: INK },
   pillTextPurple: { fontFamily: 'Inter_900Black', fontSize: scale(15), color: PURPLE },
+  pillTextDisabledCoin: { fontFamily: 'Inter_900Black', fontSize: scale(15), color: '#6E6C4F' },
+  pillTextDisabledXp:   { fontFamily: 'Inter_900Black', fontSize: scale(15), color: '#7A7196' },
+  pendingBanner: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    backgroundColor: LIME,
+    borderBottomWidth: 2.5,
+    borderBottomColor: INK,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: scale(10),
+  },
+  pendingBannerText: {
+    fontFamily: 'Inter_800ExtraBold',
+    fontSize: scale(14),
+    color: INK,
+  },
   subText: {
     fontFamily: 'Nunito_800ExtraBold',
     fontSize: scale(15.5),

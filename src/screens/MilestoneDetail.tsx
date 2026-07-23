@@ -44,7 +44,7 @@ export function MilestoneDetail({
   onBack,
   allEarned = [],
 }: MilestoneDetailProps) {
-  const { scaleAnim: backScale, pressIn: backPI, pressOut: backPO } = useScaleAnimation({ toScale: 0.85 });
+  const { scaleAnim: closeScale, pressIn: closePI, pressOut: closePO } = useScaleAnimation({ toScale: 0.85 });
 
   // Build ordered list of kid milestones that have been earned
   const kidMilestoneDefs = MILESTONES.filter(m => m.audience === 'kid');
@@ -83,15 +83,15 @@ export function MilestoneDetail({
 
   return (
     <View style={s.root}>
-      {/* Header */}
+      {/* Header — modal chrome: close button only, no back arrow */}
       <View style={s.header}>
-        <TouchableOpacity style={s.backBtn} onPress={onBack} onPressIn={backPI} onPressOut={backPO} activeOpacity={1}>
-          <Animated.View style={{ transform: [{ scale: backScale }] }}>
-            <Text style={s.backBtnText}>←</Text>
+        <View style={s.backBtnSpacer} />
+        <Text style={s.headerTitle}>Trophies</Text>
+        <TouchableOpacity style={s.backBtn} onPress={onBack} onPressIn={closePI} onPressOut={closePO} activeOpacity={1}>
+          <Animated.View style={{ transform: [{ scale: closeScale }] }}>
+            <Text style={s.backBtnText}>✕</Text>
           </Animated.View>
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Trophies</Text>
-        <View style={s.backBtn} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
@@ -161,11 +161,6 @@ export function MilestoneDetail({
           </View>
         )}
 
-        {/* CTA */}
-        <TouchableOpacity style={[s.ctaBtn, CARD_SHADOW]} activeOpacity={0.8}>
-          <Text style={s.ctaText}>Power up for the next boss →</Text>
-        </TouchableOpacity>
-
       </ScrollView>
     </View>
   );
@@ -180,12 +175,13 @@ const s = StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
   backBtn: {
-    width: 44, height: 44, borderRadius: 12,
+    width: 44, height: 44, borderRadius: 22,
     borderWidth: 2, borderColor: BORDER,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.white,
     shadowColor: BORDER, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
   },
+  backBtnSpacer: { width: 44, height: 44 },
   backBtnText: { fontSize: fontSize.xxl, color: BORDER, fontFamily: interFamily.bold },
   headerTitle: { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.xxl, color: BORDER },
 

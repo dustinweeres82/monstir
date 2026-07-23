@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, Image, ScrollView,
-  TouchableOpacity, Dimensions, Animated,
+  TouchableOpacity, Dimensions, Animated, Modal, StatusBar,
 } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors, spacing, radii, scale, fontSize, interFamily } from '../design-system/tokens';
 import { ScreenState } from '../design-system/components/ScreenState';
 import { useScaleAnimation } from '../design-system/hooks';
@@ -144,43 +145,11 @@ export function TrophyRoom({
   const COL3_W  = (W - spacing.lg * 2 - GAP * (RELIC_COLS - 1)) / RELIC_COLS;
 
   // ── Detail routing ───────────────────────────────────────────────────────────
-
-  if (detailCaptureIdx !== null) {
-    return (
-      <BossDetail
-        captures={captures}
-        initialIndex={detailCaptureIdx}
-        relics={relics}
-        onBack={() => setDetailCaptureIdx(null)}
-      />
-    );
-  }
-
-  if (detailIndex !== null) {
-    return (
-      <RelicDetail
-        entries={relics}
-        initialIndex={detailIndex}
-        rawEntries={rawEntries}
-        captures={captures}
-        onBack={() => setDetailIndex(null)}
-        onOpenBoss={(c) => { setDetailIndex(null); setDetailCaptureIdx(captures.indexOf(c)); }}
-      />
-    );
-  }
-
-  // Milestone detail — keep showAllMilestones active so back returns to list
-  if (detailMilestone) {
-    const earned = earnedMs.find(e => e.id === detailMilestone.id);
-    return (
-      <MilestoneDetail
-        milestone={detailMilestone}
-        earned={earned}
-        allEarned={earnedMs}
-        onBack={() => setDetailMs(null)}
-      />
-    );
-  }
+  // Relic / boss-jar / milestone detail all render in a bottom sheet modal
+  // below, not as a full-screen replace — see the <Modal>s at the end of the
+  // main return. (Rendering as a modal instead of an early return also means
+  // whatever was underneath — main grid or the "see all milestones" list —
+  // just stays mounted, so back naturally returns to the right place.)
 
   // ── See All: Milestones ──────────────────────────────────────────────────────
 
@@ -652,6 +621,69 @@ export function TrophyRoom({
 
         </ScrollView>
       )}
+
+      {/* Relic detail — slides up as a bottom sheet, mirrors the Add/Edit
+          chore modal pattern elsewhere in the app. */}
+      <Modal
+        visible={detailIndex !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDetailIndex(null)}
+      >
+        <SafeAreaProvider>
+          <StatusBar barStyle="dark-content" />
+          {detailIndex !== null && (
+            <RelicDetail
+              entries={relics}
+              initialIndex={detailIndex}
+              rawEntries={rawEntries}
+              captures={captures}
+              onBack={() => setDetailIndex(null)}
+              onOpenBoss={(c) => { setDetailIndex(null); setDetailCaptureIdx(captures.indexOf(c)); }}
+            />
+          )}
+        </SafeAreaProvider>
+      </Modal>
+
+      {/* Boss jar detail — same bottom sheet treatment as relic detail. */}
+      <Modal
+        visible={detailCaptureIdx !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDetailCaptureIdx(null)}
+      >
+        <SafeAreaProvider>
+          <StatusBar barStyle="dark-content" />
+          {detailCaptureIdx !== null && (
+            <BossDetail
+              captures={captures}
+              initialIndex={detailCaptureIdx}
+              relics={relics}
+              onBack={() => setDetailCaptureIdx(null)}
+            />
+          )}
+        </SafeAreaProvider>
+      </Modal>
+
+      {/* Milestone detail — same bottom sheet treatment as relic detail. */}
+      <Modal
+        visible={detailMilestone !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDetailMs(null)}
+      >
+        <SafeAreaProvider>
+          <StatusBar barStyle="dark-content" />
+          {detailMilestone && (
+            <MilestoneDetail
+              milestone={detailMilestone}
+              earned={earnedMs.find(e => e.id === detailMilestone.id)}
+              allEarned={earnedMs}
+              onBack={() => setDetailMs(null)}
+            />
+          )}
+        </SafeAreaProvider>
+      </Modal>
     </View>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Share,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated,
 } from 'react-native';
 import { colors, spacing, fontSize, scale, interFamily, spaceMonoFamily, radii } from '../design-system/tokens';
 import { useScaleAnimation } from '../design-system/hooks';
@@ -66,8 +66,7 @@ export interface RelicDetailProps {
 
 export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBack, onOpenBoss }: RelicDetailProps) {
   const [idx, setIdx] = useState(initialIndex);
-  const { scaleAnim: backScale, pressIn: backPressIn, pressOut: backPressOut } = useScaleAnimation({ toScale: 0.85 });
-  const { scaleAnim: shareScale, pressIn: sharePressIn, pressOut: sharePressOut } = useScaleAnimation({ toScale: 0.85 });
+  const { scaleAnim: closeScale, pressIn: closePressIn, pressOut: closePressOut } = useScaleAnimation({ toScale: 0.85 });
 
   const entry       = entries[idx];
   const def         = COLLECTIBLES.find(c => c.key === entry.itemKey);
@@ -88,37 +87,21 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
 
   const dots = entries;
 
-  async function handleShare() {
-    try {
-      await Share.share({ message: `I found a ${rarity} Relic — ${displayName} — in Monstir! 🏆` });
-    } catch (_) {}
-  }
-
   return (
     <View style={s.root}>
-      {/* Header */}
+      {/* Header — modal chrome: close button only, no back arrow */}
       <View style={s.header}>
-        <TouchableOpacity
-          style={s.iconBtn}
-          onPress={onBack}
-          onPressIn={backPressIn}
-          onPressOut={backPressOut}
-          activeOpacity={1}
-        >
-          <Animated.View style={{ transform: [{ scale: backScale }] }}>
-            <Text style={s.iconBtnText}>←</Text>
-          </Animated.View>
-        </TouchableOpacity>
+        <View style={s.iconBtnSpacer} />
         <Text style={s.headerTitle}>Relic</Text>
         <TouchableOpacity
           style={s.iconBtn}
-          onPress={handleShare}
-          onPressIn={sharePressIn}
-          onPressOut={sharePressOut}
+          onPress={onBack}
+          onPressIn={closePressIn}
+          onPressOut={closePressOut}
           activeOpacity={1}
         >
-          <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-            <Text style={s.iconBtnText}>↑</Text>
+          <Animated.View style={{ transform: [{ scale: closeScale }] }}>
+            <Text style={s.iconBtnText}>✕</Text>
           </Animated.View>
         </TouchableOpacity>
       </View>
@@ -184,11 +167,6 @@ export function RelicDetail({ entries, initialIndex, rawEntries, captures, onBac
           />
         </View>
 
-        {/* CTA */}
-        <TouchableOpacity style={[s.ctaBtn, CARD_SHADOW]} activeOpacity={0.8}>
-          <Text style={s.ctaText}>Find More Relics →</Text>
-        </TouchableOpacity>
-
       </ScrollView>
     </View>
   );
@@ -203,12 +181,13 @@ const s = StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
   iconBtn: {
-    width: 44, height: 44, borderRadius: 12,
+    width: 44, height: 44, borderRadius: 22,
     borderWidth: 2, borderColor: BORDER,
     backgroundColor: colors.white,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: BORDER, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
   },
+  iconBtnSpacer: { width: 44, height: 44 },
   iconBtnText: { fontSize: fontSize.xxl, color: BORDER, fontFamily: interFamily.bold },
   headerTitle: { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.xxl, color: BORDER },
 
