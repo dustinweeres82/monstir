@@ -6964,7 +6964,13 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onAddChore, managedC
 
               {allPendingReviews.length === 0 ? (
                 <View style={{ alignItems: 'center', gap: 6, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 24 }}>
-                  <Text style={{ fontSize: scale(28) }}>{isFresh ? '🌱' : '🎉'}</Text>
+                  <Image
+                    source={isFresh
+                      ? require('./assets/icons/icon-plant.png')
+                      : require('./assets/icons/icon-clipboard-done.png')}
+                    style={{ width: scale(48), height: scale(48) }}
+                    resizeMode="contain"
+                  />
                   <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>
                     {isFresh ? 'New week, fresh start!' : "You're all caught up!"}
                   </Text>
@@ -7599,7 +7605,11 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
             </View>
           ) : allPendingReviews.length === 0 ? (
             <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
-              <Text style={{ fontSize: scale(28) }}>🎉</Text>
+              <Image
+                source={require('./assets/icons/icon-clipboard-done.png')}
+                style={{ width: scale(48), height: scale(48) }}
+                resizeMode="contain"
+              />
               <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: C.text }}>All caught up!</Text>
               <Text style={{ fontSize: scale(12), color: C.muted, textAlign: 'center' }}>Nothing needs your review right now.</Text>
             </View>
@@ -7666,7 +7676,11 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
           // History tab
           historyGroups.length === 0 ? (
             <View style={{ alignItems: 'center', paddingTop: 60 }}>
-              <Text style={{ fontSize: scale(28), marginBottom: 12 }}>📋</Text>
+              <Image
+                source={require('./assets/icons/icon-calendar-empty.png')}
+                style={{ width: scale(48), height: scale(48), marginBottom: 12 }}
+                resizeMode="contain"
+              />
               <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: C.text, marginBottom: 8 }}>No history yet</Text>
               <Text style={{ fontSize: scale(12), color: C.muted }}>Approved chores will appear here.</Text>
             </View>
@@ -8991,7 +9005,11 @@ function SettingsApprovalScreen({ onBack, kids, kidApprovalSettings, setKidAppro
         {/* Header card */}
         <View style={ps.apprHeaderCard}>
           <View style={ps.apprHeaderIcon}>
-            <Text style={{ fontSize: scale(22) }}>✅</Text>
+            <Image
+              source={require('./assets/icons/icon-completed.png')}
+              style={{ width: scale(28), height: scale(28) }}
+              resizeMode="contain"
+            />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={ps.apprHeaderTitle}>Who needs sign-off?</Text>
