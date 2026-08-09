@@ -6230,6 +6230,17 @@ function MoneyScreen({
   const owedCents     = ledger.owedCents;
   const settled       = owedCents === 0;
 
+  // Chores behind the owed figure. Deliberately counts UNPAID weeks only, so it
+  // moves in lockstep with the dollar amount — a lifetime "approved chores"
+  // count would keep climbing while the money stayed put, which reads as broken
+  // math (the same failure MON-75 Rev 6's EARNED = PAID + OWED chips fixed).
+  const unpaidChoreCount = useMemo(
+    () => ledger.perKid.reduce((sum, k) => sum + k.unpaidWeeks.reduce((s, w) => s + w.choreCount, 0), 0),
+    [ledger],
+  );
+  const kidChoreCount = (slice: typeof ledger.perKid[number]) =>
+    slice.unpaidWeeks.reduce((s, w) => s + w.choreCount, 0);
+
   // ── Activity filter ───────────────────────────────────────────────────────
   const [activityFilter, setActivityFilter] = useState<string>('all');
 
@@ -6293,6 +6304,15 @@ function MoneyScreen({
   // MON-83: per-child "Mark paid" breakdown sheet. Opening it on a kid shows a
   // per-week breakdown (one row per unpaid week) before confirming the payout.
   const [payoutSheetKid, setPayoutSheetKid] = useState<string | null>(null);
+
+  // Global "Mark all as paid" (re-added to the hero). MON-75 Rev 5 had removed a
+  // global payout because it fired immediately; the objection was the missing
+  // confirmation, not the affordance. So it exists again, but only behind a
+  // confirm that itemises every kid and amount — marking paid asserts real cash
+  // changed hands, and a mis-tap here would silently do that for the whole
+  // family with no undo.
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false);
+  const owedKids = ledger.perKid.filter(k => k.owedCents > 0);
   const payoutSheetLedger = payoutSheetKid
     ? ledger.perKid.find(k => k.kidName === payoutSheetKid) ?? null
     : null;
@@ -6455,10 +6475,12 @@ function MoneyScreen({
         showsVerticalScrollIndicator={false}
       >
         {/* ── Hero Card — owed leads (MON-75) ─────────────────────────────── */}
+        {/* Lime, not purple: the owed figure is the one actionable number on this
+            screen, and lime is the app's affirmative/action colour. */}
         <View style={{
           margin: 16,
           borderRadius: 20,
-          backgroundColor: '#6B35F0',
+          backgroundColor: '#C5F215',
           borderWidth: 2.5,
           borderColor: '#1A1A1A',
           ...shadows.solid,
@@ -6468,36 +6490,40 @@ function MoneyScreen({
             {/* Label */}
             <Text style={{
               fontFamily: 'Inter_900Black',
-              fontSize: scale(16),
-              color: 'rgba(255,255,255,0.7)',
-              letterSpacing: 1.5,
+              fontSize: scale(13),
+              color: '#1A1A1A',
+              opacity: 0.72,
+              letterSpacing: 1.2,
               textTransform: 'uppercase',
               marginBottom: 4,
             }}>
-              {settled ? 'All settled up' : 'You owe'}
+              {settled ? 'All settled up' : 'Total owed to kids'}
             </Text>
 
             {/* Primary stat — total owed */}
             <Text style={{
               fontFamily: 'Inter_900Black',
               fontSize: scale(44),
-              color: '#FFFFFF',
+              color: '#1A1A1A',
               lineHeight: scale(50),
             }}>
               {fmtDollars(owedCents)}
             </Text>
 
-            {/* Secondary — the action / settled state */}
+            {/* Secondary — what the figure is made of. Still no payday date:
+                MON-75 Rev 5 keeps the owed total untied to a schedule and never
+                scolding, so this describes the amount rather than nagging. */}
             <Text style={{
-              fontFamily: 'Inter_500Medium',
-              fontSize: scale(16),
-              color: 'rgba(255,255,255,0.75)',
-              marginTop: 4,
+              fontFamily: 'Inter_600SemiBold',
+              fontSize: scale(14),
+              color: '#1A1A1A',
+              opacity: 0.7,
+              marginTop: 6,
               marginBottom: 16,
             }}>
-              {/* MON-75 Rev 5: no scheduled payday — the owed total persists until
-                  the parent settles it, never tied to a date and never scolding. */}
-              {settled ? 'All paid up 🎉' : 'Pay whenever you’re ready'}
+              {settled
+                ? 'All paid up 🎉'
+                : `${unpaidChoreCount} approved chore${unpaidChoreCount === 1 ? '' : 's'} · ${ledger.kidsOwedCount} kid${ledger.kidsOwedCount === 1 ? '' : 's'}`}
             </Text>
 
             {/* Stat chips — the weekly ledger as a visible equation that adds up:
@@ -6559,27 +6585,108 @@ function MoneyScreen({
               );
             })()}
 
-            {/* MON-75 Rev 5: no global "Mark all paid" (payout is strictly
-                per-child via the per-kid sheet) and no "Next payday" row /
-                payday-settings Edit link — there is no scheduled payday. */}
+            {/* Global payout. Still no "Next payday" row or payday-settings link
+                — MON-75 Rev 5's point that there is no scheduled payday stands.
+                Opens a confirm rather than paying on tap; see confirmAllOpen. */}
+            {!settled && (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setConfirmAllOpen(true)}
+                style={{
+                  backgroundColor: '#1A1A1A',
+                  borderRadius: 14,
+                  paddingVertical: 16,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#FFFFFF' }}>
+                  Mark all as paid
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
-        {/* ── Kids Row ────────────────────────────────────────────────────── */}
-        <View style={{ marginTop: 4 }}>
-          {/* Section header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 }}>
+        {/* ── Owed by kid ──────────────────────────────────────────────────── */}
+        {/* Only kids with money outstanding, which is what the label promises. A
+            kid owed nothing has no action here; their record lives in Activity
+            (clipboard, top right). Looked up by NAME rather than index — this
+            list is filtered, so ledger.perKid positions no longer line up with
+            kidProfiles the way the old index-based card renderer assumed. */}
+        {!settled && (
+          <View style={{ marginTop: 4, paddingHorizontal: 16 }}>
             <Text style={{
-              fontFamily: 'Inter_800ExtraBold',
-              fontSize: scale(22),
-              color: '#1A1A1A',
-            }}>Kids</Text>
-          </View>
+              fontFamily: 'Inter_900Black',
+              fontSize: scale(13),
+              color: '#767676',
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              marginBottom: 12,
+            }}>Owed by kid</Text>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-            {ledger.perKid.map((slice, i) => renderKidCard(slice, i))}
-          </ScrollView>
-        </View>
+            <View style={{ gap: 12 }}>
+              {owedKids.map(slice => {
+                const kid    = kidProfiles.find(k => k.name === slice.kidName);
+                const chores = kidChoreCount(slice);
+                return (
+                  <View
+                    key={slice.kidName}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 16,
+                      borderWidth: 2.5,
+                      borderColor: '#1A1A1A',
+                      padding: 12,
+                      ...shadows.solid,
+                    }}
+                  >
+                    <View style={{
+                      width: 52, height: 52, borderRadius: 12,
+                      backgroundColor: kid?.avatarColor || '#EAE4FF',
+                      borderWidth: 2, borderColor: '#1A1A1A',
+                      alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                    }}>
+                      <Image source={getAvatarImage(kid?.avatarIdx ?? 0)} style={{ width: 44, height: 44 }} resizeMode="contain" />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A' }} numberOfLines={1}>
+                        {slice.kidName}
+                      </Text>
+                      <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(13), color: '#767676', marginTop: 2 }}>
+                        {chores} chore{chores === 1 ? '' : 's'}
+                      </Text>
+                    </View>
+
+                    <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(20), color: '#1E8E3E' }}>
+                      {fmtDollars(slice.owedCents)}
+                    </Text>
+
+                    {/* Opens the MON-83 per-week breakdown sheet — deliberately
+                        not an immediate payout. */}
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => setPayoutSheetKid(slice.kidName)}
+                      style={{
+                        backgroundColor: '#C5F215',
+                        borderRadius: 100,
+                        borderWidth: 2,
+                        borderColor: '#1A1A1A',
+                        paddingHorizontal: 14,
+                        paddingVertical: 10,
+                      }}
+                    >
+                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(13), color: '#1A1A1A' }}>Mark paid</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* ── Activity Feed ────────────────────────────────────────────────── */}
         <View style={{ marginTop: 20, paddingHorizontal: 16 }}>
@@ -6731,9 +6838,62 @@ function MoneyScreen({
         </View>
       </ScrollView>
 
+      {/* ── "Mark all as paid" confirm ─────────────────────────────────────────
+          Itemises every kid and amount before anything is written. Marking paid
+          asserts that real cash changed hands; doing that for the whole family
+          on one tap with no undo is what made MON-75 Rev 5 drop the bulk action.
+          The affordance was never the problem — the missing confirmation was. */}
+      <Modal visible={confirmAllOpen} transparent animationType="fade" onRequestClose={() => setConfirmAllOpen(false)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setConfirmAllOpen(false)} />
+          <View style={{
+            backgroundColor: '#FFFDF7',
+            borderTopLeftRadius: 24, borderTopRightRadius: 24,
+            borderWidth: 2.5, borderColor: '#1A1A1A',
+            padding: 20, paddingBottom: 20 + insets.bottom,
+          }}>
+            <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9D5CC', marginBottom: 16 }} />
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(20), color: '#1A1A1A', marginBottom: 4 }}>
+              Mark all as paid?
+            </Text>
+            <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(14), color: '#767676', marginBottom: 12 }}>
+              This records that you’ve handed out the cash. It can’t be undone.
+            </Text>
+
+            {owedKids.map(k => (
+              <View key={k.kidName} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#EDEAE1' }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>{k.kidName}</Text>
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(k.owedCents)}</Text>
+              </View>
+            ))}
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderTopWidth: 2, borderTopColor: '#1A1A1A', marginBottom: 16 }}>
+              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#1A1A1A' }}>Total</Text>
+              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(18), color: '#1A1A1A' }}>{fmtDollars(owedCents)}</Text>
+            </View>
+
+            <Button
+              label={`Mark all as paid — ${fmtDollars(owedCents)}`}
+              onPress={() => {
+                // Snapshot the names first: onConfirm mutates the ledger, so
+                // iterating owedKids directly while it changes underneath would
+                // be reading a moving target.
+                const names = owedKids.map(k => k.kidName);
+                setConfirmAllOpen(false);
+                names.forEach(n => onConfirm(n));
+              }}
+            />
+            <TouchableOpacity onPress={() => setConfirmAllOpen(false)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 14 }}>
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(15), color: '#767676' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Per-child "Mark paid" breakdown sheet (MON-83) ─────────────────────
-          Per-week breakdown for one child before confirming the payout. Payout
-          is strictly per-child — there is no bulk "settle all". */}
+          Per-week breakdown for one child before confirming the payout. A bulk
+          "mark all as paid" now also exists on the hero, but it is likewise
+          confirm-gated (see the sheet above this one). */}
       <Modal visible={payoutSheetOpen} transparent animationType="none" onRequestClose={closePayoutSheet_}>
         <Animated.View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)', opacity: payoutScrimOpacity }}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closePayoutSheet_} />
