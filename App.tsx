@@ -5,6 +5,7 @@ import {
   StatusBar, Platform, Image, TextInput, Modal, KeyboardAvoidingView,
   Animated, Easing, Dimensions, PanResponder, ActionSheetIOS, FlatList, Pressable,
   ActivityIndicator, LogBox, AccessibilityInfo, AppState, Linking, Alert, type LayoutChangeEvent,
+  type ImageSourcePropType,
 } from 'react-native';
 
 // Suppress spurious dev-mode RN warning — not a real bug in this codebase
@@ -1857,11 +1858,18 @@ const av = StyleSheet.create({
   ageCheck:     { fontSize: scale(18), color: PURPLE, fontFamily: 'Inter_700Bold' },
 });
 
-function ChoreIcon({ icon, size }: { icon: string | number; size: number }) {
-  if (typeof icon === 'number') {
-    return <Image source={icon} style={{ width: size, height: size }} resizeMode="contain" />;
+// Branch on the emoji case, NOT on `typeof icon === 'number'`. Emoji entries are
+// plain strings, but image entries come from require(), whose return type is
+// platform-dependent: an asset-registry id (number) on native, and a descriptor
+// object ({ uri, width, height }) on web. Testing for 'number' therefore misses
+// every image on web and falls through to <Text>{object}</Text>, which throws
+// "Objects are not valid as a React child". Testing for 'string' is correct on
+// both, and hands anything else straight to <Image source> as-is.
+function ChoreIcon({ icon, size }: { icon: string | ImageSourcePropType; size: number }) {
+  if (typeof icon === 'string') {
+    return <Text style={{ fontSize: size * 0.8 }}>{icon}</Text>;
   }
-  return <Text style={{ fontSize: size * 0.8 }}>{icon}</Text>;
+  return <Image source={icon} style={{ width: size, height: size }} resizeMode="contain" />;
 }
 
 function Header({ title, coins, showCoins = true }: { title: string; coins?: number; showCoins?: boolean }) {
