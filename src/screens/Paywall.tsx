@@ -56,7 +56,10 @@ export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
   const selectedPlan = selectedSku === PREMIUM_MONTHLY_SKU ? monthlyPlan : yearlyPlan;
   const trialCopy = useMemo(() => {
     if (!selectedPlan) return 'Start free trial';
-    return selectedPlan.hasFreeTrial ? `Start ${selectedPlan.trialLabel ?? '7-day'} trial` : `Subscribe — ${selectedPlan.price}`;
+    // Fallback matches the trial length formalized in MON-86 (14 days). It only
+    // shows if StoreKit reports an introductory offer with no parseable label —
+    // the real string always comes from the product.
+    return selectedPlan.hasFreeTrial ? `Start ${selectedPlan.trialLabel ?? '14-day'} trial` : `Subscribe — ${selectedPlan.price}`;
   }, [selectedPlan]);
 
   const handleDismiss = () => {

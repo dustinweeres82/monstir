@@ -8240,12 +8240,33 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
 
 // ─── Parent Settings Screens ──────────────────────────────────────────────────
 
-// Plan & billing — presentational only for now, no real Apple IAP/StoreKit
-// wiring. `planCadence` lives as local state on ParentSettingsScreen (not
-// persisted) until a real subscription backend exists to hang it off of.
-const PLAN_YEARLY_PRICE     = 39.99;
-const PLAN_MONTHLY_PRICE    = 4.99;
-const PLAN_TRIAL_DAYS_TOTAL = 7;
+// Plan & billing — presentational only, no real StoreKit wiring. `planCadence`
+// lives as local state on ParentSettingsScreen (not persisted) until a real
+// subscription backend exists to hang it off of. This whole screen is currently
+// unreachable behind BILLING_ENABLED.
+//
+// PRICES: formalized in MON-86 (2026-08-09) as a flat family rate — $9.99/mo or
+// $79.99/yr, which is exactly 33% off the annualized monthly ($119.88), so the
+// "SAVE 33%" badge stays truthful. Effective $6.67/mo yearly.
+//
+// These constants exist ONLY so the gated screen renders something coherent.
+// They are NOT the source of truth and must not be shown to a user as-is —
+// iap.ts's rule stands: prices are always derived from the live StoreKit product
+// via describePlan(), never hardcoded. Before BILLING_ENABLED flips on, this
+// screen needs rewiring to useSubscription's plan data; leaving these in place
+// would state a price Apple may not agree with (regional pricing, tax, tier
+// changes) — which is the exact trust failure the paywall strategy is built to
+// avoid.
+const PLAN_YEARLY_PRICE     = 79.99;
+const PLAN_MONTHLY_PRICE    = 9.99;
+// Trial length: 14 days, decided in MON-86 (two Sunday boss battles before any
+// charge). The real value comes from the StoreKit introductory offer — this is
+// display-only.
+const PLAN_TRIAL_DAYS_TOTAL = 14;
+// FABRICATED. A constant "days left" is not a countdown — every user would see
+// the same number forever, and END_LABEL is a fixed past date. Both must be
+// computed from the live trial (useSubscription's trialEndsAt) before this
+// screen is ever shown.
 const PLAN_TRIAL_DAYS_LEFT  = 5;
 const PLAN_TRIAL_END_LABEL  = 'Jul 22';
 const planCadenceLabel = (c: 'yearly' | 'monthly') => c === 'yearly' ? 'Yearly' : 'Monthly';
