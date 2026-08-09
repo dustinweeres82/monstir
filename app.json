@@ -16,7 +16,6 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.dweeres.monstir",
       "usesAppleSignIn": true,
-      "deploymentTarget": "15.0",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
