@@ -82,7 +82,7 @@ export function WeaknessDiscoveryModal({ visible, bossName, weaknessName, weakne
 
 const s = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1000, elevation: 1000,
     backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',

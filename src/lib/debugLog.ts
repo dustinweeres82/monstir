@@ -158,7 +158,7 @@ function installGlobalHandler() {
   if (handlerInstalled) return;
   handlerInstalled = true;
 
-  const g = global as any;
+  const g = globalThis as any;
   if (g.ErrorUtils?.getGlobalHandler) {
     const prev = g.ErrorUtils.getGlobalHandler();
     g.ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {

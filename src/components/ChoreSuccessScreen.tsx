@@ -193,7 +193,7 @@ const fmtPillCoins = (cents: number): string =>
 
 const s = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 900, elevation: 900,
     backgroundColor: PURPLE,
     alignItems: 'center',

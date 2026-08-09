@@ -4123,13 +4123,13 @@ function SlingshotGame({ onScore, title = 'SLINGSHOT' }: { onScore: (s: number) 
       </View>
 
       {/* HIT — legible ink plate so the call-out never floats on the bg */}
-      {hit && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: scale(8) }} pointerEvents="none">
+      {hit && <View style={{ ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', gap: scale(8) }} pointerEvents="none">
         <View style={b.mgTitlePlate}>
           <Text style={b.mgTitleText}>{shotPts >= 85 ? <>🎯 <Text style={b.mgTitleAccent}>BULLSEYE!</Text></> : <>💥 <Text style={b.mgTitleAccent}>HIT!</Text></>}</Text>
         </View>
         <View style={b.resultChip}><Text style={b.resultChipText}>+{shotPts}</Text></View>
       </View>}
-      {miss && <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
+      {miss && <View style={{ ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
         <View style={b.mgTitlePlate}>
           <Text style={b.mgTitleText}><Text style={b.mgTitleDanger}>MISS!</Text></Text>
         </View>
@@ -5126,7 +5126,7 @@ function BattleArenaScreen({ monsterIdx, monsterImg, monsterName, monsterId, tot
       {/* Combo colour flash */}
       {combo && (
         <Animated.View pointerEvents="none" style={{
-          ...StyleSheet.absoluteFillObject, zIndex: 99,
+          ...StyleSheet.absoluteFill, zIndex: 99,
           backgroundColor: combo.color, opacity: flashAnim.interpolate({ inputRange:[0,1], outputRange:[0, 0.35] }),
         }} />
       )}
@@ -8076,7 +8076,7 @@ function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate,
               activeOpacity={0.8}
             >
               {isHighlighted && (
-                <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: '#C5F215', borderRadius: 16, opacity: glow }]} />
+                <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#C5F215', borderRadius: 16, opacity: glow }]} />
               )}
               <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
                 <ChoreIcon icon={chore.icon} size={45} />
@@ -15414,7 +15414,7 @@ const b = StyleSheet.create({
   weaponEmptySub:  { fontSize: scale(10), fontFamily: 'Inter_600SemiBold', color: 'rgba(255,255,255,0.6)' },
 
   // ── Per-hit result: tier banner + stars + damage chip (MON-19 Rev 7) ───────
-  resultScrim:     { ...StyleSheet.absoluteFillObject, zIndex: 95, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.42)' },
+  resultScrim:     { ...StyleSheet.absoluteFill, zIndex: 95, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.42)' },
   resultBanner:    { paddingHorizontal: scale(22), paddingVertical: scale(10), borderRadius: 100, borderWidth: 3, borderColor: '#1A1A1A', ...SOLID_SHADOW },
   resultBannerText:{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(34), color: '#1A1A1A', textAlign: 'center' },
   resultStars:     { flexDirection: 'row', gap: scale(4) },
@@ -15425,7 +15425,7 @@ const b = StyleSheet.create({
   resultBoostText: { fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 0.3 },
 
   // ── Captured payoff (boss-in-jar, holds until tapped) ──────────────────────
-  captureScrim:    { ...StyleSheet.absoluteFillObject, zIndex: 120, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.82)' },
+  captureScrim:    { ...StyleSheet.absoluteFill, zIndex: 120, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.82)' },
   captureName:     { fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), color: '#FFFFFF', textAlign: 'center' },
   captureBtn:      { backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(36), paddingVertical: scale(14), marginTop: scale(4), ...SOLID_SHADOW },
   captureBtnText:  { fontFamily: 'Inter_900Black', fontSize: scale(18), color: '#1A1A1A' },
