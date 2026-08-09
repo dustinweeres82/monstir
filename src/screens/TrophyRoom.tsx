@@ -613,7 +613,11 @@ export function TrophyRoom({
           {/* ── Empty state ── */}
           {totalTrophies === 0 && (
             <View style={s.emptyWrap}>
-              <Text style={s.emptyIcon}>🏆</Text>
+              <Image
+                source={require('../../assets/icons/icon-trophy.png')}
+                style={s.emptyIcon}
+                resizeMode="contain"
+              />
               <Text style={s.emptyTitle}>No trophies yet</Text>
               <Text style={s.emptyBody}>Complete your chores, win battles, and earn chests to start your collection.</Text>
             </View>
@@ -839,7 +843,7 @@ const s = StyleSheet.create({
     alignItems: 'center', paddingTop: spacing.xxxl * 2,
     paddingHorizontal: spacing.xxxl, gap: spacing.md,
   },
-  emptyIcon:  { fontSize: scale(56) },
+  emptyIcon:  { width: scale(64), height: scale(64) },
   emptyTitle: { fontFamily: 'FredokaOne_400Regular', fontSize: fontSize.h2, color: BORDER, textAlign: 'center' },
   emptyBody:  { fontFamily: interFamily.regular, fontSize: fontSize.base, color: colors.muted, textAlign: 'center', lineHeight: scale(20) },
 });
