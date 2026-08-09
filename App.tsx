@@ -177,6 +177,23 @@ const WEAKNESS_THRESHOLD_PCT = 75;      // weekly chore completion % that reveal
 const WEAKNESS_DAMAGE_MULTIPLIER = 3.0; // fallback if a boss row omits damageMultiplier
 const WEAKNESS_BASE_DMG = 30;           // a representative normal hit; the multiplier scales this
 
+// MON-31: billing is deferred for alpha AND beta. No paywall, trial, or plan-
+// management UX is reachable while this is false — everyone is entitled to
+// everything. The existential alpha question (does the Sunday boss battle bring
+// kids back in week 2?) is unproven, and a paywall shrinks and distorts the very
+// sample needed to answer it.
+//
+// This is a kill switch over the UI only; the StoreKit plumbing in
+// useSubscription stays intact so flipping it back on is a one-line change
+// rather than a re-integration.
+//
+// TODO(MON-81): read `billing_enabled` from the app_config table once it exists,
+// with an optional per-household override so a test cohort can be flipped on
+// after retention is validated. Hardcoded false until then.
+// Annotated `boolean` rather than inferred as the literal `false`, so the gated
+// branches stay type-checked as reachable code instead of narrowing to dead.
+const BILLING_ENABLED: boolean = false;
+
 type ChoreStatus = 'active' | 'pending' | 'approved' | 'rejected';
 
 interface ManagedChore {
@@ -8310,7 +8327,7 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
   if (sub === 'battle')      return <SettingsBattleScreen       onBack={() => setSub('main')} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} />;
   if (sub === 'account')     return <SettingsAccountScreen      onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} onSignOut={onSignOut} />;
   if (sub === 'approval')    return <SettingsApprovalScreen     onBack={() => setSub('main')} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={kidProfiles} />;
-  if (sub === 'planBilling') return <SettingsPlanBillingScreen  onBack={() => setSub('main')} planCadence={planCadence} onChangeCadence={setPlanCadence} />;
+  if (BILLING_ENABLED && sub === 'planBilling') return <SettingsPlanBillingScreen  onBack={() => setSub('main')} planCadence={planCadence} onChangeCadence={setPlanCadence} />;
 
   return (
     <CreamBg>
@@ -8330,7 +8347,11 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
       />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-        {/* Your plan */}
+        {/* Your plan — hidden while BILLING_ENABLED is false (MON-31). The card
+            below renders PLAN_TRIAL_DAYS_LEFT / PLAN_* prices, which are static
+            placeholders, so showing it would state a fabricated trial countdown
+            and a price that is not the real StoreKit one. */}
+        {BILLING_ENABLED && (<>
         <Text style={ps.sectionLabel}>Your plan</Text>
         <TouchableOpacity
           onPress={() => setSub('planBilling')}
@@ -8348,6 +8369,7 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
           </View>
           <ProgressBar value={PLAN_TRIAL_DAYS_TOTAL - PLAN_TRIAL_DAYS_LEFT} max={PLAN_TRIAL_DAYS_TOTAL} fillColor="#6B35F0" height={8} />
         </TouchableOpacity>
+        </>)}
 
         {/* Family */}
         <Text style={ps.sectionLabel}>Family</Text>
@@ -13938,7 +13960,10 @@ function AppInner() {
             // finishing a purchase, via TrialSuccess) is what actually lands
             // on 'app'. Not a hard gate: dismissing lets them through as free
             // tier (Paywall.onDismiss records paywall_seen_at, never blocks).
-            setAppMode('paywall');
+            // MON-31: with billing off, onboarding lands straight on the app —
+            // routing to a gated 'paywall' here would strand the parent on the
+            // last onboarding step with nothing rendered.
+            setAppMode(BILLING_ENABLED ? 'paywall' : 'app');
 
             // Save to Supabase in background
             try {
@@ -13963,7 +13988,7 @@ function AppInner() {
     );
   }
 
-  if (appMode === 'paywall') {
+  if (BILLING_ENABLED && appMode === 'paywall') {
     return (
       <SafeAreaProvider>
         <StatusBar barStyle="dark-content" />
@@ -13983,7 +14008,7 @@ function AppInner() {
     );
   }
 
-  if (appMode === 'trialSuccess') {
+  if (BILLING_ENABLED && appMode === 'trialSuccess') {
     return (
       <SafeAreaProvider>
         <StatusBar barStyle="dark-content" />
@@ -14278,7 +14303,7 @@ function AppInner() {
 
     {/* Screen 12 — deferred win-back paywall (usePaywallTriggers gates when). */}
     <WinBackPaywallModal
-      visible={winBackTrigger.shouldShow}
+      visible={BILLING_ENABLED && winBackTrigger.shouldShow}
       winbackShownCount={subState.winbackShownCount}
       onDismiss={() => setSubState(prev => ({ ...prev, lastDismissedAt: new Date().toISOString(), winbackShownCount: prev.winbackShownCount + 1 }))}
       onSubscribed={(result: PaywallResult) => {
