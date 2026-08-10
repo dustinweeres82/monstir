@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated,
 } from 'react-native';
-import { colors, spacing, fontSize, scale, interFamily, radii } from '../design-system/tokens';
+import { colors, spacing, fontSize, scale, interFamily, radii, hardShadow } from '../design-system/tokens';
 import { useScaleAnimation } from '../design-system/hooks';
 import { MilestoneHero } from '../components/MilestoneHero';
 import { StatCard, RewardCard } from '../components/TrophyCards';
@@ -14,14 +14,6 @@ import type { CollectibleEntry } from '../storage/collectibles';
 const PURPLE = '#7B3FF2';
 const BORDER = '#111111';
 const BG     = '#FFFDF7';
-
-const CARD_SHADOW = {
-  shadowColor: BORDER,
-  shadowOffset: { width: 0, height: 6 },
-  shadowOpacity: 1,
-  shadowRadius: 0,
-  elevation: 6,
-};
 
 type RewardRarity = 'rare' | 'legendary' | 'common' | 'milestone';
 
@@ -191,7 +183,7 @@ const s = StyleSheet.create({
     borderWidth: 2, borderColor: BORDER,
     backgroundColor: colors.white,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: BORDER, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
+    ...hardShadow(3),
   },
   iconBtnSpacer: { width: 44, height: 44 },
   iconBtnText: { fontSize: fontSize.xxl, color: BORDER, fontFamily: interFamily.bold },

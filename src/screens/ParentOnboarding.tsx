@@ -1253,12 +1253,6 @@ export function ParentOnboarding({ onComplete }: Props) {
 
 // ─── Styles ────────────────────────────────────────────────────────────────
 
-const SOLID_SHADOW = Platform.select({
-  ios:     { shadowColor: BLACK, shadowOffset: { width: 3, height: 4 }, shadowOpacity: 1, shadowRadius: 0 },
-  android: { elevation: 4 },
-  default: {},
-})!;
-
 const s = StyleSheet.create({
   // Header
   heading: {
@@ -1542,11 +1536,6 @@ const s = StyleSheet.create({
   parentCardActive: {
     backgroundColor: obc.purpleSoft,
     borderColor: PURPLE,
-    ...Platform.select({
-      ios:     { shadowColor: PURPLE, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
-      android: { elevation: 4 },
-      default: {},
-    }),
   },
   parentCardEmoji: {
     width: scale(80),
@@ -1720,11 +1709,6 @@ const s = StyleSheet.create({
     backgroundColor: colors.white,
     borderWidth: 2.5,
     borderColor: PURPLE,
-    ...Platform.select({
-      ios:     { shadowColor: colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 2 },
-      android: { elevation: 3 },
-      default: {},
-    }),
   },
   sliderLabels: {
     flexDirection: 'row',

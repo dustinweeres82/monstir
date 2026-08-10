@@ -127,13 +127,8 @@ export function MilestoneToast({ milestone, kidName, onView, onDismiss }: Milest
   );
 }
 
-const CARD_SHADOW = {
-  shadowColor: BORDER,
-  shadowOffset: { width: 0, height: 6 },
-  shadowOpacity: 1,
-  shadowRadius: 0,
-  elevation: 6,
-};
+// Flat: surfaces carry no shadow — only CTA buttons do (hardShadow() in tokens).
+const CARD_SHADOW = {};
 
 const s = StyleSheet.create({
   wrapper: {

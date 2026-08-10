@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Image,
 } from 'react-native';
-import { colors, spacing, fontSize, interFamily, nunitoFamily, radii } from '../design-system/tokens';
+import { colors, spacing, fontSize, interFamily, nunitoFamily, radii, hardShadow } from '../design-system/tokens';
 import { useScaleAnimation } from '../design-system/hooks';
 import { MilestoneHero } from '../components/MilestoneHero';
 import { StatCard } from '../components/TrophyCards';
@@ -16,13 +16,8 @@ const BG     = '#FFFDF7';
 const LIME   = '#D8F52F';
 const MUTED  = '#888888';
 
-const CARD_SHADOW = {
-  shadowColor: BORDER,
-  shadowOffset: { width: 0, height: 6 },
-  shadowOpacity: 1,
-  shadowRadius: 0,
-  elevation: 6,
-};
+// Flat: surfaces carry no shadow — only CTA buttons do (hardShadow() in tokens).
+const CARD_SHADOW = {};
 
 function getNextMilestone(current: MilestoneDef): MilestoneDef | undefined {
   const same = MILESTONES.filter(m => m.category === current.category && m.audience === current.audience);
@@ -179,7 +174,7 @@ const s = StyleSheet.create({
     borderWidth: 2, borderColor: BORDER,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.white,
-    shadowColor: BORDER, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
+    ...hardShadow(3),
   },
   backBtnSpacer: { width: 44, height: 44 },
   backBtnText: { fontSize: fontSize.xxl, color: BORDER, fontFamily: interFamily.bold },

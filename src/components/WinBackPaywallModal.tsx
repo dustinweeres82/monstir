@@ -17,7 +17,8 @@ const INK    = '#1A1A1A';
 const PURPLE = '#6B35F0';
 const LIME   = '#C5F215';
 
-const HARD_SHADOW = { shadowColor: INK, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 1, shadowRadius: 0, elevation: 5 };
+// Flat: surfaces carry no shadow — only CTA buttons do (hardShadow() in tokens).
+const HARD_SHADOW = {};
 
 export interface WinBackPaywallModalProps {
   visible: boolean;

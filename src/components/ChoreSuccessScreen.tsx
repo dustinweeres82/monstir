@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Animated, Easing, Platform, StatusBar, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { scale } from '../design-system/tokens';
+import { scale, hardShadow } from '../design-system/tokens';
 
 // ─── Full-screen "Quest Complete!" celebration ─────────────────────────────────
 // Shown right after a kid completes a chore whose reward is granted immediately
@@ -15,12 +15,8 @@ const PURPLE = '#6B35F0';
 const PURPLE_DEEP = '#5A2AE0';
 const LIME   = '#C5F215';
 
-const shadow = (h: number) =>
-  Platform.select({
-    ios:     { shadowColor: INK, shadowOffset: { width: 0, height: h }, shadowOpacity: 1, shadowRadius: 0 },
-    android: { elevation: h },
-    default: {},
-  })!;
+// Flat: surfaces carry no shadow. CTA buttons use hardShadow() from tokens.
+const shadow = (_h: number) => ({});
 
 // Randomized each time the screen appears — keeps the payoff moment feeling
 // alive instead of a rote "Continue" button.
@@ -293,7 +289,7 @@ const s = StyleSheet.create({
     borderColor: INK,
     paddingVertical: scale(18),
     alignItems: 'center',
-    ...shadow(5),
+    ...hardShadow(5),
   },
   ctaText: {
     fontFamily: 'Inter_900Black',

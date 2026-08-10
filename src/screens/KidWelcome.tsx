@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts, FredokaOne_400Regular } from '@expo-google-fonts/fredoka-one';
-import { scale, fontSize as fs, fontWeight as fw, colors, textStyles } from '../design-system/tokens';
+import { scale, fontSize as fs, fontWeight as fw, colors, textStyles, hardShadow } from '../design-system/tokens';
 import { ArrowButton } from '../design-system/components/ArrowButton';
 import { useScaleAnimation } from '../design-system/hooks';
 import { obc, obText, cardShadow, DotGridBg, ObButton as Button } from './onboarding/obkit';
@@ -55,21 +55,10 @@ const SCENE_H      = MONSTER_SIZE + PLATFORM_H - OVERLAP;
 const PLATFORM_IMG = require('../../assets/platforms/platformSlime.png');
 
 // ─── Shadows ─────────────────────────────────────────────────────────────────
-const CARD_SHADOW = {
-  shadowColor: BLACK,
-  shadowOffset: { width: 3, height: 4 },
-  shadowOpacity: 1,
-  shadowRadius: 0,
-  elevation: 5,
-} as const;
-
-const BTN_SHADOW = {
-  shadowColor: BLACK,
-  shadowOffset: { width: 4, height: 4 },
-  shadowOpacity: 1,
-  shadowRadius: 0,
-  elevation: 6,
-} as const;
+// Its only consumer is arrowBtn — a CTA — so it points at the shared token helper,
+// which unlike the old literal also renders on web. BTN_SHADOW used to live here
+// too and was never referenced; dropped.
+const CARD_SHADOW = hardShadow(4);
 
 // ─── Monster catalogue ────────────────────────────────────────────────────────
 interface MonsterDef {
