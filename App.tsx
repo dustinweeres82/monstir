@@ -6250,7 +6250,6 @@ function MoneyScreen({
   baseRate,
   onConfirm,
   debugDayOffset = 0,
-  managedChores = [],
   onSwitchToKid,
   parentRole,
 }: {
@@ -6261,8 +6260,6 @@ function MoneyScreen({
   baseRate: string;
   onConfirm: (kidName: string) => void;
   debugDayOffset?: number;
-  /** Live board — used to heal activity rows whose icon was lost to the '✅' fallback. */
-  managedChores?: ManagedChore[];
   onSwitchToKid: (name: string) => void;
   parentRole?: string;
 }) {
@@ -6290,63 +6287,6 @@ function MoneyScreen({
   const kidChoreCount = (slice: typeof ledger.perKid[number]) =>
     slice.unpaidWeeks.reduce((s, w) => s + w.choreCount, 0);
 
-  // ── Activity filter ───────────────────────────────────────────────────────
-  const [activityFilter, setActivityFilter] = useState<string>('all');
-
-  // Lazy render: the history is unbounded (one entry per approval, never
-  // trimmed), and mounting every row synchronously is what made this screen
-  // slow to open. Render the newest chunk and grow on demand via "Show more".
-  const ACTIVITY_CHUNK = 30;
-  const [visibleCount, setVisibleCount] = useState(ACTIVITY_CHUNK);
-
-  // Per-entry "paid" status, ledger-consistent: an approved chore is paid once a
-  // payout dated at/after its approval lands. (The old screen marked an entry
-  // paid whenever the kid's *current* balance hit 0, which mislabelled history
-  // the moment a new week's earnings arrived.) Seed/test rows are excluded.
-  const lastPaidByKid = useMemo(() => {
-    const m: Record<string, string> = {};
-    payoutLog.forEach(p => { if (!m[p.kidName] || p.paidAt > m[p.kidName]) m[p.kidName] = p.paidAt; });
-    return m;
-  }, [payoutLog]);
-  const isEntryPaid = (e: ChoreHistoryEntry) => {
-    const lp = lastPaidByKid[e.kidName];
-    return !!lp && e.approvedAt <= lp;
-  };
-  const cleanedHistory = useMemo(
-    () => choreHistory.filter(e => e.choreName.trim().toLowerCase() !== 'test'),
-    [choreHistory],
-  );
-
-  // Heal history rows whose icon was lost to the '✅' fallback (older approvals
-  // wrote that for image-based chore icons) by falling back to the live board's
-  // current icon for that chore name.
-  const liveIconByName = useMemo(() => {
-    const m: Record<string, string | number> = {};
-    for (const c of managedChores) m[c.name] = c.icon;
-    return m;
-  }, [managedChores]);
-
-  const filteredHistory = useMemo(() => (
-    activityFilter === 'all'
-      ? cleanedHistory
-      : cleanedHistory.filter(e => e.kidName === activityFilter)
-  ), [cleanedHistory, activityFilter]);
-
-  // ── Group by date — only the visible slice (history is newest-first) ───────
-  const grouped = useMemo(() => {
-    const out: { date: string; entries: ChoreHistoryEntry[] }[] = [];
-    const seenDates: Record<string, number> = {};
-    filteredHistory.slice(0, visibleCount).forEach(e => {
-      const d = new Date(e.approvedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-      if (seenDates[d] === undefined) {
-        seenDates[d] = out.length;
-        out.push({ date: d, entries: [] });
-      }
-      out[seenDates[d]].entries.push(e);
-    });
-    return out;
-  }, [filteredHistory, visibleCount]);
-  const hiddenCount = Math.max(0, filteredHistory.length - visibleCount);
 
   // ── Derived for selected kid ──────────────────────────────────────────────
 
@@ -6769,159 +6709,12 @@ function MoneyScreen({
           </View>
         )}
 
-        {/* ── Activity Feed ────────────────────────────────────────────────── */}
-        <View style={{ marginTop: 20, paddingHorizontal: 16 }}>
-          {/* Section header */}
-          <Text style={{
-            fontFamily: 'Inter_800ExtraBold',
-            fontSize: scale(22),
-            color: '#1A1A1A',
-            marginBottom: 12,
-          }}>Activity</Text>
-
-          {/* Filter chips */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
-            {(['all', ...kidProfiles.map(k => k.name)] as string[]).map((f, i) => {
-              const isActive = activityFilter === f;
-              return (
-                <TouchableOpacity
-                  key={`${f}-${i}`}
-                  onPress={() => { setActivityFilter(f); setVisibleCount(ACTIVITY_CHUNK); }}
-                  activeOpacity={0.75}
-                  style={{
-                    borderRadius: 20,
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                    backgroundColor: isActive ? '#1A1A1A' : '#FFFFFF',
-                    borderWidth: 1.5,
-                    borderColor: '#1A1A1A',
-                  }}
-                >
-                  <Text style={{
-                    fontFamily: 'Inter_700Bold',
-                    fontSize: scale(16),
-                    color: isActive ? '#FFFFFF' : '#1A1A1A',
-                  }}>
-                    {f === 'all' ? 'All Kids' : f}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {/* Grouped entries */}
-          {grouped.length === 0 && (
-            <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-              <Text style={{ fontSize: scale(28) }}>📋</Text>
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginTop: 8 }}>No activity yet</Text>
-              <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(16), color: '#767676', marginTop: 4 }}>Approved chores will show up here.</Text>
-            </View>
-          )}
-
-          {grouped.map(group => (
-            <View key={group.date} style={{ marginBottom: 16 }}>
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 }}>
-                {group.date}
-              </Text>
-              {group.entries.map(entry => {
-                const isPaid = isEntryPaid(entry);
-                // If this row stored the '✅' fallback, show the live chore's icon instead.
-                const effIcon = (entry.icon === '✅' && liveIconByName[entry.choreName] != null)
-                  ? liveIconByName[entry.choreName]
-                  : entry.icon;
-                const hasIcon = typeof effIcon === 'string' && effIcon.length <= 4;
-                return (
-                  <View
-                    key={entry.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: isPaid ? '#FFFFFF' : '#FFFBF0',
-                      borderWidth: 2,
-                      borderColor: isPaid ? '#1A1A1A' : '#E6A817',
-                      borderRadius: 12,
-                      padding: 12,
-                      marginBottom: 8,
-                    }}
-                  >
-                    {/* Icon box */}
-                    <View style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 10,
-                      backgroundColor: entry.bg,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      marginRight: 12,
-                      borderWidth: 1.5,
-                      borderColor: '#1A1A1A',
-                    }}>
-                      {hasIcon
-                        ? <Text style={{ fontSize: scale(18) }}>{effIcon as string}</Text>
-                        : <Image source={effIcon as number} style={{ width: 26, height: 26 }} resizeMode="contain" />
-                      }
-                    </View>
-
-                    {/* Text */}
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>
-                        {entry.choreName}
-                      </Text>
-                      <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', marginTop: 0 }}>
-                        {entry.kidName}
-                      </Text>
-                    </View>
-
-                    {/* Amount + badge */}
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#3B8A3A' }}>
-                        +{fmtCoins(entry.earnedCents)}
-                      </Text>
-                      <View style={{
-                        borderRadius: 5,
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        backgroundColor: isPaid ? '#E1F5EE' : '#FFFBF0',
-                        borderWidth: 1,
-                        borderColor: isPaid ? '#27AE60' : '#E6A817',
-                      }}>
-                        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: isPaid ? '#27AE60' : '#E6A817' }}>
-                          {isPaid ? 'Paid' : 'Unpaid'}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          ))}
-
-          {/* Reveal the next chunk of older history on demand */}
-          {hiddenCount > 0 && (
-            <TouchableOpacity
-              onPress={() => setVisibleCount(c => c + ACTIVITY_CHUNK)}
-              activeOpacity={0.75}
-              style={{
-                alignItems: 'center',
-                paddingVertical: 16,
-                borderRadius: 12,
-                borderWidth: 2,
-                borderColor: '#1A1A1A',
-                backgroundColor: '#FFFFFF',
-                marginTop: 4,
-              }}
-            >
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>
-                Show {Math.min(ACTIVITY_CHUNK, hiddenCount)} more · {hiddenCount} older
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
         </>)}
 
         {/* ── History view (M4) ──────────────────────────────────────────────
-            Payout record — distinct from Activity above, which is approved chores
-            (money becoming owed) rather than handoffs (money leaving).
+            Payout record — handoffs (money leaving). Approved chores (money
+            becoming owed) are not duplicated here; that history lives on
+            Chores → History, built from the same entries.
 
             Lime, matching the Owed hero. An earlier pass used lavender on the
             "lavender = past record, lime = live debt" reading, but the M4 note
@@ -14583,7 +14376,7 @@ function AppInner() {
             {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} /></ErrorBoundary>}
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} managedChores={managedChores} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} onSwitchToKid={switchToKid} parentRole={parentRole} /></ErrorBoundary>}
+            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} onSwitchToKid={switchToKid} parentRole={parentRole} /></ErrorBoundary>}
             {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} onRotateCode={handleRotateCode} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx, pairingCode: c.pairingCode }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} onSwitchToKid={switchToKid} initialSub={settingsInitialSub} onConsumeInitialSub={() => setSettingsInitialSub(null)} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'kidMilestones' && <ErrorBoundary key="kidMilestones"><ParentKidMilestonesScreen kidProfiles={setupChildren.map(c => ({ name: c.name, avatarIdx: c.avatarIdx }))} onBack={goBack} /></ErrorBoundary>}
