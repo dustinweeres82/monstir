@@ -2045,7 +2045,7 @@ function AnimatedQuestRow({ chore, done, onPress, baseRate }: { chore: Chore; do
     >
       <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />
       <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-        <ChoreIcon icon={chore.icon} size={45} />
+        <ChoreIcon icon={chore.icon} size={54} />
       </View>
       <View style={s.homeQuestInfo}>
         <Text style={[s.homeQuestTitle, done && s.homeQuestTitleDone]}>{chore.name}</Text>
@@ -2166,7 +2166,7 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
           {isApproved && <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />}
 
           <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-            <ChoreIcon icon={chore.icon} size={45} />
+            <ChoreIcon icon={chore.icon} size={54} />
             {isPending && (
               <Animated.View style={[s.doneBadge, { transform: [{ scale: doneBadgeScale }] }]}>
                 <Text style={s.doneBadgeMark}>✓</Text>
@@ -7776,11 +7776,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
               </TouchableOpacity>
             </View>
           </View>
-        ) : (
-          <View style={{ paddingVertical: 12, paddingHorizontal: 4 }}>
-            <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(16), color: '#767676' }}>✓ Nothing to approve right now.</Text>
-          </View>
-        )}
+        ) : null}
 
         {/* Tabs — Today | History. Same SegmentedToggle as Money's Owed/History:
             both screens split into two peer views, so they should look identical.
@@ -7845,7 +7841,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                       return (
                         <View key={`${r.chore.id}-${r.kidName}`} style={[s.homeQuestCard, { marginBottom: 0, overflow: 'hidden' }]}>
                           <View style={[s.homeQuestIcon, { backgroundColor: r.chore.bg }]}>
-                            <ChoreIcon icon={r.chore.icon} size={45} />
+                            <ChoreIcon icon={r.chore.icon} size={54} />
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={s.homeQuestTitle}>{r.chore.name}</Text>
@@ -7892,7 +7888,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                   {group.items.map(entry => (
                     <View key={entry.id} style={[s.homeQuestCard, { marginBottom: 0, overflow: 'hidden' }]}>
                       <View style={[s.homeQuestIcon, { backgroundColor: entry.bg }]}>
-                        <ChoreIcon icon={entry.icon} size={45} />
+                        <ChoreIcon icon={entry.icon} size={54} />
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={s.homeQuestTitle}>{entry.choreName}</Text>
@@ -8293,7 +8289,7 @@ function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate,
                 <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#C5F215', borderRadius: 16, opacity: glow }]} />
               )}
               <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-                <ChoreIcon icon={chore.icon} size={45} />
+                <ChoreIcon icon={chore.icon} size={54} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.homeQuestTitle}>{chore.name}</Text>
@@ -15038,7 +15034,10 @@ const s = StyleSheet.create({
   homeQuestCard:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FAF9F4', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, marginBottom: 12, gap: 12, ...SOLID_SHADOW },
   homeQuestSweep:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#E8FFA0', borderRadius: 14 },
   homeQuestCardDone:  { opacity: 0.5 },
-  homeQuestIcon:      { width: 58, height: 58, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  // Stroked to match the app's bordered-card language. overflow hidden so a
+  // filling icon (ChoreIcon at 54 inside the 54 inner box) is clipped to the
+  // rounded corners instead of squaring them off.
+  homeQuestIcon:      { width: 58, height: 58, borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   homeQuestInfo:      { flex: 1 },
   homeQuestTitle:     { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A', marginBottom: 4 },
   homeQuestTitleDone: { textDecorationLine: 'line-through', color: '#767676' },
