@@ -6181,6 +6181,55 @@ function ParentPayoutScreen({ kidCoins, kidProfiles, payoutLog, onConfirm, onBac
   );
 }
 
+/** Pill segmented control for swapping two peer views — Money's Owed/History and
+ *  Chores' Today/History. Shared rather than duplicated so the two can't drift
+ *  apart. Active segment carries lime; callers supply their own outer margin. */
+function SegmentedToggle<T extends string>({ value, options, onChange }: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View style={{
+      flexDirection: 'row',
+      padding: 5,
+      borderRadius: 100,
+      backgroundColor: '#FFFFFF',
+      borderWidth: 2.5,
+      borderColor: '#1A1A1A',
+      ...shadows.solid,
+    }}>
+      {options.map(opt => {
+        const active = value === opt.value;
+        return (
+          <TouchableOpacity
+            key={opt.value}
+            activeOpacity={0.85}
+            onPress={() => onChange(opt.value)}
+            style={{
+              flex: 1,
+              borderRadius: 100,
+              paddingVertical: 12,
+              alignItems: 'center',
+              backgroundColor: active ? '#C5F215' : 'transparent',
+              borderWidth: active ? 2 : 0,
+              borderColor: '#1A1A1A',
+            }}
+          >
+            <Text style={{
+              fontFamily: active ? 'Inter_800ExtraBold' : 'Inter_600SemiBold',
+              fontSize: scale(15),
+              color: active ? '#1A1A1A' : '#9A9A9A',
+            }}>
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
 // ─── MoneyScreen (MON-75) ─────────────────────────────────────────────────────
 
 type ChoreHistoryEntry = {
@@ -6420,44 +6469,12 @@ function MoneyScreen({
         {/* ── Owed / History segmented control ───────────────────────────────
             Swaps the two peer views. The active segment carries lime, matching
             the view's own hero card — one scheme across both, per the M4 note. */}
-        <View style={{
-          flexDirection: 'row',
-          margin: 16,
-          marginBottom: 12,
-          padding: 5,
-          borderRadius: 100,
-          backgroundColor: '#FFFFFF',
-          borderWidth: 2.5,
-          borderColor: '#1A1A1A',
-          ...shadows.solid,
-        }}>
-          {(['owed', 'history'] as const).map(seg => {
-            const active = moneyView === seg;
-            return (
-              <TouchableOpacity
-                key={seg}
-                activeOpacity={0.85}
-                onPress={() => setMoneyView(seg)}
-                style={{
-                  flex: 1,
-                  borderRadius: 100,
-                  paddingVertical: 12,
-                  alignItems: 'center',
-                  backgroundColor: active ? '#C5F215' : 'transparent',
-                  borderWidth: active ? 2 : 0,
-                  borderColor: '#1A1A1A',
-                }}
-              >
-                <Text style={{
-                  fontFamily: active ? 'Inter_800ExtraBold' : 'Inter_600SemiBold',
-                  fontSize: scale(15),
-                  color: active ? '#1A1A1A' : '#9A9A9A',
-                }}>
-                  {seg === 'owed' ? 'Owed' : 'History'}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+        <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 12 }}>
+          <SegmentedToggle
+            value={moneyView}
+            onChange={setMoneyView}
+            options={[{ value: 'owed', label: 'Owed' }, { value: 'history', label: 'History' }]}
+          />
         </View>
 
         {moneyView === 'owed' && (<>
@@ -6465,7 +6482,11 @@ function MoneyScreen({
         {/* Lime, not purple: the owed figure is the one actionable number on this
             screen, and lime is the app's affirmative/action colour. */}
         <View style={{
-          margin: 16,
+          // No top margin: the segmented control above already supplies the gap
+          // via its marginBottom. Having both meant Owed sat 28px under the
+          // control while History sat 12px — the views visibly jumped on switch.
+          marginHorizontal: 16,
+          marginBottom: 16,
           borderRadius: 20,
           backgroundColor: '#C5F215',
           borderWidth: 2.5,
@@ -7968,22 +7989,16 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
           </View>
         )}
 
-        {/* Tabs — Today | History */}
-        <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ECEAE4', alignItems: 'center', marginTop: 16 }}>
-          <TouchableOpacity
-            style={{ paddingVertical: 12, paddingHorizontal: 4, marginRight: 24, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'today' ? '#6B35F0' : 'transparent' }}
-            onPress={() => setActiveTab('today')}
-            activeOpacity={0.7}
-          >
-            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'today' ? '#6B35F0' : '#ABABAB' }}>Today</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={{ paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'history' ? '#6B35F0' : 'transparent' }}
-            onPress={() => setActiveTab('history')}
-            activeOpacity={0.7}
-          >
-            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'history' ? '#6B35F0' : '#ABABAB' }}>History</Text>
-          </TouchableOpacity>
+        {/* Tabs — Today | History. Same SegmentedToggle as Money's Owed/History:
+            both screens split into two peer views, so they should look identical.
+            Replaces underlined purple text tabs, which read as a different
+            navigation idiom from the pill Money uses. */}
+        <View style={{ marginTop: 12, marginBottom: 4 }}>
+          <SegmentedToggle
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[{ value: 'today', label: 'Today' }, { value: 'history', label: 'History' }]}
+          />
         </View>
       </View>
 
