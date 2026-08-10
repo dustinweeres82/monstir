@@ -6327,7 +6327,9 @@ function MoneyScreen({
   // ledger afterwards: the payout zeroes those balances, so by the time this
   // renders the numbers it needs are gone.
   const [paidReceipt, setPaidReceipt] = useState<{ names: string[]; totalCents: number } | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  // Owed / History are peer views inside the Money tab (M1/M4), swapped by the
+  // segmented control — not a pushed screen or modal, so the tab bar stays put.
+  const [moneyView, setMoneyView] = useState<'owed' | 'history'>('owed');
 
   /** "Maya, Leo & Ava" — Oxford-comma-free serial list for the receipt copy. */
   const nameList = (names: string[]) =>
@@ -6394,29 +6396,14 @@ function MoneyScreen({
         title="Money"
         backgroundColor="#F7F6F2"
         trailing={
-          // Clipboard opens the payout History (M4). The Switch pill stays — it's
-          // how a parent reaches kid view and appears on every root screen, so
-          // dropping it to match the mock's header would lose real navigation.
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => setHistoryOpen(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={{
-                width: 38, height: 38, borderRadius: 19,
-                backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1A1A',
-                alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <Text style={{ fontSize: scale(17) }}>📋</Text>
-            </TouchableOpacity>
-            <ViewSwitcher
-              selected="Switch"
-              options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
-              onSelect={(opt) => onSwitchToKid(opt.label)}
-              trigger={<SwitchPill />}
-            />
-          </View>
+          // No clipboard button: the Owed/History segmented control below now does
+          // that job, and two controls for one destination is worse than one.
+          <ViewSwitcher
+            selected="Switch"
+            options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
+            onSelect={(opt) => onSwitchToKid(opt.label)}
+            trigger={<SwitchPill />}
+          />
         }
       />
       <ScrollView
@@ -6424,6 +6411,50 @@ function MoneyScreen({
         contentContainerStyle={{ paddingBottom: 120 + insets.bottom }}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── Owed / History segmented control ───────────────────────────────
+            Swaps the two peer views. The active segment carries lime, matching
+            the view's own hero card — one scheme across both, per the M4 note. */}
+        <View style={{
+          flexDirection: 'row',
+          margin: 16,
+          marginBottom: 12,
+          padding: 5,
+          borderRadius: 100,
+          backgroundColor: '#FFFFFF',
+          borderWidth: 2.5,
+          borderColor: '#1A1A1A',
+          ...shadows.solid,
+        }}>
+          {(['owed', 'history'] as const).map(seg => {
+            const active = moneyView === seg;
+            return (
+              <TouchableOpacity
+                key={seg}
+                activeOpacity={0.85}
+                onPress={() => setMoneyView(seg)}
+                style={{
+                  flex: 1,
+                  borderRadius: 100,
+                  paddingVertical: 12,
+                  alignItems: 'center',
+                  backgroundColor: active ? '#C5F215' : 'transparent',
+                  borderWidth: active ? 2 : 0,
+                  borderColor: '#1A1A1A',
+                }}
+              >
+                <Text style={{
+                  fontFamily: active ? 'Inter_800ExtraBold' : 'Inter_600SemiBold',
+                  fontSize: scale(15),
+                  color: active ? '#1A1A1A' : '#9A9A9A',
+                }}>
+                  {seg === 'owed' ? 'Owed' : 'History'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {moneyView === 'owed' && (<>
         {/* ── Hero Card — owed leads (MON-75) ─────────────────────────────── */}
         {/* Lime, not purple: the owed figure is the one actionable number on this
             screen, and lime is the app's affirmative/action colour. */}
@@ -6795,6 +6826,77 @@ function MoneyScreen({
             </TouchableOpacity>
           )}
         </View>
+        </>)}
+
+        {/* ── History view (M4) ──────────────────────────────────────────────
+            Payout record — distinct from Activity above, which is approved chores
+            (money becoming owed) rather than handoffs (money leaving).
+
+            Lime, matching the Owed hero. An earlier pass used lavender on the
+            "lavender = past record, lime = live debt" reading, but the M4 note
+            settles it the other way: one consistent lime scheme across both
+            views, with the log rows carrying the record detail. */}
+        {moneyView === 'history' && (
+          <View style={{ paddingHorizontal: 16 }}>
+            <View style={{
+              backgroundColor: '#C5F215',
+              borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A',
+              padding: 20, marginBottom: 24, ...shadows.solid,
+            }}>
+              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#1A1A1A', opacity: 0.72, marginBottom: 4 }}>
+                MARKED PAID, ALL TIME
+              </Text>
+              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(40), color: '#1A1A1A', lineHeight: scale(46) }}>
+                {fmtDollars(paidAllTimeCents)}
+              </Text>
+              <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(14), color: '#1A1A1A', opacity: 0.7, marginTop: 4 }}>
+                Across {paidWeeksCount} week{paidWeeksCount === 1 ? '' : 's'} · {paidKidsCount} kid{paidKidsCount === 1 ? '' : 's'}
+              </Text>
+            </View>
+
+            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#767676', marginBottom: 12 }}>
+              RECENT
+            </Text>
+
+            {payoutGroups.length === 0 ? (
+              <View style={{ alignItems: 'center', paddingTop: 40 }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 6 }}>No payouts yet</Text>
+                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(13), color: '#767676', textAlign: 'center' }}>
+                  Once you mark a chore paid, it’s logged here.
+                </Text>
+              </View>
+            ) : payoutGroups.map(g => (
+              <View
+                key={g.day}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A',
+                  padding: 14, marginBottom: 12, ...shadows.solid,
+                }}
+              >
+                <View style={{
+                  width: 40, height: 40, borderRadius: 20,
+                  backgroundColor: '#F2F7F2', borderWidth: 2, borderColor: '#C9D8C9',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1E8E3E' }}>✓</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }} numberOfLines={1}>
+                    {g.names.length > 2 ? `Paid ${g.names.length} kids` : `Paid ${nameList(g.names)}`}
+                  </Text>
+                  <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676', marginTop: 2 }}>
+                    {new Date(g.at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(17), color: '#1A1A1A' }}>
+                  {fmtDollars(g.totalCents)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {/* ── Confirm payout (M2) ────────────────────────────────────────────────
@@ -6933,9 +7035,9 @@ function MoneyScreen({
 
           <TouchableOpacity
             activeOpacity={0.85}
-            // Clears the receipt as well as opening History, so History's back
-            // arrow returns to Money (M1) rather than back into this screen.
-            onPress={() => { setPaidReceipt(null); setHistoryOpen(true); }}
+            // Dismisses the receipt and leaves the Money tab on the History
+            // segment, so closing it lands on History rather than back here.
+            onPress={() => { setPaidReceipt(null); setMoneyView('history'); }}
             style={{
               alignSelf: 'stretch', backgroundColor: '#C5F215',
               borderRadius: 100, borderWidth: 2.5, borderColor: '#1A1A1A',
@@ -6959,75 +7061,6 @@ function MoneyScreen({
         </View>
       </Modal>
 
-      {/* ── History (M4) ───────────────────────────────────────────────────────
-          Payout record, distinct from the Activity feed: Activity is approved
-          chores (money becoming owed), this is handoffs (money leaving). Lavender
-          rather than lime throughout — on this screen lime means live debt, so
-          reusing it for a settled record would misread. */}
-      <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}>
-        <View style={{ flex: 1, backgroundColor: '#FAF9F4' }}>
-          <ScreenHeader variant="pushed" onBack={() => setHistoryOpen(false)} title="History" backgroundColor="#FAF9F4" />
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 + insets.bottom }} showsVerticalScrollIndicator={false}>
-            <View style={{
-              backgroundColor: '#EAE4FF',
-              borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A',
-              padding: 20, marginBottom: 24, ...shadows.solid,
-            }}>
-              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#6B35F0', marginBottom: 4 }}>
-                MARKED PAID, ALL TIME
-              </Text>
-              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(40), color: '#6B35F0', lineHeight: scale(46) }}>
-                {fmtDollars(paidAllTimeCents)}
-              </Text>
-              <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(14), color: '#6B35F0', opacity: 0.8, marginTop: 4 }}>
-                Across {paidWeeksCount} week{paidWeeksCount === 1 ? '' : 's'} · {paidKidsCount} kid{paidKidsCount === 1 ? '' : 's'}
-              </Text>
-            </View>
-
-            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#767676', marginBottom: 12 }}>
-              RECENT
-            </Text>
-
-            {payoutGroups.length === 0 ? (
-              <View style={{ alignItems: 'center', paddingTop: 40 }}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 6 }}>No payouts yet</Text>
-                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(13), color: '#767676', textAlign: 'center' }}>
-                  Once you mark a chore paid, it’s logged here.
-                </Text>
-              </View>
-            ) : payoutGroups.map(g => (
-              <View
-                key={g.day}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 12,
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A',
-                  padding: 14, marginBottom: 12, ...shadows.solid,
-                }}
-              >
-                <View style={{
-                  width: 40, height: 40, borderRadius: 20,
-                  backgroundColor: '#F2F7F2', borderWidth: 2, borderColor: '#C9D8C9',
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1E8E3E' }}>✓</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }} numberOfLines={1}>
-                    {g.names.length > 2 ? `Paid ${g.names.length} kids` : `Paid ${nameList(g.names)}`}
-                  </Text>
-                  <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676', marginTop: 2 }}>
-                    {new Date(g.at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                  </Text>
-                </View>
-                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(17), color: '#1A1A1A' }}>
-                  {fmtDollars(g.totalCents)}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      </Modal>
 
     </View>
   );
@@ -7176,7 +7209,6 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onAddChore, managedC
             <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 16, marginBottom: 16 }}>
               <StatTile label="To Approve" value={String(pendingReviewCount)} variant="purple" badge={isBackedUp ? pendingReviewCount : undefined} />
               <StatTile label="Owed Out" value={fmtDollars(owedCents)} variant="lime" />
-              <StatTile label="Done" value={`${donePct}%`} variant={isRough ? 'loss' : 'white'} />
             </View>
 
             {/* ── Payday banner ─────────────────────────────────────────────── */}
