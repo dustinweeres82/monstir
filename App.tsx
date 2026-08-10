@@ -10293,6 +10293,9 @@ function GoalCreationFlow({ onDone, onCancel, onGoalCreated, onDeleteGoal, saved
 
 interface OnboardingFlowProps {
   onReady: () => void;
+  /** Returning parent taking the "I already have an account" path off the intro
+   *  — skips the carousel and role picker and goes straight to sign-in. */
+  onExistingAccount: () => void;
 }
 
 // MON-85 re-skin: children-first carousel matching the HTML prototype. Welcome
@@ -10351,7 +10354,7 @@ function ObSlideCard({ index }: { index: number }) {
   );
 }
 
-function OnboardingFlow({ onReady }: OnboardingFlowProps) {
+function OnboardingFlow({ onReady, onExistingAccount }: OnboardingFlowProps) {
   const [step, setStep] = useState<number>(0);
 
   // Step 0 — Welcome intro
@@ -10372,6 +10375,15 @@ function OnboardingFlow({ onReady }: OnboardingFlowProps) {
               </Rise>
             </View>
             <ObButton label="Get started" onPress={() => setStep(1)} />
+            {/* Returning parents shouldn't have to walk the carousel and role
+                picker to reach sign-in. Secondary (cream) variant so it reads
+                as the quieter of the two paths. */}
+            <ObButton
+              label="I already have an account"
+              variant="secondary"
+              onPress={onExistingAccount}
+              style={{ marginTop: scale(12) }}
+            />
           </ScreenEnter>
         </SafeAreaView>
       </DotGridBg>
@@ -14031,6 +14043,11 @@ function AppInner() {
         <StatusBar barStyle="dark-content" />
         <OnboardingFlow
           onReady={() => setAppMode('roleSelect')}
+          // 'landing' (the Apple/Google/email sign-in chooser), NOT 'login'
+          // (the email+password form). A returning parent may well have signed
+          // up with Google or Apple, and those accounts have no password —
+          // dropping them on the password form would be a dead end.
+          onExistingAccount={() => setAppMode('landing')}
         />
       </SafeAreaProvider>
     );
