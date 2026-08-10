@@ -9521,7 +9521,13 @@ function ChangePlanScreen({ onBack, currentCadence, onConfirm }: {
         )}
       </ScrollView>
 
-      <View style={{ padding: 16 }}>
+      {/* The CTA is a fixed footer, not part of the ScrollView, so it can never be
+          scrolled into view — and the floating tab bar sat on top of it, leaving the
+          button unreachable. Measured on an iPhone 17: the tab bar is absolute at
+          bottom: 36 and 97pt tall, so its top edge is 133pt up from the screen
+          bottom. 152 clears that with ~19pt to spare. (Note the paddingBottom: 120
+          used by the scrolling screens is 13pt short of clearing it.) */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 152 }}>
         <Button
           label={changed ? `Switch to ${planCadenceLabel(selected)}` : `Keep ${planCadenceLabel(currentCadence)} plan`}
           disabled={!changed}
