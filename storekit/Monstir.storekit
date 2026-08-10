@@ -1,0 +1,132 @@
+{
+  "identifier" : "A1B2C3D4",
+  "nonRenewingSubscriptions" : [
+  ],
+  "products" : [
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingIssueEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21504261",
+      "localizations" : [
+        {
+          "description" : "Monstir Premium",
+          "displayName" : "Monstir Premium",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "Monstir Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+          ],
+          "codeOffers" : [
+          ],
+          "displayPrice" : "79.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6741001001",
+          "introductoryOffer" : {
+            "internalID" : "6741002001",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P2W"
+          },
+          "localizations" : [
+            {
+              "description" : "Unlimited kids & chores, the real-allowance ledger, and weekly boss battles.",
+              "displayName" : "Monstir Premium (Yearly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.dweeres.monstir.premium.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Monstir Premium Yearly",
+          "subscriptionGroupID" : "21504261",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+          ],
+          "codeOffers" : [
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6741001002",
+          "introductoryOffer" : {
+            "internalID" : "6741002002",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P2W"
+          },
+          "localizations" : [
+            {
+              "description" : "Unlimited kids & chores, the real-allowance ledger, and weekly boss battles.",
+              "displayName" : "Monstir Premium (Monthly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.dweeres.monstir.premium.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monstir Premium Monthly",
+          "subscriptionGroupID" : "21504261",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

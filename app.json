@@ -69,7 +69,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "./plugins/withStoreKitConfig"
     ],
     "extra": {
       "eas": {

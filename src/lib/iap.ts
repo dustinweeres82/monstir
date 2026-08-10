@@ -1,10 +1,13 @@
 // ─── StoreKit product identifiers + shared IAP helpers ───────────────────────
 // One subscription group ("Monstir Premium") with a yearly (hero/recommended)
-// and a monthly (demoted) auto-renewable plan, each carrying a 7-day free
-// trial as its introductory offer. These IDs must exist in App Store Connect
-// (Subscriptions → Monstir Premium) before StoreKit will resolve real prices —
-// until then, fetchProducts() returns an empty array and the paywall shows its
-// loading/empty state rather than fabricated prices.
+// and a monthly (demoted) auto-renewable plan, each carrying a 14-day free trial
+// as its introductory offer (MON-86). Apple only allows fixed intro durations, so
+// 14 days is configured as "2 weeks" / P2W — there is no literal "14 days" option.
+// These IDs must exist in App Store Connect (Subscriptions → Monstir Premium)
+// before StoreKit will resolve real prices — until then, fetchProducts() returns
+// an empty array and the paywall shows its loading/empty state rather than
+// fabricated prices. For local testing without App Store Connect, the same two
+// products and the P2W offer are mirrored in storekit/Monstir.storekit.
 export const PREMIUM_YEARLY_SKU  = 'com.dweeres.monstir.premium.yearly';
 export const PREMIUM_MONTHLY_SKU = 'com.dweeres.monstir.premium.monthly';
 export const PREMIUM_SKUS = [PREMIUM_YEARLY_SKU, PREMIUM_MONTHLY_SKU] as const;
