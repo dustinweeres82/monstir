@@ -1308,13 +1308,17 @@ const DIFFICULTY_LABELS: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3
 
 // bg colors are sampled from each PNG icon's own background so the tile blends
 // seamlessly with the artwork. Emoji entries keep a hand-picked pastel.
-const CHORE_ICONS: { icon: string | number; bg: string }[] = [
+// `retired` hides an icon from the picker without removing it from the array.
+// Position is the storage key — serializeChoreIcon writes `idx:N` to Supabase and
+// resolveChoreIcon reads CHORE_ICONS[idx] back — so splicing an entry out would
+// shift every later index and silently repaint the icon on every saved chore.
+const CHORE_ICONS: { icon: string | number; bg: string; retired?: boolean }[] = [
   { icon: require('./assets/icons/chores/chore=iconBed.png'),     bg: '#FEF1D4' },
   { icon: require('./assets/icons/chores/chore=iconLaundry.png'), bg: '#E5F3FD' },
-  { icon: '☕',                                             bg: '#FFF0E6' },
+  { icon: '☕',                                             bg: '#FFF0E6', retired: true },
   { icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#FEE1E9' },
-  { icon: '🐾',                                             bg: '#FFF9E6' },
-  { icon: '🪴',                                             bg: '#F0F7F0' },
+  { icon: '🐾',                                             bg: '#FFF9E6', retired: true },
+  { icon: '🪴',                                             bg: '#F0F7F0', retired: true },
   { icon: require('./assets/icons/chores/chore=iconDishes.png'),  bg: '#FEEDD8' },
   { icon: require('./assets/icons/chores/chore=iconBroom.png'),   bg: '#FDEBE5' },
   { icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#E3F5DD' },
@@ -1337,6 +1341,11 @@ const CHORE_ICONS: { icon: string | number; bg: string }[] = [
   { icon: require('./assets/icons/chores/chore=iconWateringcan.png'), bg: '#E8F5E1' },
   { icon: require('./assets/icons/chores/chore=iconWindows.png'),     bg: '#FDEDE0' },
 ];
+
+// What the picker offers. Retired icons stay resolvable for chores already using
+// them — those are stored as the raw emoji, not `idx:`, so they keep rendering — but
+// they can no longer be chosen for new or edited chores.
+const PICKABLE_CHORE_ICONS = CHORE_ICONS.filter(c => !c.retired);
 
 // Serialize a chore icon for Supabase storage (icon is require() number or emoji string).
 function serializeChoreIcon(icon: string | number): string {
@@ -1747,7 +1756,10 @@ function ChoreIconPicker({ selected, onSelect }: {
   onSelect: (item: { icon: string | number; bg: string }) => void;
 }) {
   const scrollRef = useRef<ScrollView>(null);
-  const selectedIdx = CHORE_ICONS.findIndex(i => i.icon === selected.icon);
+  // Indices here are into the pickable list, not CHORE_ICONS. -1 when the chore
+  // still uses a retired icon: nothing is highlighted and the row doesn't scroll,
+  // but the chore keeps its icon unless the parent actively picks a new one.
+  const selectedIdx = PICKABLE_CHORE_ICONS.findIndex(i => i.icon === selected.icon);
 
   // Land the row on the current icon on mount (e.g. editing a chore whose
   // icon sits further along the row than the first screenful).
@@ -1767,7 +1779,7 @@ function ChoreIconPicker({ selected, onSelect }: {
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={av.avatarRow}
     >
-      {CHORE_ICONS.map((item, idx) => {
+      {PICKABLE_CHORE_ICONS.map((item, idx) => {
         const isSelected = idx === selectedIdx;
         return (
           <TouchableOpacity
@@ -7952,7 +7964,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
   const [assignedTo, setAssignedTo]   = useState<string[]>(existing?.assignedTo ?? []);
   const [completionMode, setCompletionMode] = useState<'shared' | 'independent'>(existing?.completionMode ?? 'shared');
   const [selectedIcon, setSelectedIcon] = useState<{ icon: string | number; bg: string }>(
-    existing ? { icon: existing.icon, bg: existing.bg } : CHORE_ICONS[0]
+    existing ? { icon: existing.icon, bg: existing.bg } : PICKABLE_CHORE_ICONS[0]
   );
   const [saveError, setSaveError]     = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
