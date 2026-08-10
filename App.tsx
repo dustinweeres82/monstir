@@ -6352,107 +6352,6 @@ function MoneyScreen({
   const avatarColor = (name: string, idx: number) =>
     kidProfiles.find(k => k.name === name)?.avatarColor ?? AVATAR_COLORS[idx % AVATAR_COLORS.length];
 
-  // One kid's earnings card. `fullWidth` is used when a single card is shown on
-  // its own (one kid, or the tab-selected kid) rather than in the scrolling row.
-  const renderKidCard = (slice: (typeof ledger.perKid)[number], i: number, fullWidth = false) => {
-    const kid = kidProfiles[i];
-    const balance = slice.owedCents;
-    // A zero balance reads "Paid ✓" only if the kid has actually earned or been
-    // paid before. A brand-new kid who's never earned anything hasn't been
-    // "paid" — they've been paid nothing — so show a neutral "Nothing yet".
-    const everActive = choreHistory.some(e => e.kidName === kid.name) || payoutLog.some(p => p.kidName === kid.name);
-    const isPaid      = balance === 0 && everActive;
-    const neverEarned = balance === 0 && !everActive;
-    return (
-      <View
-        key={`${kid.name}-${i}`}
-        style={{
-          width: fullWidth ? '100%' : 120,
-          borderRadius: 14,
-          backgroundColor: '#FFFFFF',
-          borderWidth: 2,
-          borderColor: '#1A1A1A',
-          padding: 12,
-          alignItems: 'center',
-          ...shadows.soft,
-        }}
-      >
-        {/* Avatar circle */}
-        <View style={{
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          backgroundColor: avatarColor(kid.name, i),
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderWidth: 2,
-          borderColor: '#1A1A1A',
-          marginBottom: 8,
-        }}>
-          <Image
-            source={getAvatarImage(kid.avatarIdx)}
-            style={{ width: 36, height: 36, borderRadius: 18 }}
-            resizeMode="cover"
-          />
-        </View>
-        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 4 }} numberOfLines={1}>
-          {kid.name}
-        </Text>
-        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4, textAlign: 'center' }}>
-          This Week
-        </Text>
-        {/* Earned is neutral ink — green is reserved for the settled/paid state
-            only (MON-75 Rev 6), so the row doesn't scan "all done". */}
-        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 8 }}>
-          {fmtDollars(slice.earnedThisWeekCents)}
-        </Text>
-        {neverEarned ? (
-          <View style={{
-            borderRadius: 6,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            backgroundColor: '#F2F1ED',
-            borderWidth: 1,
-            borderColor: '#C9C7C0',
-          }}>
-            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#767676' }}>Nothing yet</Text>
-          </View>
-        ) : isPaid ? (
-          <View style={{
-            borderRadius: 6,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            backgroundColor: '#F0F7F0',
-            borderWidth: 1,
-            borderColor: '#27AE60',
-          }}>
-            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#27AE60' }}>Paid ✓</Text>
-          </View>
-        ) : (
-          /* Pay action lives in the card itself when money is owed
-             (opens the per-child breakdown sheet). */
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => setPayoutSheetKid(kid.name)}
-            style={{
-              alignSelf: 'stretch',
-              borderRadius: 8,
-              paddingVertical: 8,
-              alignItems: 'center',
-              backgroundColor: '#C5F215',
-              borderWidth: 2,
-              borderColor: '#1A1A1A',
-            }}
-          >
-            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A' }}>
-              Pay {fmtDollars(balance)}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  };
-
   return (
     <View style={{ flex: 1, backgroundColor: '#F7F6F2' }}>
       <ScreenHeader
@@ -6526,65 +6425,6 @@ function MoneyScreen({
                 : `${unpaidChoreCount} approved chore${unpaidChoreCount === 1 ? '' : 's'} · ${ledger.kidsOwedCount} kid${ledger.kidsOwedCount === 1 ? '' : 's'}`}
             </Text>
 
-            {/* Stat chips — the weekly ledger as a visible equation that adds up:
-                EARNED = PAID + OWED (MON-75 Rev 6, Option B). Uses the lifetime-
-                consistent triple (earnedLifetime = paidLifetime + owed, guaranteed
-                by the ledger) so the relationship always balances and the OWED chip
-                equals the hero number — killing the "broken math / two witnesses"
-                read. OWED is highlighted (lime ring) as the actionable figure. */}
-            {(() => {
-              const EQ_LIME = '#D8F52F';
-              const eqChips = [
-                { label: 'EARNED', value: ledger.earnedLifetimeCents, owed: false },
-                { label: 'PAID',   value: ledger.paidLifetimeCents,   owed: false },
-                { label: 'OWED',   value: owedCents,                  owed: true  },
-              ];
-              const glyphs = ['=', '+'];
-              return (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                  {eqChips.map((chip, i) => {
-                    // White card with a 2.5px black border. The OWED chip is the
-                    // actionable figure: black-bordered card + an outer Slime Lime
-                    // ring (purple value), so it reads as the highlighted total.
-                    const card = (
-                      <View style={{
-                        backgroundColor: '#FFFFFF',
-                        borderRadius: 11,
-                        borderWidth: 2.5,
-                        borderColor: '#1A1A1A',
-                        paddingVertical: 12,
-                        paddingHorizontal: 4,
-                        alignItems: 'center',
-                        gap: 4,
-                        ...(chip.owed ? null : { flex: 1 }),
-                      }}>
-                        <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: chip.owed ? '#7B3FF2' : '#1A1A1A' }}>
-                          {fmtDollars(chip.value)}
-                        </Text>
-                        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 0.8 }}>
-                          {chip.label}
-                        </Text>
-                      </View>
-                    );
-                    return (
-                      <Fragment key={chip.label}>
-                        {chip.owed ? (
-                          <View style={{ flex: 1, backgroundColor: EQ_LIME, borderRadius: 15, padding: 4 }}>
-                            {card}
-                          </View>
-                        ) : card}
-                        {i < glyphs.length && (
-                          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#FFFFFF', paddingHorizontal: 8 }}>
-                            {glyphs[i]}
-                          </Text>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </View>
-              );
-            })()}
-
             {/* Global payout. Still no "Next payday" row or payday-settings link
                 — MON-75 Rev 5's point that there is no scheduled payday stands.
                 Opens a confirm rather than paying on tap; see confirmAllOpen. */}
@@ -6594,8 +6434,8 @@ function MoneyScreen({
                 onPress={() => setConfirmAllOpen(true)}
                 style={{
                   backgroundColor: '#1A1A1A',
-                  borderRadius: 14,
-                  paddingVertical: 16,
+                  borderRadius: 22,
+                  paddingVertical: 19,
                   alignItems: 'center',
                 }}
               >
@@ -6685,6 +6525,74 @@ function MoneyScreen({
                 );
               })}
             </View>
+          </View>
+        )}
+
+        {/* ── Ledger check — EARNED = PAID + OWED ──────────────────────────
+            Moved out of the hero so the hero can lead with one number, per
+            the mock. The equation itself stays: MON-75 Rev 6 added it to kill
+            a "broken math / two witnesses" read where Home and Money could
+            disagree, so it is an audit the parent can check, not decoration. */}
+        {!settled && (
+          <View style={{ marginTop: 20, paddingHorizontal: 16 }}>
+              {/* Stat chips — the weekly ledger as a visible equation that adds up:
+                  EARNED = PAID + OWED (MON-75 Rev 6, Option B). Uses the lifetime-
+                  consistent triple (earnedLifetime = paidLifetime + owed, guaranteed
+                  by the ledger) so the relationship always balances and the OWED chip
+                  equals the hero number — killing the "broken math / two witnesses"
+                  read. OWED is highlighted (lime ring) as the actionable figure. */}
+              {(() => {
+                const EQ_LIME = '#D8F52F';
+                const eqChips = [
+                  { label: 'EARNED', value: ledger.earnedLifetimeCents, owed: false },
+                  { label: 'PAID',   value: ledger.paidLifetimeCents,   owed: false },
+                  { label: 'OWED',   value: owedCents,                  owed: true  },
+                ];
+                const glyphs = ['=', '+'];
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                    {eqChips.map((chip, i) => {
+                      // White card with a 2.5px black border. The OWED chip is the
+                      // actionable figure: black-bordered card + an outer Slime Lime
+                      // ring (purple value), so it reads as the highlighted total.
+                      const card = (
+                        <View style={{
+                          backgroundColor: '#FFFFFF',
+                          borderRadius: 11,
+                          borderWidth: 2.5,
+                          borderColor: '#1A1A1A',
+                          paddingVertical: 12,
+                          paddingHorizontal: 4,
+                          alignItems: 'center',
+                          gap: 4,
+                          ...(chip.owed ? null : { flex: 1 }),
+                        }}>
+                          <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: chip.owed ? '#7B3FF2' : '#1A1A1A' }}>
+                            {fmtDollars(chip.value)}
+                          </Text>
+                          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 0.8 }}>
+                            {chip.label}
+                          </Text>
+                        </View>
+                      );
+                      return (
+                        <Fragment key={chip.label}>
+                          {chip.owed ? (
+                            <View style={{ flex: 1, backgroundColor: EQ_LIME, borderRadius: 15, padding: 4 }}>
+                              {card}
+                            </View>
+                          ) : card}
+                          {i < glyphs.length && (
+                            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#FFFFFF', paddingHorizontal: 8 }}>
+                              {glyphs[i]}
+                            </Text>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
           </View>
         )}
 
