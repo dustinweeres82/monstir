@@ -807,7 +807,6 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: colors.white, borderRadius: 14,
     borderWidth: 2, borderColor: BORDER, padding: 12,
-    shadowColor: BORDER, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
   },
   milestoneRowLocked: { backgroundColor: '#F5F5F5', borderColor: '#DDD', shadowOpacity: 0, elevation: 0 },
   milestoneRowIcon: {
@@ -825,7 +824,6 @@ const s = StyleSheet.create({
     backgroundColor: '#1A1A2E',
     borderRadius: 18, borderWidth: 2, borderColor: PURPLE,
     padding: 16,
-    shadowColor: PURPLE, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
   },
   streakBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { scale } from '../design-system/tokens';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { scale, hardShadow } from '../design-system/tokens';
 
 // ─── Reward popup modal ─────────────────────────────────────────────────────────
 // A reusable celebratory popup (lime tile, ink border, offset shadow) styled off
@@ -13,12 +13,8 @@ const PURPLE = '#7B3FF2';
 const LIME   = '#D8F52F';
 const MUTED  = '#5A5A5A';
 
-const shadow = (h: number) =>
-  Platform.select({
-    ios:     { shadowColor: INK, shadowOffset: { width: 0, height: h }, shadowOpacity: 1, shadowRadius: 0 },
-    android: { elevation: h },
-    default: {},
-  })!;
+// Flat: surfaces carry no shadow. CTA buttons use hardShadow() from tokens.
+const shadow = (_h: number) => ({});
 
 // Generic reward popup. `body` is a ReactNode so callers can highlight words
 // with <RewardModalStrong>.
@@ -121,7 +117,7 @@ const s = StyleSheet.create({
     borderColor: INK,
     paddingVertical: 16,
     alignItems: 'center',
-    ...shadow(5),
+    ...hardShadow(5),
   },
   okText: { fontFamily: 'Nunito_800ExtraBold', fontSize: scale(17), color: '#FFFFFF' },
 });

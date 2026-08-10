@@ -1,7 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, Image, ImageSourcePropType, Animated, Platform,
-} from 'react-native';
+  View, Text, StyleSheet, Image, ImageSourcePropType, Animated, } from 'react-native';
 import Svg, { Defs, RadialGradient, Stop, Circle } from 'react-native-svg';
 import { fontSize, interFamily, spacing } from '../design-system/tokens';
 import { ArrowButton } from '../design-system/components/ArrowButton';
@@ -34,19 +33,10 @@ const INK      = '#111111';
 const ART_SIZE  = 150;
 const GLOW_SIZE = 210;
 
-const CARD_SHADOW = {
-  shadowColor: INK,
-  shadowOffset: { width: 0, height: 6 },
-  shadowOpacity: 1,
-  shadowRadius: 0,
-  elevation: 6,
-};
+// Flat: surfaces carry no shadow — only CTA buttons do (hardShadow() in tokens).
+const CARD_SHADOW = {};
 
-const FOOTER_SHADOW = Platform.select({
-  ios:     { shadowColor: INK, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 0 },
-  android: { elevation: 4 },
-  default: {},
-})!;
+const FOOTER_SHADOW = {};
 
 export function MilestoneHero({ type, items, index, onIndexChange, bgOverride }: MilestoneHeroProps) {
   const [displayIdx, setDisplayIdx] = useState(index);

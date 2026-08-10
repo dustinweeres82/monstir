@@ -8,7 +8,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { PressableShadow } from '../design-system/components/PressableShadow';
-import { scale, colors } from '../design-system/tokens';
+import { scale, colors, hardShadow } from '../design-system/tokens';
 import { DotGridBg } from './onboarding/obkit';
 import { useSubscription, type PurchaseOutcome } from '../hooks/useSubscription';
 import { markPaywallSeen, recordPaywallDismissed } from '../lib/db';
@@ -19,7 +19,8 @@ const PURPLE = '#6B35F0';
 const LIME   = '#C5F215';
 const CREAM  = '#FAF9F4';
 
-const HARD_SHADOW = { shadowColor: INK, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 0, elevation: 6 };
+// Flat: surfaces carry no shadow — only CTA buttons do (hardShadow() in tokens).
+const HARD_SHADOW = {};
 
 const FEATURES = [
   'Unlimited kids & chores',
@@ -230,7 +231,7 @@ const s = StyleSheet.create({
   reassurance: {
     flexDirection: 'row', alignItems: 'flex-start', gap: scale(10), width: '100%',
     backgroundColor: '#FFFFFF', borderRadius: scale(16), borderWidth: 2, borderColor: INK,
-    padding: scale(14), ...HARD_SHADOW, shadowOffset: { width: 0, height: 3 },
+    padding: scale(14), ...hardShadow(3),
   },
   lock: { fontSize: scale(16) },
   reassuranceText: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: scale(12.5), lineHeight: scale(18), color: '#4A4A4A' },

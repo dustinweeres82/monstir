@@ -119,7 +119,6 @@ function TierMeter({ activeTier }: { activeTier: ChestTier }) {
           backgroundColor: METER_COLORS[activeTier],
           borderWidth: 2.5, borderColor: '#1A1A1A',
           alignItems: 'center', justifyContent: 'center',
-          shadowColor: '#1A1A1A', shadowOffset: { width: 2, height: 2 }, shadowOpacity: 1, shadowRadius: 0,
         }}>
           <View style={{ width: scale(10), height: scale(10), borderRadius: scale(5), backgroundColor: '#FFFFFF' }} />
         </View>
@@ -431,11 +430,6 @@ const styles = StyleSheet.create({
     paddingBottom: scale(12),
     gap: scale(16),
     marginTop: scale(8),
-    shadowColor: '#1A1A1A',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 5,
   },
   meterTitle: {
     fontFamily: 'Inter_800ExtraBold',
@@ -535,11 +529,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: scale(3),
     marginBottom: scale(16),
-    shadowColor: '#1A1A1A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 4,
   },
   coopBannerWin:     { backgroundColor: '#D8F52F' },
   coopBannerStagger: { backgroundColor: '#FFFFFF' },
