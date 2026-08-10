@@ -73,7 +73,7 @@ import {
   Inter_800ExtraBold,
   Inter_900Black,
 } from '@expo-google-fonts/inter';
-import { shadows, scale, fontSize, interFamily, nunitoFamily } from './src/design-system/tokens';
+import { shadows, hardShadow, scale, fontSize, interFamily, nunitoFamily } from './src/design-system/tokens';
 import { useScaleAnimation } from './src/design-system/hooks';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { setAudioModeAsync } from 'expo-audio';
@@ -1308,13 +1308,17 @@ const DIFFICULTY_LABELS: Record<1 | 2 | 3, string> = { 1: 'Easy', 2: 'Medium', 3
 
 // bg colors are sampled from each PNG icon's own background so the tile blends
 // seamlessly with the artwork. Emoji entries keep a hand-picked pastel.
-const CHORE_ICONS: { icon: string | number; bg: string }[] = [
+// `retired` hides an icon from the picker without removing it from the array.
+// Position is the storage key — serializeChoreIcon writes `idx:N` to Supabase and
+// resolveChoreIcon reads CHORE_ICONS[idx] back — so splicing an entry out would
+// shift every later index and silently repaint the icon on every saved chore.
+const CHORE_ICONS: { icon: string | number; bg: string; retired?: boolean }[] = [
   { icon: require('./assets/icons/chores/chore=iconBed.png'),     bg: '#FEF1D4' },
   { icon: require('./assets/icons/chores/chore=iconLaundry.png'), bg: '#E5F3FD' },
-  { icon: '☕',                                             bg: '#FFF0E6' },
+  { icon: '☕',                                             bg: '#FFF0E6', retired: true },
   { icon: require('./assets/icons/chores/chore=iconGarbage.png'), bg: '#FEE1E9' },
-  { icon: '🐾',                                             bg: '#FFF9E6' },
-  { icon: '🪴',                                             bg: '#F0F7F0' },
+  { icon: '🐾',                                             bg: '#FFF9E6', retired: true },
+  { icon: '🪴',                                             bg: '#F0F7F0', retired: true },
   { icon: require('./assets/icons/chores/chore=iconDishes.png'),  bg: '#FEEDD8' },
   { icon: require('./assets/icons/chores/chore=iconBroom.png'),   bg: '#FDEBE5' },
   { icon: require('./assets/icons/chores/chore=iconSoap.png'),    bg: '#E3F5DD' },
@@ -1337,6 +1341,11 @@ const CHORE_ICONS: { icon: string | number; bg: string }[] = [
   { icon: require('./assets/icons/chores/chore=iconWateringcan.png'), bg: '#E8F5E1' },
   { icon: require('./assets/icons/chores/chore=iconWindows.png'),     bg: '#FDEDE0' },
 ];
+
+// What the picker offers. Retired icons stay resolvable for chores already using
+// them — those are stored as the raw emoji, not `idx:`, so they keep rendering — but
+// they can no longer be chosen for new or edited chores.
+const PICKABLE_CHORE_ICONS = CHORE_ICONS.filter(c => !c.retired);
 
 // Serialize a chore icon for Supabase storage (icon is require() number or emoji string).
 function serializeChoreIcon(icon: string | number): string {
@@ -1747,7 +1756,10 @@ function ChoreIconPicker({ selected, onSelect }: {
   onSelect: (item: { icon: string | number; bg: string }) => void;
 }) {
   const scrollRef = useRef<ScrollView>(null);
-  const selectedIdx = CHORE_ICONS.findIndex(i => i.icon === selected.icon);
+  // Indices here are into the pickable list, not CHORE_ICONS. -1 when the chore
+  // still uses a retired icon: nothing is highlighted and the row doesn't scroll,
+  // but the chore keeps its icon unless the parent actively picks a new one.
+  const selectedIdx = PICKABLE_CHORE_ICONS.findIndex(i => i.icon === selected.icon);
 
   // Land the row on the current icon on mount (e.g. editing a chore whose
   // icon sits further along the row than the first screenful).
@@ -1767,7 +1779,7 @@ function ChoreIconPicker({ selected, onSelect }: {
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={av.avatarRow}
     >
-      {CHORE_ICONS.map((item, idx) => {
+      {PICKABLE_CHORE_ICONS.map((item, idx) => {
         const isSelected = idx === selectedIdx;
         return (
           <TouchableOpacity
@@ -1847,7 +1859,8 @@ const av = StyleSheet.create({
   title:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   // Horizontal carousel row — shared by the avatar picker and chore icon picker
   avatarRow:  { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 16, gap: 12 },
-  avatarCell: { width: 90, height: 90, borderRadius: 16, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
+  // Black stroke at rest like every other bordered surface; purple marks selection.
+  avatarCell: { width: 90, height: 90, borderRadius: 16, overflow: 'hidden', borderWidth: 2.5, borderColor: '#1A1A1A', backgroundColor: '#F3F1EC' },
   cellActive: { borderColor: PURPLE },
   cellImg:    { width: '100%', height: '100%' },
   // Age range rows
@@ -2045,7 +2058,7 @@ function AnimatedQuestRow({ chore, done, onPress, baseRate }: { chore: Chore; do
     >
       <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />
       <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-        <ChoreIcon icon={chore.icon} size={45} />
+        <ChoreIcon icon={chore.icon} size={54} />
       </View>
       <View style={s.homeQuestInfo}>
         <Text style={[s.homeQuestTitle, done && s.homeQuestTitleDone]}>{chore.name}</Text>
@@ -2166,7 +2179,7 @@ function AnimatedManagedQuestRow({ chore, onPress, baseRate, kidName, parentRole
           {isApproved && <Animated.View style={[s.homeQuestSweep, { opacity: sweepOpacity }]} />}
 
           <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-            <ChoreIcon icon={chore.icon} size={45} />
+            <ChoreIcon icon={chore.icon} size={54} />
             {isPending && (
               <Animated.View style={[s.doneBadge, { transform: [{ scale: doneBadgeScale }] }]}>
                 <Text style={s.doneBadgeMark}>✓</Text>
@@ -3422,7 +3435,7 @@ function ResultScreen({ monsterIdx, captured, bonusCoins, onDone, monsterImg, bo
           : `This time.\nHe slipped away — a fresh boss arrives\nnext week. Keep doing your chores!`}
       </Text>
       <TouchableOpacity
-        style={{ backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, ...SOLID_SHADOW }}
+        style={{ backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, ...BTN_SHADOW }}
         onPress={onDone}
         activeOpacity={0.8}
       >
@@ -3653,7 +3666,7 @@ function FrenzyGame({ onScore, title = 'FRENZY' }: { onScore: (s: number) => voi
         onPress={handleTap}
         disabled={done}
         activeOpacity={0.75}
-        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...BTN_SHADOW }}
       >
         <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
           {done ? '⚡ Charged!' : `Charge!  ${Math.ceil(timeLeft / 1000)}s`}
@@ -3811,7 +3824,7 @@ function ShakePotionGame({ onScore, title = 'SHAKE POTION' }: { onScore: (s: num
           onPress={() => { if (selected.length === 3) setPhase('shaking'); }}
           disabled={selected.length < 3}
           activeOpacity={0.75}
-          style={{ alignSelf: 'stretch', backgroundColor: selected.length === 3 ? '#C5F215' : '#D0CEC8', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+          style={{ alignSelf: 'stretch', backgroundColor: selected.length === 3 ? '#C5F215' : '#D0CEC8', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...BTN_SHADOW }}
         >
           <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
             {selected.length === 3 ? 'Create the potion!' : `Pick ${3 - selected.length} more`}
@@ -3918,7 +3931,7 @@ function ShakePotionShake({ onScore, title = 'SHAKE POTION' }: { onScore: (s: nu
         onPress={handleTap}
         disabled={done}
         activeOpacity={0.7}
-        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...BTN_SHADOW }}
       >
         <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
           {done ? '✨ Done!' : `Shake!  ${Math.ceil(timeLeft / 1000)}s`}
@@ -5494,7 +5507,7 @@ function KidPayoutScreen({ amount, completedCount, weeks, battleWon, battleBonus
 
         {/* Collect button */}
         <TouchableOpacity
-          style={{ backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 20, paddingHorizontal: 48, alignItems: 'center', ...SOLID_SHADOW, marginTop: 8 }}
+          style={{ backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 20, paddingHorizontal: 48, alignItems: 'center', ...BTN_SHADOW, marginTop: 8 }}
           onPress={() => { playCashRegister(); onDismiss(); }}
           onPressIn={collectPI} onPressOut={collectPO}
           activeOpacity={1}
@@ -5702,7 +5715,6 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
             borderWidth: 2, borderColor: '#1A1A1A',
             backgroundColor: '#FFFFFF',
             alignItems: 'center', justifyContent: 'center',
-            shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
           }}
           activeOpacity={0.7}
         >
@@ -5996,7 +6008,7 @@ function WalletScreen({ coins, weeklyEarnedCents, weeklyHistory, done, battleRes
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <Text style={{ fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Other goals</Text>
               <TouchableOpacity
-                style={{ backgroundColor: '#C5F215', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 8, ...SOLID_SHADOW }}
+                style={{ backgroundColor: '#C5F215', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 8, ...BTN_SHADOW }}
                 onPress={() => { setEditingGoal(null); setShowGoalModal(true); }}
                 activeOpacity={0.8}
               >
@@ -6181,6 +6193,55 @@ function ParentPayoutScreen({ kidCoins, kidProfiles, payoutLog, onConfirm, onBac
   );
 }
 
+/** Pill segmented control for swapping two peer views — Money's Owed/History and
+ *  Chores' Today/History. Shared rather than duplicated so the two can't drift
+ *  apart. Active segment carries lime; callers supply their own outer margin. */
+function SegmentedToggle<T extends string>({ value, options, onChange }: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View style={{
+      flexDirection: 'row',
+      padding: 5,
+      borderRadius: 100,
+      backgroundColor: '#FFFFFF',
+      borderWidth: 2.5,
+      borderColor: '#1A1A1A',
+      ...shadows.solid,
+    }}>
+      {options.map(opt => {
+        const active = value === opt.value;
+        return (
+          <TouchableOpacity
+            key={opt.value}
+            activeOpacity={0.85}
+            onPress={() => onChange(opt.value)}
+            style={{
+              flex: 1,
+              borderRadius: 100,
+              paddingVertical: 12,
+              alignItems: 'center',
+              backgroundColor: active ? '#C5F215' : 'transparent',
+              borderWidth: active ? 2 : 0,
+              borderColor: '#1A1A1A',
+            }}
+          >
+            <Text style={{
+              fontFamily: active ? 'Inter_800ExtraBold' : 'Inter_600SemiBold',
+              fontSize: scale(15),
+              color: active ? '#1A1A1A' : '#9A9A9A',
+            }}>
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
 // ─── MoneyScreen (MON-75) ─────────────────────────────────────────────────────
 
 type ChoreHistoryEntry = {
@@ -6201,7 +6262,6 @@ function MoneyScreen({
   baseRate,
   onConfirm,
   debugDayOffset = 0,
-  managedChores = [],
   onSwitchToKid,
   parentRole,
 }: {
@@ -6212,8 +6272,6 @@ function MoneyScreen({
   baseRate: string;
   onConfirm: (kidName: string) => void;
   debugDayOffset?: number;
-  /** Live board — used to heal activity rows whose icon was lost to the '✅' fallback. */
-  managedChores?: ManagedChore[];
   onSwitchToKid: (name: string) => void;
   parentRole?: string;
 }) {
@@ -6230,82 +6288,85 @@ function MoneyScreen({
   const owedCents     = ledger.owedCents;
   const settled       = owedCents === 0;
 
-  // ── Activity filter ───────────────────────────────────────────────────────
-  const [activityFilter, setActivityFilter] = useState<string>('all');
-
-  // Lazy render: the history is unbounded (one entry per approval, never
-  // trimmed), and mounting every row synchronously is what made this screen
-  // slow to open. Render the newest chunk and grow on demand via "Show more".
-  const ACTIVITY_CHUNK = 30;
-  const [visibleCount, setVisibleCount] = useState(ACTIVITY_CHUNK);
-
-  // Per-entry "paid" status, ledger-consistent: an approved chore is paid once a
-  // payout dated at/after its approval lands. (The old screen marked an entry
-  // paid whenever the kid's *current* balance hit 0, which mislabelled history
-  // the moment a new week's earnings arrived.) Seed/test rows are excluded.
-  const lastPaidByKid = useMemo(() => {
-    const m: Record<string, string> = {};
-    payoutLog.forEach(p => { if (!m[p.kidName] || p.paidAt > m[p.kidName]) m[p.kidName] = p.paidAt; });
-    return m;
-  }, [payoutLog]);
-  const isEntryPaid = (e: ChoreHistoryEntry) => {
-    const lp = lastPaidByKid[e.kidName];
-    return !!lp && e.approvedAt <= lp;
-  };
-  const cleanedHistory = useMemo(
-    () => choreHistory.filter(e => e.choreName.trim().toLowerCase() !== 'test'),
-    [choreHistory],
+  // Chores behind the owed figure. Deliberately counts UNPAID weeks only, so it
+  // moves in lockstep with the dollar amount — a lifetime "approved chores"
+  // count would keep climbing while the money stayed put, which reads as broken
+  // math (the same failure MON-75 Rev 6's EARNED = PAID + OWED chips fixed).
+  const unpaidChoreCount = useMemo(
+    () => ledger.perKid.reduce((sum, k) => sum + k.unpaidWeeks.reduce((s, w) => s + w.choreCount, 0), 0),
+    [ledger],
   );
+  const kidChoreCount = (slice: typeof ledger.perKid[number]) =>
+    slice.unpaidWeeks.reduce((s, w) => s + w.choreCount, 0);
 
-  // Heal history rows whose icon was lost to the '✅' fallback (older approvals
-  // wrote that for image-based chore icons) by falling back to the live board's
-  // current icon for that chore name.
-  const liveIconByName = useMemo(() => {
-    const m: Record<string, string | number> = {};
-    for (const c of managedChores) m[c.name] = c.icon;
-    return m;
-  }, [managedChores]);
-
-  const filteredHistory = useMemo(() => (
-    activityFilter === 'all'
-      ? cleanedHistory
-      : cleanedHistory.filter(e => e.kidName === activityFilter)
-  ), [cleanedHistory, activityFilter]);
-
-  // ── Group by date — only the visible slice (history is newest-first) ───────
-  const grouped = useMemo(() => {
-    const out: { date: string; entries: ChoreHistoryEntry[] }[] = [];
-    const seenDates: Record<string, number> = {};
-    filteredHistory.slice(0, visibleCount).forEach(e => {
-      const d = new Date(e.approvedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-      if (seenDates[d] === undefined) {
-        seenDates[d] = out.length;
-        out.push({ date: d, entries: [] });
-      }
-      out[seenDates[d]].entries.push(e);
-    });
-    return out;
-  }, [filteredHistory, visibleCount]);
-  const hiddenCount = Math.max(0, filteredHistory.length - visibleCount);
 
   // ── Derived for selected kid ──────────────────────────────────────────────
 
-  // MON-83: per-child "Mark paid" breakdown sheet. Opening it on a kid shows a
-  // per-week breakdown (one row per unpaid week) before confirming the payout.
-  const [payoutSheetKid, setPayoutSheetKid] = useState<string | null>(null);
-  const payoutSheetLedger = payoutSheetKid
-    ? ledger.perKid.find(k => k.kidName === payoutSheetKid) ?? null
-    : null;
-  const payoutSheetProfile = payoutSheetKid
-    ? kidProfiles.find(k => k.name === payoutSheetKid) ?? null
-    : null;
-  // Slide-up sheet chrome: the scrim appears instantly (opacity set, not animated)
-  // while only the sheet itself slides up — see useSheet. Driven by payoutSheetKid.
-  const { open: payoutSheetOpen, openSheet: openPayoutSheet, closeSheet: closePayoutSheet, scrimOpacity: payoutScrimOpacity, sheetY: payoutSheetY } = useSheet(600);
-  const closePayoutSheet_ = () => closePayoutSheet(() => setPayoutSheetKid(null));
-  useEffect(() => {
-    if (payoutSheetKid) openPayoutSheet();
-  }, [payoutSheetKid]);
+  // Payout confirmation. MON-83's separate per-child sheet is gone: both the
+  // per-kid "Mark paid" and the hero's "Mark all as paid" now open the same
+  // Confirm-payout sheet (M2), which is one row per kid. MON-83's per-week
+  // breakdown survives as sub-lines under any kid with more than one unpaid week,
+  // so a parent settling several weeks can still see which ones.
+  //
+  // Neither path writes until confirmed. MON-75 Rev 5 had removed the bulk
+  // payout because it fired on tap; the objection was the missing confirmation,
+  // not the affordance — marking paid asserts real cash changed hands and cannot
+  // be undone.
+  // One confirm sheet serves both entry points, per the M2 mock: 'all' from the
+  // hero, or a single kid's name from their row. A single kid is just the same
+  // sheet with one row.
+  const [payoutTarget, setPayoutTarget] = useState<'all' | string | null>(null);
+  const owedKids = ledger.perKid.filter(k => k.owedCents > 0);
+  const payoutRows = payoutTarget === 'all'
+    ? owedKids
+    : payoutTarget
+      ? owedKids.filter(k => k.kidName === payoutTarget)
+      : [];
+  const payoutTotalCents = payoutRows.reduce((s, k) => s + k.owedCents, 0);
+
+  // M3 — post-payout receipt. Captured at confirm time rather than read from the
+  // ledger afterwards: the payout zeroes those balances, so by the time this
+  // renders the numbers it needs are gone.
+  const [paidReceipt, setPaidReceipt] = useState<{ names: string[]; totalCents: number } | null>(null);
+  // Owed / History are peer views inside the Money tab (M1/M4), swapped by the
+  // segmented control — not a pushed screen or modal, so the tab bar stays put.
+  const [moneyView, setMoneyView] = useState<'owed' | 'history'>('owed');
+
+  /** "Maya, Leo & Ava" — Oxford-comma-free serial list for the receipt copy. */
+  const nameList = (names: string[]) =>
+    names.length <= 1 ? (names[0] ?? '')
+      : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+
+  // M4 — payout history, grouped back into the batches the parent actually
+  // performed. Grouped by calendar day, NOT by exact timestamp: a bulk payout
+  // fires one onConfirm per kid, so their paidAt values differ by milliseconds
+  // and would otherwise render as one row per kid instead of "Paid 3 kids".
+  const payoutGroups = useMemo(() => {
+    const byDay = new Map<string, { day: string; names: string[]; totalCents: number; at: number }>();
+    for (const p of payoutLog) {
+      const d = new Date(p.paidAt);
+      const key = d.toDateString();
+      const g = byDay.get(key) ?? { day: key, names: [], totalCents: 0, at: d.getTime() };
+      g.totalCents += p.amount;
+      if (!g.names.includes(p.kidName)) g.names.push(p.kidName);
+      g.at = Math.max(g.at, d.getTime());
+      byDay.set(key, g);
+    }
+    return [...byDay.values()].sort((a, b) => b.at - a.at);
+  }, [payoutLog]);
+
+  const paidAllTimeCents = payoutLog.reduce((s, p) => s + p.amount, 0);
+  // Reuses the ledger's own Monday-key function rather than a second week
+  // implementation — a parallel one could disagree with the ledger, which is the
+  // class of bug MON-75 exists to prevent.
+  const paidWeeksCount = new Set(payoutLog.map(p => weekMondayKeyForDate(new Date(p.paidAt)))).size;
+  const paidKidsCount  = new Set(payoutLog.map(p => p.kidName)).size;
+
+  /** Most recent payout date for a kid, or null if they've never been paid. */
+  const lastPaidFor = (kidName: string): Date | null => {
+    const times = payoutLog.filter(p => p.kidName === kidName).map(p => +new Date(p.paidAt));
+    return times.length ? new Date(Math.max(...times)) : null;
+  };
   // Reconcile the per-week rows to the live owed balance (the source of truth)
   // so the breakdown can never out-total what's actually owed, even if
   // choreHistory and the live balance drift apart (the "two witnesses" risk).
@@ -6313,125 +6374,26 @@ function MoneyScreen({
   // weeks: walk newest→oldest taking each week up to the remaining owed amount
   // (clamping the last partial week), then any leftover is non-chore credit
   // (battle bonus). Rows + bonus therefore always sum to exactly `owedCents`.
-  const payoutSheetRows: UnpaidWeek[] = [];
-  let payoutSheetBonus = 0;
-  if (payoutSheetLedger) {
-    let remaining = payoutSheetLedger.owedCents;
-    for (const w of [...payoutSheetLedger.unpaidWeeks].reverse()) {
+  // Generalised so the confirm sheet can show this breakdown for one kid or for
+  // every owed kid at once. Rows + bonus always sum to exactly slice.owedCents.
+  const weekRowsFor = (slice: (typeof ledger.perKid)[number]): { rows: UnpaidWeek[]; bonusCents: number } => {
+    const rows: UnpaidWeek[] = [];
+    let remaining = slice.owedCents;
+    for (const w of [...slice.unpaidWeeks].reverse()) {
       if (remaining <= 0) break;
       const amt = Math.min(w.earnedCents, remaining);
-      payoutSheetRows.push({ ...w, earnedCents: amt });
+      rows.push({ ...w, earnedCents: amt });
       remaining -= amt;
     }
-    payoutSheetRows.reverse();
-    payoutSheetBonus = remaining;
-  }
+    rows.reverse();
+    return { rows, bonusCents: remaining };
+  };
+
 
   // ── Avatar initial color ──────────────────────────────────────────────────
   const AVATAR_COLORS = ['#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444'];
   const avatarColor = (name: string, idx: number) =>
     kidProfiles.find(k => k.name === name)?.avatarColor ?? AVATAR_COLORS[idx % AVATAR_COLORS.length];
-
-  // One kid's earnings card. `fullWidth` is used when a single card is shown on
-  // its own (one kid, or the tab-selected kid) rather than in the scrolling row.
-  const renderKidCard = (slice: (typeof ledger.perKid)[number], i: number, fullWidth = false) => {
-    const kid = kidProfiles[i];
-    const balance = slice.owedCents;
-    // A zero balance reads "Paid ✓" only if the kid has actually earned or been
-    // paid before. A brand-new kid who's never earned anything hasn't been
-    // "paid" — they've been paid nothing — so show a neutral "Nothing yet".
-    const everActive = choreHistory.some(e => e.kidName === kid.name) || payoutLog.some(p => p.kidName === kid.name);
-    const isPaid      = balance === 0 && everActive;
-    const neverEarned = balance === 0 && !everActive;
-    return (
-      <View
-        key={`${kid.name}-${i}`}
-        style={{
-          width: fullWidth ? '100%' : 120,
-          borderRadius: 14,
-          backgroundColor: '#FFFFFF',
-          borderWidth: 2,
-          borderColor: '#1A1A1A',
-          padding: 12,
-          alignItems: 'center',
-          ...shadows.soft,
-        }}
-      >
-        {/* Avatar circle */}
-        <View style={{
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          backgroundColor: avatarColor(kid.name, i),
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderWidth: 2,
-          borderColor: '#1A1A1A',
-          marginBottom: 8,
-        }}>
-          <Image
-            source={getAvatarImage(kid.avatarIdx)}
-            style={{ width: 36, height: 36, borderRadius: 18 }}
-            resizeMode="cover"
-          />
-        </View>
-        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 4 }} numberOfLines={1}>
-          {kid.name}
-        </Text>
-        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4, textAlign: 'center' }}>
-          This Week
-        </Text>
-        {/* Earned is neutral ink — green is reserved for the settled/paid state
-            only (MON-75 Rev 6), so the row doesn't scan "all done". */}
-        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 8 }}>
-          {fmtDollars(slice.earnedThisWeekCents)}
-        </Text>
-        {neverEarned ? (
-          <View style={{
-            borderRadius: 6,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            backgroundColor: '#F2F1ED',
-            borderWidth: 1,
-            borderColor: '#C9C7C0',
-          }}>
-            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#767676' }}>Nothing yet</Text>
-          </View>
-        ) : isPaid ? (
-          <View style={{
-            borderRadius: 6,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            backgroundColor: '#F0F7F0',
-            borderWidth: 1,
-            borderColor: '#27AE60',
-          }}>
-            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: '#27AE60' }}>Paid ✓</Text>
-          </View>
-        ) : (
-          /* Pay action lives in the card itself when money is owed
-             (opens the per-child breakdown sheet). */
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => setPayoutSheetKid(kid.name)}
-            style={{
-              alignSelf: 'stretch',
-              borderRadius: 8,
-              paddingVertical: 8,
-              alignItems: 'center',
-              backgroundColor: '#C5F215',
-              borderWidth: 2,
-              borderColor: '#1A1A1A',
-            }}
-          >
-            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), color: '#1A1A1A' }}>
-              Pay {fmtDollars(balance)}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  };
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F7F6F2' }}>
@@ -6441,6 +6403,8 @@ function MoneyScreen({
         title="Money"
         backgroundColor="#F7F6F2"
         trailing={
+          // No clipboard button: the Owed/History segmented control below now does
+          // that job, and two controls for one destination is worse than one.
           <ViewSwitcher
             selected="Switch"
             options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
@@ -6454,335 +6418,582 @@ function MoneyScreen({
         contentContainerStyle={{ paddingBottom: 120 + insets.bottom }}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── Owed / History segmented control ───────────────────────────────
+            Swaps the two peer views. The active segment carries lime, matching
+            the view's own hero card — one scheme across both, per the M4 note. */}
+        <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 12 }}>
+          <SegmentedToggle
+            value={moneyView}
+            onChange={setMoneyView}
+            options={[{ value: 'owed', label: 'Owed' }, { value: 'history', label: 'History' }]}
+          />
+        </View>
+
+        {moneyView === 'owed' && (<>
         {/* ── Hero Card — owed leads (MON-75) ─────────────────────────────── */}
+        {/* Lime, not purple: the owed figure is the one actionable number on this
+            screen, and lime is the app's affirmative/action colour. */}
         <View style={{
-          margin: 16,
+          // No top margin: the segmented control above already supplies the gap
+          // via its marginBottom. Having both meant Owed sat 28px under the
+          // control while History sat 12px — the views visibly jumped on switch.
+          marginHorizontal: 16,
+          marginBottom: 16,
           borderRadius: 20,
-          backgroundColor: '#6B35F0',
+          backgroundColor: '#C5F215',
           borderWidth: 2.5,
           borderColor: '#1A1A1A',
           ...shadows.solid,
           overflow: 'visible',
         }}>
-          <View style={{ padding: 20 }}>
-            {/* Label */}
-            <Text style={{
-              fontFamily: 'Inter_900Black',
-              fontSize: scale(16),
-              color: 'rgba(255,255,255,0.7)',
-              letterSpacing: 1.5,
-              textTransform: 'uppercase',
-              marginBottom: 4,
-            }}>
-              {settled ? 'All settled up' : 'You owe'}
-            </Text>
+          {/* Settled keeps the same lime hero rather than swapping to a different
+              treatment (M5) — it just gains a check and loses the CTA, so the
+              screen reads "done", not "empty". Settled lays the check beside the
+              figure; owed stacks. */}
+          <View style={{
+            padding: 20,
+            ...(settled ? { flexDirection: 'row', alignItems: 'center', gap: 16 } : null),
+          }}>
+            {settled && (
+              <View style={{
+                width: 56, height: 56, borderRadius: 28,
+                backgroundColor: '#FFFFFF', borderWidth: 2.5, borderColor: '#1A1A1A',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(26), lineHeight: scale(32), color: '#1A1A1A' }}>✓</Text>
+              </View>
+            )}
 
-            {/* Primary stat — total owed */}
-            <Text style={{
-              fontFamily: 'Inter_900Black',
-              fontSize: scale(44),
-              color: '#FFFFFF',
-              lineHeight: scale(50),
-            }}>
-              {fmtDollars(owedCents)}
-            </Text>
-
-            {/* Secondary — the action / settled state */}
-            <Text style={{
-              fontFamily: 'Inter_500Medium',
-              fontSize: scale(16),
-              color: 'rgba(255,255,255,0.75)',
-              marginTop: 4,
-              marginBottom: 16,
-            }}>
-              {/* MON-75 Rev 5: no scheduled payday — the owed total persists until
-                  the parent settles it, never tied to a date and never scolding. */}
-              {settled ? 'All paid up 🎉' : 'Pay whenever you’re ready'}
-            </Text>
-
-            {/* Stat chips — the weekly ledger as a visible equation that adds up:
-                EARNED = PAID + OWED (MON-75 Rev 6, Option B). Uses the lifetime-
-                consistent triple (earnedLifetime = paidLifetime + owed, guaranteed
-                by the ledger) so the relationship always balances and the OWED chip
-                equals the hero number — killing the "broken math / two witnesses"
-                read. OWED is highlighted (lime ring) as the actionable figure. */}
-            {(() => {
-              const EQ_LIME = '#D8F52F';
-              const eqChips = [
-                { label: 'EARNED', value: ledger.earnedLifetimeCents, owed: false },
-                { label: 'PAID',   value: ledger.paidLifetimeCents,   owed: false },
-                { label: 'OWED',   value: owedCents,                  owed: true  },
-              ];
-              const glyphs = ['=', '+'];
-              return (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                  {eqChips.map((chip, i) => {
-                    // White card with a 2.5px black border. The OWED chip is the
-                    // actionable figure: black-bordered card + an outer Slime Lime
-                    // ring (purple value), so it reads as the highlighted total.
-                    const card = (
-                      <View style={{
-                        backgroundColor: '#FFFFFF',
-                        borderRadius: 11,
-                        borderWidth: 2.5,
-                        borderColor: '#1A1A1A',
-                        paddingVertical: 12,
-                        paddingHorizontal: 4,
-                        alignItems: 'center',
-                        gap: 4,
-                        ...(chip.owed ? null : { flex: 1 }),
-                      }}>
-                        <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: chip.owed ? '#7B3FF2' : '#1A1A1A' }}>
-                          {fmtDollars(chip.value)}
-                        </Text>
-                        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 0.8 }}>
-                          {chip.label}
-                        </Text>
-                      </View>
-                    );
-                    return (
-                      <Fragment key={chip.label}>
-                        {chip.owed ? (
-                          <View style={{ flex: 1, backgroundColor: EQ_LIME, borderRadius: 15, padding: 4 }}>
-                            {card}
-                          </View>
-                        ) : card}
-                        {i < glyphs.length && (
-                          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#FFFFFF', paddingHorizontal: 8 }}>
-                            {glyphs[i]}
-                          </Text>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </View>
-              );
-            })()}
-
-            {/* MON-75 Rev 5: no global "Mark all paid" (payout is strictly
-                per-child via the per-kid sheet) and no "Next payday" row /
-                payday-settings Edit link — there is no scheduled payday. */}
-          </View>
-        </View>
-
-        {/* ── Kids Row ────────────────────────────────────────────────────── */}
-        <View style={{ marginTop: 4 }}>
-          {/* Section header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 }}>
-            <Text style={{
-              fontFamily: 'Inter_800ExtraBold',
-              fontSize: scale(22),
-              color: '#1A1A1A',
-            }}>Kids</Text>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-            {ledger.perKid.map((slice, i) => renderKidCard(slice, i))}
-          </ScrollView>
-        </View>
-
-        {/* ── Activity Feed ────────────────────────────────────────────────── */}
-        <View style={{ marginTop: 20, paddingHorizontal: 16 }}>
-          {/* Section header */}
-          <Text style={{
-            fontFamily: 'Inter_800ExtraBold',
-            fontSize: scale(22),
-            color: '#1A1A1A',
-            marginBottom: 12,
-          }}>Activity</Text>
-
-          {/* Filter chips */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
-            {(['all', ...kidProfiles.map(k => k.name)] as string[]).map((f, i) => {
-              const isActive = activityFilter === f;
-              return (
-                <TouchableOpacity
-                  key={`${f}-${i}`}
-                  onPress={() => { setActivityFilter(f); setVisibleCount(ACTIVITY_CHUNK); }}
-                  activeOpacity={0.75}
-                  style={{
-                    borderRadius: 20,
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                    backgroundColor: isActive ? '#1A1A1A' : '#FFFFFF',
-                    borderWidth: 1.5,
-                    borderColor: '#1A1A1A',
-                  }}
-                >
-                  <Text style={{
-                    fontFamily: 'Inter_700Bold',
-                    fontSize: scale(16),
-                    color: isActive ? '#FFFFFF' : '#1A1A1A',
-                  }}>
-                    {f === 'all' ? 'All Kids' : f}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {/* Grouped entries */}
-          {grouped.length === 0 && (
-            <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-              <Text style={{ fontSize: scale(28) }}>📋</Text>
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginTop: 8 }}>No activity yet</Text>
-              <Text style={{ fontFamily: 'Inter_400Regular', fontSize: scale(16), color: '#767676', marginTop: 4 }}>Approved chores will show up here.</Text>
-            </View>
-          )}
-
-          {grouped.map(group => (
-            <View key={group.date} style={{ marginBottom: 16 }}>
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 }}>
-                {group.date}
+            <View style={settled ? { flex: 1 } : undefined}>
+              {/* Label */}
+              <Text style={{
+                fontFamily: 'Inter_900Black',
+                fontSize: scale(13),
+                color: '#1A1A1A',
+                opacity: 0.72,
+                letterSpacing: 1.2,
+                textTransform: 'uppercase',
+                marginBottom: 4,
+              }}>
+                Total owed to kids
               </Text>
-              {group.entries.map(entry => {
-                const isPaid = isEntryPaid(entry);
-                // If this row stored the '✅' fallback, show the live chore's icon instead.
-                const effIcon = (entry.icon === '✅' && liveIconByName[entry.choreName] != null)
-                  ? liveIconByName[entry.choreName]
-                  : entry.icon;
-                const hasIcon = typeof effIcon === 'string' && effIcon.length <= 4;
+
+              {/* Primary stat — total owed */}
+              <Text style={{
+                fontFamily: 'Inter_900Black',
+                fontSize: scale(settled ? 34 : 44),
+                color: '#1A1A1A',
+                lineHeight: scale(settled ? 40 : 50),
+              }}>
+                {fmtDollars(owedCents)}
+              </Text>
+
+              {/* Secondary — what the figure is made of. Still no payday date:
+                  MON-75 Rev 5 keeps the owed total untied to a schedule and never
+                  scolding, so this describes the amount rather than nagging. */}
+              <Text style={{
+                fontFamily: 'Inter_600SemiBold',
+                fontSize: scale(14),
+                color: '#1A1A1A',
+                opacity: 0.7,
+                marginTop: settled ? 2 : 6,
+                marginBottom: settled ? 0 : 16,
+              }}>
+                {settled
+                  ? 'You’re all caught up!'
+                  : `${unpaidChoreCount} approved chore${unpaidChoreCount === 1 ? '' : 's'} · ${ledger.kidsOwedCount} kid${ledger.kidsOwedCount === 1 ? '' : 's'}`}
+              </Text>
+            </View>
+
+            {/* Global payout. Still no "Next payday" row or payday-settings link
+                — MON-75 Rev 5's point that there is no scheduled payday stands.
+                Opens a confirm rather than paying on tap; see confirmAllOpen. */}
+            {!settled && (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setPayoutTarget('all')}
+                style={{
+                  backgroundColor: '#1A1A1A',
+                  borderRadius: 22,
+                  paddingVertical: 19,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#FFFFFF' }}>
+                  Mark all as paid
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* ── Owed by kid ──────────────────────────────────────────────────── */}
+        {/* Only kids with money outstanding, which is what the label promises. A
+            kid owed nothing has no action here; their record lives in Activity
+            (clipboard, top right). Looked up by NAME rather than index — this
+            list is filtered, so ledger.perKid positions no longer line up with
+            kidProfiles the way the old index-based card renderer assumed. */}
+        {/* Kept even when settled (M5): the rows just read PAID, so the screen
+            reads "everyone's square" instead of feeling gutted. Every kid is
+            listed, not only those owed — a kid at $0 still belongs in the family
+            picture, and it means the list doesn't reshuffle after a payout. */}
+        {kidProfiles.length > 0 && (
+          <View style={{ marginTop: 4, paddingHorizontal: 16 }}>
+            <Text style={{
+              fontFamily: 'Inter_900Black',
+              fontSize: scale(13),
+              color: '#767676',
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              marginBottom: 12,
+            }}>Owed by kid</Text>
+
+            <View style={{ gap: 12 }}>
+              {ledger.perKid.map(slice => {
+                const kid    = kidProfiles.find(k => k.name === slice.kidName);
+                const chores = kidChoreCount(slice);
+                const lastPaid = lastPaidFor(slice.kidName);
+                // A brand-new kid who has never earned or been paid must not read
+                // "PAID" — they've been paid nothing, which is a different thing.
+                const neverActive = slice.owedCents === 0 && !lastPaid
+                  && !choreHistory.some(e => e.kidName === slice.kidName);
                 return (
                   <View
-                    key={entry.id}
+                    key={slice.kidName}
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
-                      backgroundColor: isPaid ? '#FFFFFF' : '#FFFBF0',
-                      borderWidth: 2,
-                      borderColor: isPaid ? '#1A1A1A' : '#E6A817',
-                      borderRadius: 12,
+                      gap: 12,
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 16,
+                      borderWidth: 2.5,
+                      borderColor: '#1A1A1A',
                       padding: 12,
-                      marginBottom: 8,
+                      ...shadows.solid,
                     }}
                   >
-                    {/* Icon box */}
                     <View style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 10,
-                      backgroundColor: entry.bg,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      marginRight: 12,
-                      borderWidth: 1.5,
-                      borderColor: '#1A1A1A',
+                      width: 52, height: 52, borderRadius: 12,
+                      backgroundColor: kid?.avatarColor || '#EAE4FF',
+                      borderWidth: 2, borderColor: '#1A1A1A',
+                      alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                     }}>
-                      {hasIcon
-                        ? <Text style={{ fontSize: scale(18) }}>{effIcon as string}</Text>
-                        : <Image source={effIcon as number} style={{ width: 26, height: 26 }} resizeMode="contain" />
-                      }
+                      <Image source={getAvatarImage(kid?.avatarIdx ?? 0)} style={{ width: 44, height: 44 }} resizeMode="contain" />
                     </View>
 
-                    {/* Text */}
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>
-                        {entry.choreName}
+                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A' }} numberOfLines={1}>
+                        {slice.kidName}
                       </Text>
-                      <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(16), color: '#767676', marginTop: 0 }}>
-                        {entry.kidName}
+                      <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(13), color: '#767676', marginTop: 2 }}>
+                        {slice.owedCents > 0
+                          ? `${chores} chore${chores === 1 ? '' : 's'}`
+                          : neverActive
+                            ? 'Nothing yet'
+                            : lastPaid
+                              ? `Paid ${lastPaid.toLocaleDateString('en-US', { weekday: 'short' })} · ${lastPaid.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                              : 'Nothing owed'}
                       </Text>
                     </View>
 
-                    {/* Amount + badge */}
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#3B8A3A' }}>
-                        +{fmtCoins(entry.earnedCents)}
+                    {slice.owedCents > 0 && (
+                      <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(20), color: '#1E8E3E' }}>
+                        {fmtDollars(slice.owedCents)}
                       </Text>
+                    )}
+
+                    {slice.owedCents > 0 ? (
+                      /* Opens the shared Confirm-payout sheet — deliberately not
+                         an immediate payout. */
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => setPayoutTarget(slice.kidName)}
+                        style={{
+                          backgroundColor: '#C5F215',
+                          borderRadius: 100,
+                          borderWidth: 2,
+                          borderColor: '#1A1A1A',
+                          paddingHorizontal: 14,
+                          paddingVertical: 10,
+                        }}
+                      >
+                        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(13), color: '#1A1A1A' }}>Mark paid</Text>
+                      </TouchableOpacity>
+                    ) : neverActive ? null : (
+                      /* Static badge, not a button — there's nothing to act on. */
                       <View style={{
-                        borderRadius: 5,
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        backgroundColor: isPaid ? '#E1F5EE' : '#FFFBF0',
-                        borderWidth: 1,
-                        borderColor: isPaid ? '#27AE60' : '#E6A817',
+                        borderRadius: 100,
+                        borderWidth: 2, borderColor: '#1A1A1A',
+                        backgroundColor: '#FFFFFF',
+                        paddingHorizontal: 14, paddingVertical: 9,
                       }}>
-                        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(16), color: isPaid ? '#27AE60' : '#E6A817' }}>
-                          {isPaid ? 'Paid' : 'Unpaid'}
-                        </Text>
+                        <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), letterSpacing: 0.6, color: '#1A1A1A' }}>PAID</Text>
                       </View>
-                    </View>
+                    )}
                   </View>
                 );
               })}
             </View>
-          ))}
 
-          {/* Reveal the next chunk of older history on demand */}
-          {hiddenCount > 0 && (
-            <TouchableOpacity
-              onPress={() => setVisibleCount(c => c + ACTIVITY_CHUNK)}
-              activeOpacity={0.75}
-              style={{
-                alignItems: 'center',
-                paddingVertical: 16,
-                borderRadius: 12,
-                borderWidth: 2,
-                borderColor: '#1A1A1A',
+            {/* Settled-state reassurance (M5): explains why the list is quiet, so
+                a parent doesn't read "$0.00" as the app having lost their data. */}
+            {settled && (
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', gap: 12,
                 backgroundColor: '#FFFFFF',
-                marginTop: 4,
-              }}
-            >
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>
-                Show {Math.min(ACTIVITY_CHUNK, hiddenCount)} more · {hiddenCount} older
+                borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A',
+                padding: 14, marginTop: 12, ...shadows.solid,
+              }}>
+                <Image source={require('./assets/monstirs/slime/slimer_4.png')} style={{ width: 44, height: 44 }} resizeMode="contain" />
+                <Text style={{ flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20) }}>
+                  New chores get approved during the week — they’ll show up here.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Ledger check — EARNED = PAID + OWED ──────────────────────────
+            Moved out of the hero so the hero can lead with one number, per
+            the mock. The equation itself stays: MON-75 Rev 6 added it to kill
+            a "broken math / two witnesses" read where Home and Money could
+            disagree, so it is an audit the parent can check, not decoration. */}
+        {!settled && (
+          <View style={{ marginTop: 20, paddingHorizontal: 16 }}>
+              {/* Stat chips — the weekly ledger as a visible equation that adds up:
+                  EARNED = PAID + OWED (MON-75 Rev 6, Option B). Uses the lifetime-
+                  consistent triple (earnedLifetime = paidLifetime + owed, guaranteed
+                  by the ledger) so the relationship always balances and the OWED chip
+                  equals the hero number — killing the "broken math / two witnesses"
+                  read. OWED is highlighted (lime ring) as the actionable figure. */}
+              {(() => {
+                const EQ_LIME = '#D8F52F';
+                const eqChips = [
+                  { label: 'EARNED', value: ledger.earnedLifetimeCents, owed: false },
+                  { label: 'PAID',   value: ledger.paidLifetimeCents,   owed: false },
+                  { label: 'OWED',   value: owedCents,                  owed: true  },
+                ];
+                const glyphs = ['=', '+'];
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                    {eqChips.map((chip, i) => {
+                      // White card with a 2.5px black border. The OWED chip is the
+                      // actionable figure: black-bordered card + an outer Slime Lime
+                      // ring (purple value), so it reads as the highlighted total.
+                      const card = (
+                        <View style={{
+                          backgroundColor: '#FFFFFF',
+                          borderRadius: 11,
+                          borderWidth: 2.5,
+                          borderColor: '#1A1A1A',
+                          paddingVertical: 12,
+                          paddingHorizontal: 4,
+                          alignItems: 'center',
+                          gap: 4,
+                          ...(chip.owed ? null : { flex: 1 }),
+                        }}>
+                          <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: chip.owed ? '#7B3FF2' : '#1A1A1A' }}>
+                            {fmtDollars(chip.value)}
+                          </Text>
+                          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(12), color: '#1A1A1A', letterSpacing: 0.8 }}>
+                            {chip.label}
+                          </Text>
+                        </View>
+                      );
+                      return (
+                        <Fragment key={chip.label}>
+                          {chip.owed ? (
+                            <View style={{ flex: 1, backgroundColor: EQ_LIME, borderRadius: 15, padding: 4 }}>
+                              {card}
+                            </View>
+                          ) : card}
+                          {i < glyphs.length && (
+                            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#FFFFFF', paddingHorizontal: 8 }}>
+                              {glyphs[i]}
+                            </Text>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
+          </View>
+        )}
+
+        </>)}
+
+        {/* ── History view (M4) ──────────────────────────────────────────────
+            Payout record — handoffs (money leaving). Approved chores (money
+            becoming owed) are not duplicated here; that history lives on
+            Chores → History, built from the same entries.
+
+            Lime, matching the Owed hero. An earlier pass used lavender on the
+            "lavender = past record, lime = live debt" reading, but the M4 note
+            settles it the other way: one consistent lime scheme across both
+            views, with the log rows carrying the record detail. */}
+        {moneyView === 'history' && (
+          <View style={{ paddingHorizontal: 16 }}>
+            {/* Empty history drops the hero entirely (M6) rather than showing
+                "$0.00 all time / Across 0 weeks · 0 kids" — a zeroed record card
+                reads like a bug, and there's no record to summarise yet. */}
+            {payoutGroups.length > 0 && (
+              <View style={{
+                backgroundColor: '#C5F215',
+                borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A',
+                padding: 20, marginBottom: 24, ...shadows.solid,
+              }}>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#1A1A1A', opacity: 0.72, marginBottom: 4 }}>
+                  MARKED PAID, ALL TIME
+                </Text>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(40), color: '#1A1A1A', lineHeight: scale(46) }}>
+                  {fmtDollars(paidAllTimeCents)}
+                </Text>
+                <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(14), color: '#1A1A1A', opacity: 0.7, marginTop: 4 }}>
+                  Across {paidWeeksCount} week{paidWeeksCount === 1 ? '' : 's'} · {paidKidsCount} kid{paidKidsCount === 1 ? '' : 's'}
+                </Text>
+              </View>
+            )}
+
+            {payoutGroups.length > 0 && (
+              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#767676', marginBottom: 12 }}>
+                RECENT
               </Text>
-            </TouchableOpacity>
-          )}
-        </View>
+            )}
+
+            {payoutGroups.length === 0 ? (
+              <View style={{ alignItems: 'center', paddingTop: 24 }}>
+                <Image source={require('./assets/monstirs/slime/slimer_4.png')} style={{ width: 140, height: 140, marginBottom: 18 }} resizeMode="contain" />
+                <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(24), color: '#1A1A1A', marginBottom: 8 }}>No payouts yet</Text>
+                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(14), color: '#767676', textAlign: 'center', lineHeight: scale(21), paddingHorizontal: 12 }}>
+                  Once you mark chores as paid, every payout lands here so you can look back on it.
+                </Text>
+
+                {/* Points at the money actually waiting rather than dead-ending
+                    (M6). Only when something IS waiting — otherwise it would be
+                    telling the parent to go act on $0.00. */}
+                {owedCents > 0 && (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setMoneyView('owed')}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 12,
+                      alignSelf: 'stretch', marginTop: 24,
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A',
+                      padding: 14, ...shadows.solid,
+                    }}
+                  >
+                    <View style={{
+                      width: 40, height: 40, borderRadius: 20,
+                      backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Text style={{ fontSize: scale(17) }}>💰</Text>
+                    </View>
+                    <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: scale(14), color: '#1A1A1A', lineHeight: scale(20) }}>
+                      <Text style={{ fontFamily: 'Inter_800ExtraBold' }}>{fmtDollars(owedCents)} waiting</Text> in Owed — mark it paid to start your history.
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : payoutGroups.map(g => (
+              <View
+                key={g.day}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A',
+                  padding: 14, marginBottom: 12, ...shadows.solid,
+                }}
+              >
+                <View style={{
+                  width: 40, height: 40, borderRadius: 20,
+                  backgroundColor: '#F2F7F2', borderWidth: 2, borderColor: '#C9D8C9',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1E8E3E' }}>✓</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }} numberOfLines={1}>
+                    {g.names.length > 2 ? `Paid ${g.names.length} kids` : `Paid ${nameList(g.names)}`}
+                  </Text>
+                  <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676', marginTop: 2 }}>
+                    {new Date(g.at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(17), color: '#1A1A1A' }}>
+                  {fmtDollars(g.totalCents)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
-      {/* ── Per-child "Mark paid" breakdown sheet (MON-83) ─────────────────────
-          Per-week breakdown for one child before confirming the payout. Payout
-          is strictly per-child — there is no bulk "settle all". */}
-      <Modal visible={payoutSheetOpen} transparent animationType="none" onRequestClose={closePayoutSheet_}>
-        <Animated.View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)', opacity: payoutScrimOpacity }}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closePayoutSheet_} />
-          {payoutSheetLedger && payoutSheetProfile && (
-            <Animated.View style={{ backgroundColor: '#FFFDF7', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2.5, borderColor: '#1A1A1A', paddingHorizontal: 20, paddingTop: 16, paddingBottom: insets.bottom + 24, transform: [{ translateY: payoutSheetY }] }}>
-              {/* The transparent Modal's content frame stops at the bottom safe-area
-                  line, so the sheet's own padding can't reach the home-indicator zone.
-                  This filler overflows below the frame to bleed the cream into the safe
-                  area (overflow isn't clipped), eliminating the grey band underneath. */}
-              <View style={{ position: 'absolute', left: 0, right: 0, top: '100%', height: 120, backgroundColor: '#FFFDF7' }} pointerEvents="none" />
-              <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9D5CC', marginBottom: 16 }} />
-              {/* Header — child avatar + name */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: payoutSheetProfile.avatarColor, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
-                  <Image source={getAvatarImage(payoutSheetProfile.avatarIdx)} style={{ width: 36, height: 36, borderRadius: 18 }} resizeMode="cover" />
-                </View>
-                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A' }}>Pay {payoutSheetProfile.name}</Text>
-              </View>
-              {/* One row per unpaid week, reconciled to the owed total (zero-chore
-                  weeks are already excluded). */}
-              {payoutSheetRows.map(w => (
-                <View key={w.weekKey} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>{w.label}</Text>
-                    <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676', marginTop: 4 }}>{w.choreCount} chore{w.choreCount === 1 ? '' : 's'} completed</Text>
+      {/* ── Confirm payout (M2) ────────────────────────────────────────────────
+          One sheet for both entry points: 'all' from the hero, or a single kid
+          from their row — a single kid is just this sheet with one row. Marking
+          paid asserts real cash changed hands and cannot be undone, which is why
+          neither path writes anything until this is confirmed (MON-75 Rev 5 had
+          dropped the bulk action precisely because it fired on tap).
+
+          Where a kid has more than one unpaid week, those weeks appear as
+          sub-lines under their row. The mock shows one row per kid, but MON-83
+          added the per-week breakdown so a parent settling several weeks can see
+          which ones — collapsing that away would hide it. Rows come from
+          weekRowsFor(), so they always sum to exactly what's owed. */}
+      <Modal visible={payoutTarget !== null} transparent animationType="fade" onRequestClose={() => setPayoutTarget(null)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPayoutTarget(null)} />
+          <View style={{
+            backgroundColor: '#FFFDF7',
+            borderTopLeftRadius: 24, borderTopRightRadius: 24,
+            borderWidth: 2.5, borderColor: '#1A1A1A',
+            padding: 20, paddingBottom: 20 + insets.bottom,
+          }}>
+            <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9D5CC', marginBottom: 16 }} />
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(22), color: '#1A1A1A', marginBottom: 4 }}>
+              Confirm payout
+            </Text>
+            <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(14), color: '#767676', marginBottom: 14 }}>
+              This records that you’ve handed out the cash. It can’t be undone.
+            </Text>
+
+            {/* Itemised card */}
+            <View style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 16,
+              borderWidth: 2.5, borderColor: '#1A1A1A',
+              paddingHorizontal: 16, paddingVertical: 6,
+              marginBottom: 18,
+              ...shadows.solid,
+            }}>
+              {payoutRows.map(k => {
+                const { rows, bonusCents } = weekRowsFor(k);
+                const chores = kidChoreCount(k);
+                return (
+                  <View key={k.kidName} style={{ paddingVertical: 10 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(17), color: '#1A1A1A' }}>
+                        {k.kidName} · {chores} chore{chores === 1 ? '' : 's'}
+                      </Text>
+                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(17), color: '#1A1A1A' }}>
+                        {fmtDollars(k.owedCents)}
+                      </Text>
+                    </View>
+                    {/* Only worth showing when there's more than one week to settle. */}
+                    {rows.length > 1 && rows.map(w => (
+                      <View key={`${k.kidName}-${w.weekKey}`} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, paddingLeft: 10 }}>
+                        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676' }}>{w.label}</Text>
+                        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(12), color: '#767676' }}>{fmtDollars(w.earnedCents)}</Text>
+                      </View>
+                    ))}
+                    {bonusCents > 0 && (
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, paddingLeft: 10 }}>
+                        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676' }}>Battle bonus</Text>
+                        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(12), color: '#767676' }}>{fmtDollars(bonusCents)}</Text>
+                      </View>
+                    )}
                   </View>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(w.earnedCents)}</Text>
-                </View>
-              ))}
-              {/* Owed credit not tied to a chore week (battle bonus etc.) */}
-              {payoutSheetBonus > 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 }}>
-                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>Boss Battle bonus 🏆</Text>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(payoutSheetBonus)}</Text>
-                </View>
-              )}
-              <View style={{ height: 1, backgroundColor: '#1A1A1A', opacity: 0.12, marginVertical: 8 }} />
-              {/* Total owed */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>Total owed</Text>
-                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(22), color: '#1A1A1A' }}>{fmtDollars(payoutSheetLedger.owedCents)}</Text>
-              </View>
-              <Button label="Mark as paid" onPress={() => { const k = payoutSheetKid; closePayoutSheet(() => { setPayoutSheetKid(null); if (k) onConfirm(k); }); }} />
-              <View style={{ height: 10 }} />
-              <Button label="Cancel" variant="secondary" onPress={closePayoutSheet_} />
-            </Animated.View>
-          )}
-        </Animated.View>
+                );
+              })}
+            </View>
+
+            {/* Purple CTA, not lime: lime reads as the live-debt colour on this
+                screen (hero card, Mark paid pills), and this is the commit. */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                // Snapshot names first — onConfirm mutates the ledger, so
+                // iterating payoutRows as it changes underneath would be reading
+                // a moving target.
+                const names = payoutRows.map(k => k.kidName);
+                const total = payoutTotalCents;
+                setPayoutTarget(null);
+                names.forEach(n => onConfirm(n));
+                setPaidReceipt({ names, totalCents: total });
+              }}
+              style={{
+                backgroundColor: '#6B35F0',
+                borderRadius: 100,
+                borderWidth: 2.5, borderColor: '#1A1A1A',
+                paddingVertical: 18,
+                alignItems: 'center',
+                ...shadows.solid,
+              }}
+            >
+              <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(17), color: '#FFFFFF' }}>
+                Yes, mark {fmtDollars(payoutTotalCents)} paid
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => setPayoutTarget(null)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 16 }}>
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#9A9A9A' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
+
+      {/* ── Marked paid (M3) ───────────────────────────────────────────────────
+          The totals and names are read from `paidReceipt`, captured at confirm
+          time — the payout has already zeroed those balances, so the ledger no
+          longer holds the numbers this screen needs to report. */}
+      <Modal visible={paidReceipt !== null} animationType="fade" onRequestClose={() => setPaidReceipt(null)}>
+        <View style={{ flex: 1, backgroundColor: '#6B35F0', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, paddingBottom: insets.bottom + 16 }}>
+          <View style={{
+            width: 100, height: 100, borderRadius: 50,
+            backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A',
+            alignItems: 'center', justifyContent: 'center', marginBottom: 22,
+          }}>
+            <Text style={{ fontSize: scale(46), lineHeight: scale(54), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>✓</Text>
+          </View>
+
+          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(13), letterSpacing: 1.4, color: '#C5F215', marginBottom: 8 }}>
+            ALL SETTLED UP
+          </Text>
+          <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(32), color: '#FFFFFF', textAlign: 'center', lineHeight: scale(38) }}>
+            {fmtDollars(paidReceipt?.totalCents ?? 0)} marked paid
+          </Text>
+          <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(15), color: 'rgba(255,255,255,0.85)', textAlign: 'center', marginTop: 12, lineHeight: scale(22) }}>
+            {nameList(paidReceipt?.names ?? [])} {(paidReceipt?.names.length ?? 0) === 1 ? 'is' : 'are'} all squared away.{'\n'}Logged to your History.
+          </Text>
+
+          <Image
+            source={require('./assets/monstirs/slime/slimer_4.png')}
+            style={{ width: 150, height: 150, marginVertical: 26 }}
+            resizeMode="contain"
+          />
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            // Dismisses the receipt and leaves the Money tab on the History
+            // segment, so closing it lands on History rather than back here.
+            onPress={() => { setPaidReceipt(null); setMoneyView('history'); }}
+            style={{
+              alignSelf: 'stretch', backgroundColor: '#C5F215',
+              borderRadius: 100, borderWidth: 2.5, borderColor: '#1A1A1A',
+              paddingVertical: 18, alignItems: 'center', ...shadows.solid,
+            }}
+          >
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(17), color: '#1A1A1A' }}>View history</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setPaidReceipt(null)}
+            style={{
+              alignSelf: 'stretch', marginTop: 12,
+              borderRadius: 100, borderWidth: 2, borderColor: 'rgba(255,255,255,0.45)',
+              paddingVertical: 16, alignItems: 'center',
+            }}
+          >
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#FFFFFF' }}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+
     </View>
   );
 }
@@ -6930,7 +7141,6 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onAddChore, managedC
             <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 16, marginBottom: 16 }}>
               <StatTile label="To Approve" value={String(pendingReviewCount)} variant="purple" badge={isBackedUp ? pendingReviewCount : undefined} />
               <StatTile label="Owed Out" value={fmtDollars(owedCents)} variant="lime" />
-              <StatTile label="Done" value={`${donePct}%`} variant={isRough ? 'loss' : 'white'} />
             </View>
 
             {/* ── Payday banner ─────────────────────────────────────────────── */}
@@ -7022,7 +7232,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onAddChore, managedC
               <TouchableOpacity
                 onPress={onAddChore}
                 activeOpacity={0.85}
-                style={{ backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center', ...SOLID_SHADOW }}
+                style={{ backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center', ...BTN_SHADOW }}
               >
                 <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>+ Assign Chore</Text>
               </TouchableOpacity>
@@ -7189,14 +7399,14 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               {/* Action buttons */}
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <TouchableOpacity
-                  style={{ flex: 1, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 16, padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', ...SOLID_SHADOW }}
+                  style={{ flex: 1, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 16, padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', ...BTN_SHADOW }}
                   onPress={handleReject}
                   activeOpacity={0.7}
                 >
                   <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#E84040' }}>✕ Reject</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: '#6B35F0', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
+                  style={{ flex: 1, backgroundColor: '#6B35F0', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW }}
                   onPress={handleApprove}
                   activeOpacity={0.7}
                 >
@@ -7207,7 +7417,7 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               {/* Approve all — only when a backlog has accumulated */}
               {pendingCount > 1 && (
                 <TouchableOpacity
-                  style={{ marginTop: 12, backgroundColor: '#27AE60', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
+                  style={{ marginTop: 12, backgroundColor: '#27AE60', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW }}
                   onPress={handleApproveAll}
                   activeOpacity={0.7}
                 >
@@ -7375,7 +7585,7 @@ function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
 
             {/* CTA */}
             <TouchableOpacity
-              style={{ backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
+              style={{ backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW }}
               onPress={handlePay}
               activeOpacity={0.8}
             >
@@ -7553,7 +7763,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
         {/* Hero: purple review-queue card when there's something to approve,
             else a calm line (MON-96, supersedes the amber action bar). */}
         {allPendingReviews.length > 0 ? (
-          <View style={{ backgroundColor: '#6B35F0', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, shadowColor: '#111111', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 1, shadowRadius: 0, elevation: 5 }}>
+          <View style={{ backgroundColor: '#6B35F0', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20 }}>
             <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), letterSpacing: 1.5, color: '#C5F215' }}>NEEDS YOUR REVIEW</Text>
             <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(40), lineHeight: scale(44), color: '#FFFFFF', marginTop: 2 }}>
               {allPendingReviews.length} {allPendingReviews.length === 1 ? 'chore' : 'chores'}
@@ -7578,28 +7788,22 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
               </TouchableOpacity>
             </View>
           </View>
-        ) : (
-          <View style={{ paddingVertical: 12, paddingHorizontal: 4 }}>
-            <Text style={{ fontFamily: 'Nunito_700Bold', fontSize: scale(16), color: '#767676' }}>✓ Nothing to approve right now.</Text>
-          </View>
-        )}
+        ) : null}
 
-        {/* Tabs — Today | History */}
-        <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ECEAE4', alignItems: 'center', marginTop: 16 }}>
-          <TouchableOpacity
-            style={{ paddingVertical: 12, paddingHorizontal: 4, marginRight: 24, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'today' ? '#6B35F0' : 'transparent' }}
-            onPress={() => setActiveTab('today')}
-            activeOpacity={0.7}
-          >
-            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'today' ? '#6B35F0' : '#ABABAB' }}>Today</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={{ paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: 2.5, borderBottomColor: activeTab === 'history' ? '#6B35F0' : 'transparent' }}
-            onPress={() => setActiveTab('history')}
-            activeOpacity={0.7}
-          >
-            <Text style={{ fontSize: scale(16), fontFamily: 'Inter_700Bold', color: activeTab === 'history' ? '#6B35F0' : '#ABABAB' }}>History</Text>
-          </TouchableOpacity>
+        {/* Tabs — Today | History. Same SegmentedToggle as Money's Owed/History:
+            both screens split into two peer views, so they should look identical.
+            Replaces underlined purple text tabs, which read as a different
+            navigation idiom from the pill Money uses. */}
+        {/* Top margin only when the hero above actually rendered. With nothing to
+            approve the hero is null, so this 12 used to stack on the wrapper's
+            marginTop: 16 and push the control to 28 from the header — against
+            Money's 16, where the control carries the top margin itself. */}
+        <View style={{ marginTop: allPendingReviews.length > 0 ? 12 : 0, marginBottom: 4 }}>
+          <SegmentedToggle
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[{ value: 'today', label: 'Today' }, { value: 'history', label: 'History' }]}
+          />
         </View>
       </View>
 
@@ -7653,7 +7857,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                       return (
                         <View key={`${r.chore.id}-${r.kidName}`} style={[s.homeQuestCard, { marginBottom: 0, overflow: 'hidden' }]}>
                           <View style={[s.homeQuestIcon, { backgroundColor: r.chore.bg }]}>
-                            <ChoreIcon icon={r.chore.icon} size={45} />
+                            <ChoreIcon icon={r.chore.icon} size={54} />
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={s.homeQuestTitle}>{r.chore.name}</Text>
@@ -7700,7 +7904,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
                   {group.items.map(entry => (
                     <View key={entry.id} style={[s.homeQuestCard, { marginBottom: 0, overflow: 'hidden' }]}>
                       <View style={[s.homeQuestIcon, { backgroundColor: entry.bg }]}>
-                        <ChoreIcon icon={entry.icon} size={45} />
+                        <ChoreIcon icon={entry.icon} size={54} />
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={s.homeQuestTitle}>{entry.choreName}</Text>
@@ -7760,9 +7964,20 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
   const [assignedTo, setAssignedTo]   = useState<string[]>(existing?.assignedTo ?? []);
   const [completionMode, setCompletionMode] = useState<'shared' | 'independent'>(existing?.completionMode ?? 'shared');
   const [selectedIcon, setSelectedIcon] = useState<{ icon: string | number; bg: string }>(
-    existing ? { icon: existing.icon, bg: existing.bg } : CHORE_ICONS[0]
+    existing ? { icon: existing.icon, bg: existing.bg } : PICKABLE_CHORE_ICONS[0]
   );
   const [saveError, setSaveError]     = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Unreviewed completions snapshotted onto this chore. Deleting drops them and
+  // the pay owed for them, so the confirm sheet has to say so — approved work is
+  // already in choreHistory and survives the delete, but this does not.
+  const pendingOnChore = Object.values(existing?.childPendingCount ?? {}).reduce((a, b) => a + b, 0);
+  // Double-submit guard. handleSave mints a fresh id for a new chore, so two taps
+  // landing before the parent's state update unmounts this form used to create two
+  // separate chores. A ref, not state: it has to flip synchronously within the same
+  // handler, and this component is unmounting as it saves so a state update may
+  // never land. Reset on failure so a real error is still retryable.
+  const savingRef = useRef(false);
   // Completion mode is a household-level choice: always offered for "Everyone"
   // chores (it takes effect as soon as a 2nd kid joins) and for 2+ specific
   // kids. Hidden only when a single specific kid is assigned.
@@ -7794,6 +8009,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
       setSaveError('Please enter a chore name.');
       return;
     }
+    if (savingRef.current) return;
     setSaveError('');
     try {
       const chore: ManagedChore = {
@@ -7831,8 +8047,10 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         const maxKidDone = Math.max(0, ...Object.values(existing.childCompletions ?? {}));
         chore.weeklyCompletions = Math.max(chore.weeklyCompletions, maxKidDone);
       }
+      savingRef.current = true;
       onSave(chore);
     } catch (err) {
+      savingRef.current = false;
       setSaveError(err instanceof Error ? err.message : 'Failed to save chore. Please try again.');
     }
   };
@@ -7846,7 +8064,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         title={isEdit ? 'Edit chore' : 'Add chore'}
         backgroundColor="#FAF9F4"
         trailing={isEdit ? (
-          <PressableShadow onPress={onDelete} depth={4} style={{ width: scale(44), height: scale(44) }}>
+          <PressableShadow onPress={() => setShowDeleteConfirm(true)} depth={4} style={{ width: scale(44), height: scale(44) }}>
             <View style={{ width: scale(44), height: scale(44), borderRadius: scale(22), backgroundColor: '#FFFFFF', borderWidth: 2.5, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: scale(18) }}>🗑️</Text>
             </View>
@@ -8024,6 +8242,43 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
           </Animated.View>
         </Animated.View>
       </Modal>
+
+      {/* Delete confirmation. The trash icon sits in the header next to the close
+          button, so a mis-tap used to delete the chore outright with no way back.
+          Mirrors the goal-delete sheet's shape (headline, consequence, dark
+          destructive CTA, cancel underneath) — and, like that one, a plain
+          absolutely-positioned overlay rather than a <Modal>. Confirming deletes the
+          chore, which unmounts this screen in the same tick the Modal would be
+          closing; iOS is then left holding a presented Modal with nothing behind it
+          and the app renders blank white. An overlay unmounts with its parent. */}
+      {showDeleteConfirm && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', paddingBottom: 32, paddingHorizontal: 16 }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowDeleteConfirm(false)} />
+          <View style={{ backgroundColor: '#F7F6F2', borderRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', padding: 24, gap: 12 }}>
+            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -0.3 }}>
+              {`Delete "${existing?.name ?? name}"?`}
+            </Text>
+            <Text style={{ fontSize: scale(15), color: '#4A4A4A', lineHeight: scale(21) }}>
+              {pendingOnChore > 0
+                ? `${pendingOnChore} completion${pendingOnChore === 1 ? '' : 's'} still waiting on your review will be dropped, along with the pay owed for ${pendingOnChore === 1 ? 'it' : 'them'}. Already-approved work stays in History. This can't be undone.`
+                : `Already-approved work stays in History. This can't be undone.`}
+            </Text>
+            {/* Explicit markup rather than <Button>: Button forwards `style` to the
+                outer PressableShadow, so a colour override lands behind the pill
+                instead of on it. Dark destructive fill matches the goal-delete sheet. */}
+            <PressableShadow onPress={() => { setShowDeleteConfirm(false); onDelete?.(); }} depth={6} style={{ width: '100%', marginTop: 4 }}>
+              <View style={{ backgroundColor: '#1A1A1A', borderRadius: 80, borderWidth: 3, borderColor: '#1A1A1A', paddingVertical: 18, alignItems: 'center' }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(20), color: '#FFFFFF' }}>Yes, delete it</Text>
+              </View>
+            </PressableShadow>
+            <PressableShadow onPress={() => setShowDeleteConfirm(false)} depth={6} style={{ width: '100%' }}>
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 80, borderWidth: 3, borderColor: '#1A1A1A', paddingVertical: 18, alignItems: 'center' }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(20), color: '#1A1A1A' }}>Keep chore</Text>
+              </View>
+            </PressableShadow>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -8101,7 +8356,7 @@ function ChoreLibraryScreen({ chores, onBack, onAdd, onEdit, onDelete, baseRate,
                 <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#C5F215', borderRadius: 16, opacity: glow }]} />
               )}
               <View style={[s.homeQuestIcon, { backgroundColor: chore.bg }]}>
-                <ChoreIcon icon={chore.icon} size={45} />
+                <ChoreIcon icon={chore.icon} size={54} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.homeQuestTitle}>{chore.name}</Text>
@@ -8240,12 +8495,33 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
 
 // ─── Parent Settings Screens ──────────────────────────────────────────────────
 
-// Plan & billing — presentational only for now, no real Apple IAP/StoreKit
-// wiring. `planCadence` lives as local state on ParentSettingsScreen (not
-// persisted) until a real subscription backend exists to hang it off of.
-const PLAN_YEARLY_PRICE     = 39.99;
-const PLAN_MONTHLY_PRICE    = 4.99;
-const PLAN_TRIAL_DAYS_TOTAL = 7;
+// Plan & billing — presentational only, no real StoreKit wiring. `planCadence`
+// lives as local state on ParentSettingsScreen (not persisted) until a real
+// subscription backend exists to hang it off of. This whole screen is currently
+// unreachable behind BILLING_ENABLED.
+//
+// PRICES: formalized in MON-86 (2026-08-09) as a flat family rate — $9.99/mo or
+// $79.99/yr, which is exactly 33% off the annualized monthly ($119.88), so the
+// "SAVE 33%" badge stays truthful. Effective $6.67/mo yearly.
+//
+// These constants exist ONLY so the gated screen renders something coherent.
+// They are NOT the source of truth and must not be shown to a user as-is —
+// iap.ts's rule stands: prices are always derived from the live StoreKit product
+// via describePlan(), never hardcoded. Before BILLING_ENABLED flips on, this
+// screen needs rewiring to useSubscription's plan data; leaving these in place
+// would state a price Apple may not agree with (regional pricing, tax, tier
+// changes) — which is the exact trust failure the paywall strategy is built to
+// avoid.
+const PLAN_YEARLY_PRICE     = 79.99;
+const PLAN_MONTHLY_PRICE    = 9.99;
+// Trial length: 14 days, decided in MON-86 (two Sunday boss battles before any
+// charge). The real value comes from the StoreKit introductory offer — this is
+// display-only.
+const PLAN_TRIAL_DAYS_TOTAL = 14;
+// FABRICATED. A constant "days left" is not a countdown — every user would see
+// the same number forever, and END_LABEL is a fixed past date. Both must be
+// computed from the live trial (useSubscription's trialEndsAt) before this
+// screen is ever shown.
 const PLAN_TRIAL_DAYS_LEFT  = 5;
 const PLAN_TRIAL_END_LABEL  = 'Jul 22';
 const planCadenceLabel = (c: 'yearly' | 'monthly') => c === 'yearly' ? 'Yearly' : 'Monthly';
@@ -9278,7 +9554,13 @@ function ChangePlanScreen({ onBack, currentCadence, onConfirm }: {
         )}
       </ScrollView>
 
-      <View style={{ padding: 16 }}>
+      {/* The CTA is a fixed footer, not part of the ScrollView, so it can never be
+          scrolled into view — and the floating tab bar sat on top of it, leaving the
+          button unreachable. Measured on an iPhone 17: the tab bar is absolute at
+          bottom: 36 and 97pt tall, so its top edge is 133pt up from the screen
+          bottom. 152 clears that with ~19pt to spare. (Note the paddingBottom: 120
+          used by the scrolling screens is 13pt short of clearing it.) */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 152 }}>
         <Button
           label={changed ? `Switch to ${planCadenceLabel(selected)}` : `Keep ${planCadenceLabel(currentCadence)} plan`}
           disabled={!changed}
@@ -10452,11 +10734,9 @@ const socialBtn = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      ios:     { shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 0 },
-      android: { elevation: 6 },
-      default: {},
-    }),
+    // Social sign-in is a CTA button, so it keeps the hard shadow — and via
+    // hardShadow() it now renders on web too, not just iOS/Android.
+    ...hardShadow(6),
   },
   apple:  { backgroundColor: '#1A1A1A' },
   google: { backgroundColor: '#FFFFFF' },
@@ -14184,7 +14464,7 @@ function AppInner() {
             {parentScreen === 'payRates'  && <ErrorBoundary key="payRates"><PayRatesScreen onBack={goBack} onRateGuide={() => { setPrevParentScreen('payRates'); setParentScreen('rateGuide'); }} baseRate={baseRate} setBaseRate={setBaseRate} /></ErrorBoundary>}
             {parentScreen === 'rateGuide' && <ErrorBoundary key="rateGuide"><RateGuideScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'rewards'   && <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>Rewards coming soon</Text></View>}
-            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} managedChores={managedChores} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} onSwitchToKid={switchToKid} parentRole={parentRole} /></ErrorBoundary>}
+            {parentScreen === 'moneyLedger' && <ErrorBoundary key="moneyLedger"><MoneyScreen kidCoins={kidCoins} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx }))} choreHistory={choreHistory} payoutLog={payoutLog} baseRate={baseRate} debugDayOffset={debugDayOffset} onConfirm={(kidName) => { confirmPayout(kidName); showParentToast(`✓ Paid ${kidName}!`); }} onSwitchToKid={switchToKid} parentRole={parentRole} /></ErrorBoundary>}
             {parentScreen === 'settings'         && <ErrorBoundary key="parentSettings"><ParentSettingsScreen onNav={navParent} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} onAddKid={() => openKidModal(null)} onEditKid={k => { const full = setupChildren.find(c => c.name === k.name); if (full) openKidModal(full); }} onRotateCode={handleRotateCode} kids={kids} kidApprovalSettings={kidApprovalSettings} setKidApprovalSettings={setKidApprovalSettings} kidProfiles={setupChildren.map(c => ({ name: c.name, avatarColor: c.avatarColor, avatarIdx: c.avatarIdx, pairingCode: c.pairingCode }))} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={parentPinEnabled} savedPin={parentPin} onSavePin={saveParentPin} onDisablePin={disableParentPin} onSaveName={(n) => { setSessionUser(prev => prev ? { ...prev, name: n } : prev); saveDisplayName(n).catch(e => console.warn('[DB] saveDisplayName error:', e)); }} onSignOut={handleSignOut} onSwitchToKid={switchToKid} initialSub={settingsInitialSub} onConsumeInitialSub={() => setSettingsInitialSub(null)} /></ErrorBoundary>}
             {parentScreen === 'parentMilestones' && <ErrorBoundary key="parentMilestones"><ParentMilestonesScreen onBack={goBack} /></ErrorBoundary>}
             {parentScreen === 'kidMilestones' && <ErrorBoundary key="kidMilestones"><ParentKidMilestonesScreen kidProfiles={setupChildren.map(c => ({ name: c.name, avatarIdx: c.avatarIdx }))} onBack={goBack} /></ErrorBoundary>}
@@ -14776,13 +15056,13 @@ export default App;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Both retired: surfaces are flat on every platform now, and the hard shadow is
+// reserved for CTA buttons (PressableShadow's `hardShadow` prop, or hardShadow()).
+// Kept as empty spreads so the call sites don't all have to change.
 const SOLID_SHADOW = shadows.solid;
-// Smaller solid drop shadow (0px 3px 0px #111) — matches the design-system --shadow-sm
-const SOLID_SHADOW_SM = Platform.select({
-  ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
-  android: { elevation: 3 },
-  default: {},
-})!;
+const SOLID_SHADOW_SM = {};
+/** The hard shadow, for CTA buttons only. Renders on web as well as iOS/Android. */
+const BTN_SHADOW = hardShadow(6);
 
 const s = StyleSheet.create({
   root:            { flex: 1, backgroundColor: C.surface },
@@ -14812,7 +15092,7 @@ const s = StyleSheet.create({
   choreCheckDone:  { backgroundColor: C.accent, borderColor: C.accent },
   checkDot:        { width: 7, height: 7, borderRadius: 4, backgroundColor: 'white' },
   tabBar:          { position: 'absolute', bottom: 36, left: 12, right: 12 },
-  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 8, justifyContent: 'space-between', alignItems: 'center', ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12 }, android: { elevation: 8 } }) },
+  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 8, justifyContent: 'space-between', alignItems: 'center' },
   tab:             { flex: 1, alignItems: 'center', gap: 4 },
   tabIconWrap:     { width: 86, borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 4 },
   tabIconWrapActive: { backgroundColor: '#EAE4FF' }, // legacy static highlight — superseded by the animated tabPill
@@ -14822,7 +15102,7 @@ const s = StyleSheet.create({
   tabLabelActive:  { color: '#6B35F0' },
   // home screen
   homeRoot:           { flex: 1, backgroundColor: 'transparent' },
-  homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(14), paddingVertical: scale(9), gap: 6, shadowColor: '#111111', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4 },
+  homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(14), paddingVertical: scale(9), gap: 6 },
   homeBalanceText:    { fontSize: scale(15), fontFamily: 'SpaceMono_700Bold', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 12 },
   homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW, overflow: 'visible' },
@@ -14846,7 +15126,10 @@ const s = StyleSheet.create({
   homeQuestCard:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FAF9F4', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, marginBottom: 12, gap: 12, ...SOLID_SHADOW },
   homeQuestSweep:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#E8FFA0', borderRadius: 14 },
   homeQuestCardDone:  { opacity: 0.5 },
-  homeQuestIcon:      { width: 58, height: 58, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  // Stroked to match the app's bordered-card language. overflow hidden so a
+  // filling icon (ChoreIcon at 54 inside the 54 inner box) is clipped to the
+  // rounded corners instead of squaring them off.
+  homeQuestIcon:      { width: 58, height: 58, borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   homeQuestInfo:      { flex: 1 },
   homeQuestTitle:     { fontSize: scale(18), fontFamily: 'Inter_700Bold', color: '#1A1A1A', marginBottom: 4 },
   homeQuestTitleDone: { textDecorationLine: 'line-through', color: '#767676' },
@@ -14892,7 +15175,7 @@ const s = StyleSheet.create({
   oddsCard:        { flex: 1, backgroundColor: C.bg, borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', ...SOLID_SHADOW },
   oddsVal:         { fontSize: scale(18), fontFamily: 'Inter_900Black', color: C.text },
   oddsLbl:         { fontSize: scale(12), color: C.muted, fontFamily: 'Inter_700Bold', letterSpacing: 0.5, marginTop: 4 },
-  battleBtn:       { backgroundColor: '#1A1A1A', borderRadius: 100, paddingVertical: 20, alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  battleBtn:       { backgroundColor: '#1A1A1A', borderRadius: 100, paddingVertical: 20, alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...BTN_SHADOW },
   battleBtnText:   { fontSize: scale(18), fontFamily: 'Inter_900Black', color: 'white', letterSpacing: -0.3 },
   debugBtn:        { backgroundColor: C.bg, borderWidth: 0.5, borderColor: C.border, borderRadius: 10, padding: 12, alignItems: 'center' },
   debugBtnText:    { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.muted, letterSpacing: 0.3 },
@@ -15067,7 +15350,7 @@ const p = StyleSheet.create({
   formDropdownValue:{ fontSize: scale(16), color: '#1A1A1A' },
   rateDollarSign:   { fontSize: scale(18), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
   // Difficulty picker
-  difficultyBtn:        { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 12, borderWidth: 2, borderColor: '#ECEAE4', padding: 12, alignItems: 'center' as const, gap: 4 },
+  difficultyBtn:        { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center' as const, gap: 4 },
   difficultyBtnActive:  { backgroundColor: '#EAE4FF', borderColor: '#6B35F0' },
   difficultyStars:      { fontSize: scale(12) },
   difficultyLabel:      { fontSize: scale(12), fontFamily: 'Inter_700Bold' as const, color: '#767676' },
@@ -15075,7 +15358,7 @@ const p = StyleSheet.create({
   difficultyPay:        { fontSize: scale(12), fontFamily: 'Inter_700Bold' as const, color: '#767676' },
   difficultyPayActive:  { color: '#3B8A3A' },
   // Kid assignment pills
-  kidPill:          { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100, borderWidth: 2, borderColor: '#ECEAE4', backgroundColor: '#F7F6F2' },
+  kidPill:          { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#F7F6F2' },
   kidPillActive:    { backgroundColor: '#C5F215', borderColor: '#1A1A1A' },
   kidPillText:      { fontSize: scale(12), fontFamily: 'Inter_600SemiBold' as const, color: '#767676' },
   kidPillTextActive:{ color: '#1A1A1A' },
@@ -15084,7 +15367,7 @@ const p = StyleSheet.create({
   // (like the difficulty/frequency pickers elsewhere), not a plain field.
   completionSection: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
   // Completion-mode radio card
-  modeCard:         { borderWidth: 2, borderColor: '#ECEAE4', borderRadius: 14, overflow: 'hidden', backgroundColor: '#FFFFFF' },
+  modeCard:         { borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, overflow: 'hidden', backgroundColor: '#FFFFFF' },
   modeRow:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, backgroundColor: '#FFFFFF' },
   modeRowDivider:   { borderTopWidth: 1, borderTopColor: '#ECEAE4' },
   modeRowActive:    { backgroundColor: '#F4F9E3', borderLeftWidth: 4, borderLeftColor: '#7B3FF2', paddingLeft: 12 },
@@ -15145,7 +15428,7 @@ const p = StyleSheet.create({
   payoutBreakdownValue: { fontSize: scale(16), color: '#1A1A1A', fontFamily: 'Inter_700Bold' as const },
   payoutTotalLabel: { fontSize: scale(18), fontFamily: 'Inter_800ExtraBold' as const, color: '#1A1A1A' },
   payoutTotalValue: { fontSize: scale(18), fontFamily: 'Inter_900Black' as const, color: '#3B8A3A' },
-  payoutCta: { backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, alignItems: 'center' as const, ...SOLID_SHADOW },
+  payoutCta: { backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, alignItems: 'center' as const, ...BTN_SHADOW },
   payoutCtaText: { fontSize: scale(18), fontFamily: 'Inter_900Black' as const, color: '#1A1A1A' },
 });
 
@@ -15186,13 +15469,13 @@ const ps = StyleSheet.create({
   apprBadgeText:    { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold' },
   apprToggleMain:   { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#111' },
   apprToggleSub:    { fontSize: scale(12), color: '#888', fontFamily: 'Inter_600SemiBold', lineHeight: scale(17), marginTop: 4 },
-  apprShortcutBtn:  { flex: 1, paddingVertical: 12, backgroundColor: '#FFFDF7', borderWidth: 2, borderColor: '#111', borderRadius: 12, alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW_SM },
+  apprShortcutBtn:  { flex: 1, paddingVertical: 12, backgroundColor: '#FFFDF7', borderWidth: 2, borderColor: '#111', borderRadius: 12, alignItems: 'center', justifyContent: 'center', ...BTN_SHADOW },
   apprShortcutText: { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#111' },
   apprInfoBox:      { marginTop: 20, backgroundColor: '#F0E8FF', borderWidth: 2, borderColor: '#7B3FF2', borderRadius: 12, padding: 16, flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   apprInfoText:     { flex: 1, fontSize: scale(12), color: '#444', lineHeight: scale(19), fontFamily: 'Inter_600SemiBold' },
   sliderTrack:    { height: 6, backgroundColor: '#E0DCDC', borderRadius: 3, position: 'relative', marginBottom: 4 },
   sliderFill:     { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#6B35F0', borderRadius: 3 },
-  sliderThumb:    { position: 'absolute', top: -7, marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
+  sliderThumb:    { position: 'absolute', top: -7, marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#FFFFFF' },
   sliderTickLabel:{ fontSize: scale(12), color: '#767676' },
   impactRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   impactCell:     { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 10, padding: 12, alignItems: 'center', borderWidth: 2, borderColor: '#111111' },
@@ -15205,7 +15488,7 @@ const ps = StyleSheet.create({
   cosmeticText:   { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#6B35F0' },
   accountAvatar:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' },
   accountAvatarText: { fontSize: scale(28), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' },
-  logoutBtn:      { margin: 16, marginTop: 20, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW },
+  logoutBtn:      { margin: 16, marginTop: 20, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW },
   logoutText:     { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#E53935' },
 });
 
@@ -15453,7 +15736,7 @@ const b = StyleSheet.create({
   // ── Captured payoff (boss-in-jar, holds until tapped) ──────────────────────
   captureScrim:    { ...StyleSheet.absoluteFill, zIndex: 120, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.82)' },
   captureName:     { fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), color: '#FFFFFF', textAlign: 'center' },
-  captureBtn:      { backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(36), paddingVertical: scale(14), marginTop: scale(4), ...SOLID_SHADOW },
+  captureBtn:      { backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(36), paddingVertical: scale(14), marginTop: scale(4), ...BTN_SHADOW },
   captureBtnText:  { fontFamily: 'Inter_900Black', fontSize: scale(18), color: '#1A1A1A' },
 
   // ── Mini-game shared ──────────────────────────────────────────────────────
@@ -15465,9 +15748,9 @@ const b = StyleSheet.create({
   mgTitleDanger:{ color: '#FF6B6B' },
   mgInstrPill:  { backgroundColor: '#FFF9E6', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: scale(14), paddingVertical: scale(6), maxWidth: scale(320) },
   mgInstrText:  { fontFamily: 'Inter_700Bold', fontSize: scale(13), color: '#1A1A1A', textAlign: 'center' },
-  mgMainBtn:  { backgroundColor: '#6B35F0', borderRadius: 100, paddingHorizontal: scale(40), paddingVertical: scale(18), borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  mgMainBtn:  { backgroundColor: '#6B35F0', borderRadius: 100, paddingHorizontal: scale(40), paddingVertical: scale(18), borderWidth: 2, borderColor: '#1A1A1A', ...BTN_SHADOW },
   mgMainBtnText: { color: '#fff', fontFamily: 'Inter_900Black', fontSize: scale(18) },
-  mgBigTap:   { width: scale(130), height: scale(130), borderRadius: scale(65), backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
+  mgBigTap:   { width: scale(130), height: scale(130), borderRadius: scale(65), backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...BTN_SHADOW },
 
   // ── Card hand ─────────────────────────────────────────────────────────────
   handGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },

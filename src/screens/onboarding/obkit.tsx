@@ -8,7 +8,7 @@
 import React, { useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, Animated, Easing, TouchableOpacity,
-  Platform, ViewStyle, StyleProp,
+  ViewStyle, StyleProp,
 } from 'react-native';
 import Svg, { Defs, Pattern, Circle, Rect, Path } from 'react-native-svg';
 import { scale } from '../../design-system/tokens';
@@ -36,11 +36,9 @@ export const obc = {
   mono:        'SpaceMono_700Bold',
 } as const;
 
-export const cardShadow = Platform.select({
-  ios:     { shadowColor: obc.ink, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
-  android: { elevation: 4 },
-  default: {},
-})!;
+// Flat: onboarding surfaces (helper bubbles, code cells, keypad keys) carry no
+// shadow. Only CTA buttons do. Empty object keeps the `...cardShadow` spreads valid.
+export const cardShadow = {};
 
 // ─── Dot-grid lavender background ────────────────────────────────────────────
 // Prototype: background:#E9E4F5 + radial-gradient dot pattern, 22px tile.
@@ -79,7 +77,7 @@ export function ObButton({
   const bg    = variant === 'lime' ? obc.lime : ghost ? obc.cream : obc.purple;
   const color = variant === 'purple' ? obc.white : obc.ink;
   return (
-    <PressableShadow onPress={onPress} disabled={disabled} depth={disabled ? 0 : 5} style={[{ width: '100%' } as ViewStyle, style as ViewStyle]}>
+    <PressableShadow onPress={onPress} disabled={disabled} depth={disabled ? 0 : 5} hardShadow={!disabled} style={[{ width: '100%' } as ViewStyle, style as ViewStyle]}>
       <View style={[obs.btn, { backgroundColor: disabled ? '#DCDCDC' : bg, borderColor: disabled ? '#C0C0C0' : obc.ink }]}>
         <Text style={[obs.btnLabel, { color: disabled ? '#888888' : color }]}>{label}</Text>
       </View>

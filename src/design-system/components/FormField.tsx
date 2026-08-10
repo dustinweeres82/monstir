@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ViewStyle, KeyboardTypeOptions, Platform,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ViewStyle, KeyboardTypeOptions,
 } from 'react-native';
 import { colors, radii, fontSize, spacing, shadows } from '../tokens';
 
@@ -10,11 +10,8 @@ const HINT  = '#C0BEB8';
 const WHITE = '#FFFFFF';
 
 // Monstir solid drop-shadow (smaller variant for form elements)
-const FIELD_SHADOW = Platform.select({
-  ios:     { shadowColor: INK, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
-  android: { elevation: 3 },
-  default: {},
-})!;
+// Flat: form fields are surfaces, not buttons.
+const FIELD_SHADOW = {};
 
 // ─── FormField ────────────────────────────────────────────────────────────────
 // Self-contained card: white bg, 2px ink border, solid shadow, label + input.

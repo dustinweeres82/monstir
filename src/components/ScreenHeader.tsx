@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, Platform } from 'react-native';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { PressableShadow } from '../design-system/components/PressableShadow';
 import { scale, colors } from '../design-system/tokens';
 
@@ -8,11 +8,10 @@ const INK = '#1A1A1A';
 // A hard "0 4px 0 #111" shadow, applied to a view whose ONLY content is an
 // opaque shape (never applied to the same view as the shape's own background
 // — see the comment on `pillShadow`/`backBtnOuter` below for why that matters).
-const hardShadow = (depth: number) => Platform.select({
-  ios:     { shadowColor: INK, shadowOffset: { width: 0, height: depth }, shadowOpacity: 1, shadowRadius: 0 },
-  android: { elevation: depth },
-  default: {},
-})!;
+// Flat: header pills and icon buttons carry no shadow now — only CTA buttons do.
+// (Previously ios/android-only, which is why headers looked raised on device and
+// flat in the browser.) Kept as a function so the call sites don't change.
+const hardShadow = (_depth: number) => ({});
 
 // ─── Standardized three-slot screen header: Leading · Title · Trailing ────────
 // Root screens: leading = caller-provided avatar/switcher control (44×44).

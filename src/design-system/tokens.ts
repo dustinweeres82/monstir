@@ -141,30 +141,38 @@ export const spaceMonoFamily = {
 
 // ─── Shadows ─────────────────────────────────────────────────────────────────
 
+// Surfaces are flat. The hard 0px 6px 0px shadow is reserved for CTA buttons and
+// lives in PressableShadow — nothing else carries a shadow.
+//
+// These were previously Platform.select({ ios, android, default: {} }). That empty
+// web branch is why the app looked different per platform: token-styled surfaces
+// (Card, GamePanel, BottomSheet, ListCell, Toggle, TabBar) were shadowed on iOS and
+// flat on web, while a handful of hand-written inline `shadow*` props were NOT
+// platform-gated and so rendered on both (react-native-web maps shadow* → box-shadow).
+// Keeping the keys as empty objects so the ~20 `...shadows.solid` spreads stay valid.
 export const shadows = {
-  card: Platform.select({
-    ios:     { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12 },
-    android: { elevation: 8 },
-    default: {},
-  })!,
-  soft: Platform.select({
-    ios:     { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 },
-    android: { elevation: 3 },
-    default: {},
-  })!,
-  /** Monstir design system: 0px 6px 0px #111111 */
-  solid: Platform.select({
-    ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 0 },
-    android: { elevation: 6 },
-    default: {},
-  })!,
-  /** Monstir design system, smaller: 0px 3px 0px #111111 */
-  solidSm: Platform.select({
-    ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
-    android: { elevation: 3 },
-    default: {},
-  })!,
+  card:    {},
+  soft:    {},
+  /** Retired: surfaces are flat. Kept so existing spreads compile. */
+  solid:   {},
+  /** Retired: surfaces are flat. Kept so existing spreads compile. */
+  solidSm: {},
 };
+
+/**
+ * The one shadow the app still uses: a hard 0px {depth}px 0px ink drop, for CTA
+ * buttons only. Spread into a button's own style when it isn't going through
+ * PressableShadow (which applies the same thing via its `hardShadow` prop).
+ *
+ * Includes a web value on purpose. Every shadow in this codebase used to be
+ * Platform.select'd with an empty `default`, which silently dropped it on web and
+ * is why the same button looked raised on iOS and flat in the browser.
+ */
+export const hardShadow = (depth: number = 6) => Platform.select({
+  ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: depth }, shadowOpacity: 1, shadowRadius: 0 },
+  android: { elevation: depth },
+  default: { boxShadow: `0px ${depth}px 0px #111111` },
+})!;
 
 // ─── Border shortcuts ─────────────────────────────────────────────────────────
 

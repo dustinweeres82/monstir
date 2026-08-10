@@ -24,6 +24,7 @@ export function ArrowButton({ direction, onPress, disabled, size = 52 }: Props) 
         onPress={onPress}
         disabled={disabled}
         pressScale={0.92}
+        hardShadow={!disabled}
       >
         {/*
          * White circle is inside PressableShadow so the shadow layer has an

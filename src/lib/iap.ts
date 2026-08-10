@@ -13,11 +13,11 @@ import type { ProductSubscription } from 'expo-iap';
 
 export interface PlanDisplay {
   sku: string;
-  /** Formatted total price for the billing period, e.g. "$39.99" */
+  /** Formatted total price for the billing period, e.g. "$79.99" */
   price: string;
   /** Formatted "per month" breakdown, e.g. "$3.33 / month" */
   perMonth: string | null;
-  /** e.g. "Yearly · billed $39.99 / year" */
+  /** e.g. "Yearly · billed $79.99 / year" */
   subline: string;
   hasFreeTrial: boolean;
   /** e.g. "7 days free" — blank if this plan has no introductory offer */
@@ -28,7 +28,7 @@ function isIOSSubscription(p: ProductSubscription): p is Extract<ProductSubscrip
   return (p as { platform?: string }).platform === 'ios';
 }
 
-/** Parses a StoreKit displayPrice string ("$39.99") into a number (39.99). Falls
+/** Parses a StoreKit displayPrice string ("$79.99") into a number (79.99). Falls
  *  back to the raw `price` field when the string can't be parsed (e.g. a
  *  currency with a trailing symbol). */
 function parsePriceNumber(product: Extract<ProductSubscription, { platform: 'ios' }>): number {
