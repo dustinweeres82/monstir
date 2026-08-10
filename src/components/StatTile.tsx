@@ -3,7 +3,10 @@ import { View, Text } from 'react-native';
 import { scale } from '../design-system/tokens';
 
 const INK = '#1A1A1A';
-const SOLID_SHADOW = { shadowColor: INK, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 0, elevation: 6 } as const;
+// Flat: surfaces carry no shadow, only CTA buttons do. These inline props weren't
+// platform-gated, so they were the one shadow that did render on web — the reason
+// the stat tiles looked shadowed there while every other surface was flat.
+const SOLID_SHADOW = {} as const;
 
 export type StatTileVariant = 'purple' | 'lime' | 'white' | 'loss';
 

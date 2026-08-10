@@ -15,7 +15,7 @@ interface ButtonProps {
 
 export function Button({ label, onPress, variant = 'primary', disabled, style }: ButtonProps) {
   return (
-    <PressableShadow onPress={onPress} disabled={disabled} depth={disabled ? 0 : 6} style={[{ width: '100%' } as ViewStyle, style as ViewStyle]}>
+    <PressableShadow onPress={onPress} disabled={disabled} depth={disabled ? 0 : 6} hardShadow={!disabled} style={[{ width: '100%' } as ViewStyle, style as ViewStyle]}>
       <View style={[s.btn, s[variant], disabled && s.disabled]}>
         <Text style={[s.label, variant === 'primary' ? s.labelLight : s.labelDark, disabled && s.labelDisabled]}>
           {label}

@@ -73,7 +73,7 @@ import {
   Inter_800ExtraBold,
   Inter_900Black,
 } from '@expo-google-fonts/inter';
-import { shadows, scale, fontSize, interFamily, nunitoFamily } from './src/design-system/tokens';
+import { shadows, hardShadow, scale, fontSize, interFamily, nunitoFamily } from './src/design-system/tokens';
 import { useScaleAnimation } from './src/design-system/hooks';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { setAudioModeAsync } from 'expo-audio';
@@ -1847,7 +1847,8 @@ const av = StyleSheet.create({
   title:      { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: '#767676', letterSpacing: 0.8, textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   // Horizontal carousel row — shared by the avatar picker and chore icon picker
   avatarRow:  { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 16, gap: 12 },
-  avatarCell: { width: 90, height: 90, borderRadius: 16, overflow: 'hidden', borderWidth: 2.5, borderColor: 'transparent', backgroundColor: '#F3F1EC' },
+  // Black stroke at rest like every other bordered surface; purple marks selection.
+  avatarCell: { width: 90, height: 90, borderRadius: 16, overflow: 'hidden', borderWidth: 2.5, borderColor: '#1A1A1A', backgroundColor: '#F3F1EC' },
   cellActive: { borderColor: PURPLE },
   cellImg:    { width: '100%', height: '100%' },
   // Age range rows
@@ -3422,7 +3423,7 @@ function ResultScreen({ monsterIdx, captured, bonusCoins, onDone, monsterImg, bo
           : `This time.\nHe slipped away — a fresh boss arrives\nnext week. Keep doing your chores!`}
       </Text>
       <TouchableOpacity
-        style={{ backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, ...SOLID_SHADOW }}
+        style={{ backgroundColor: '#C5F215', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 40, ...BTN_SHADOW }}
         onPress={onDone}
         activeOpacity={0.8}
       >
@@ -3653,7 +3654,7 @@ function FrenzyGame({ onScore, title = 'FRENZY' }: { onScore: (s: number) => voi
         onPress={handleTap}
         disabled={done}
         activeOpacity={0.75}
-        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...BTN_SHADOW }}
       >
         <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
           {done ? '⚡ Charged!' : `Charge!  ${Math.ceil(timeLeft / 1000)}s`}
@@ -3811,7 +3812,7 @@ function ShakePotionGame({ onScore, title = 'SHAKE POTION' }: { onScore: (s: num
           onPress={() => { if (selected.length === 3) setPhase('shaking'); }}
           disabled={selected.length < 3}
           activeOpacity={0.75}
-          style={{ alignSelf: 'stretch', backgroundColor: selected.length === 3 ? '#C5F215' : '#D0CEC8', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+          style={{ alignSelf: 'stretch', backgroundColor: selected.length === 3 ? '#C5F215' : '#D0CEC8', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...BTN_SHADOW }}
         >
           <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
             {selected.length === 3 ? 'Create the potion!' : `Pick ${3 - selected.length} more`}
@@ -3918,7 +3919,7 @@ function ShakePotionShake({ onScore, title = 'SHAKE POTION' }: { onScore: (s: nu
         onPress={handleTap}
         disabled={done}
         activeOpacity={0.7}
-        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...SOLID_SHADOW }}
+        style={{ alignSelf: 'stretch', backgroundColor: done ? '#ABABAB' : '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...BTN_SHADOW }}
       >
         <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(18), color: '#1A1A1A' }}>
           {done ? '✨ Done!' : `Shake!  ${Math.ceil(timeLeft / 1000)}s`}
@@ -5494,7 +5495,7 @@ function KidPayoutScreen({ amount, completedCount, weeks, battleWon, battleBonus
 
         {/* Collect button */}
         <TouchableOpacity
-          style={{ backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 20, paddingHorizontal: 48, alignItems: 'center', ...SOLID_SHADOW, marginTop: 8 }}
+          style={{ backgroundColor: '#FFFFFF', borderRadius: 18, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 20, paddingHorizontal: 48, alignItems: 'center', ...BTN_SHADOW, marginTop: 8 }}
           onPress={() => { playCashRegister(); onDismiss(); }}
           onPressIn={collectPI} onPressOut={collectPO}
           activeOpacity={1}
@@ -5702,7 +5703,6 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
             borderWidth: 2, borderColor: '#1A1A1A',
             backgroundColor: '#FFFFFF',
             alignItems: 'center', justifyContent: 'center',
-            shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3,
           }}
           activeOpacity={0.7}
         >
@@ -5996,7 +5996,7 @@ function WalletScreen({ coins, weeklyEarnedCents, weeklyHistory, done, battleRes
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <Text style={{ fontSize: scale(18), fontFamily: 'Inter_900Black', color: '#1A1A1A' }}>Other goals</Text>
               <TouchableOpacity
-                style={{ backgroundColor: '#C5F215', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 8, ...SOLID_SHADOW }}
+                style={{ backgroundColor: '#C5F215', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: 16, paddingVertical: 8, ...BTN_SHADOW }}
                 onPress={() => { setEditingGoal(null); setShowGoalModal(true); }}
                 activeOpacity={0.8}
               >
@@ -7220,7 +7220,7 @@ function ParentHomeScreen({ onNav, onSwitchToKid, onAddKid, onAddChore, managedC
               <TouchableOpacity
                 onPress={onAddChore}
                 activeOpacity={0.85}
-                style={{ backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center', ...SOLID_SHADOW }}
+                style={{ backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: 16, alignItems: 'center', ...BTN_SHADOW }}
               >
                 <Text style={{ fontSize: scale(15), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>+ Assign Chore</Text>
               </TouchableOpacity>
@@ -7387,14 +7387,14 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               {/* Action buttons */}
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <TouchableOpacity
-                  style={{ flex: 1, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 16, padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', ...SOLID_SHADOW }}
+                  style={{ flex: 1, borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 16, padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', ...BTN_SHADOW }}
                   onPress={handleReject}
                   activeOpacity={0.7}
                 >
                   <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#E84040' }}>✕ Reject</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: '#6B35F0', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
+                  style={{ flex: 1, backgroundColor: '#6B35F0', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW }}
                   onPress={handleApprove}
                   activeOpacity={0.7}
                 >
@@ -7405,7 +7405,7 @@ function ChoreReviewSheet({ chore, kidName = '', kidProfiles, baseRate, onApprov
               {/* Approve all — only when a backlog has accumulated */}
               {pendingCount > 1 && (
                 <TouchableOpacity
-                  style={{ marginTop: 12, backgroundColor: '#27AE60', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
+                  style={{ marginTop: 12, backgroundColor: '#27AE60', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW }}
                   onPress={handleApproveAll}
                   activeOpacity={0.7}
                 >
@@ -7573,7 +7573,7 @@ function PayoutSheet({ target, weeks, totalCents, onConfirm, onClose }: {
 
             {/* CTA */}
             <TouchableOpacity
-              style={{ backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW }}
+              style={{ backgroundColor: '#6B35F0', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW }}
               onPress={handlePay}
               activeOpacity={0.8}
             >
@@ -7751,7 +7751,7 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
         {/* Hero: purple review-queue card when there's something to approve,
             else a calm line (MON-96, supersedes the amber action bar). */}
         {allPendingReviews.length > 0 ? (
-          <View style={{ backgroundColor: '#6B35F0', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, shadowColor: '#111111', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 1, shadowRadius: 0, elevation: 5 }}>
+          <View style={{ backgroundColor: '#6B35F0', borderRadius: 20, borderWidth: 2, borderColor: '#1A1A1A', padding: 20 }}>
             <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(12), letterSpacing: 1.5, color: '#C5F215' }}>NEEDS YOUR REVIEW</Text>
             <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(40), lineHeight: scale(44), color: '#FFFFFF', marginTop: 2 }}>
               {allPendingReviews.length} {allPendingReviews.length === 1 ? 'chore' : 'chores'}
@@ -7782,7 +7782,11 @@ function ParentChoresScreen({ chores, history, onBack, showBack, onAdd, onEdit, 
             both screens split into two peer views, so they should look identical.
             Replaces underlined purple text tabs, which read as a different
             navigation idiom from the pill Money uses. */}
-        <View style={{ marginTop: 12, marginBottom: 4 }}>
+        {/* Top margin only when the hero above actually rendered. With nothing to
+            approve the hero is null, so this 12 used to stack on the wrapper's
+            marginTop: 16 and push the control to 28 from the header — against
+            Money's 16, where the control carries the top margin itself. */}
+        <View style={{ marginTop: allPendingReviews.length > 0 ? 12 : 0, marginBottom: 4 }}>
           <SegmentedToggle
             value={activeTab}
             onChange={setActiveTab}
@@ -7951,6 +7955,17 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
     existing ? { icon: existing.icon, bg: existing.bg } : CHORE_ICONS[0]
   );
   const [saveError, setSaveError]     = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Unreviewed completions snapshotted onto this chore. Deleting drops them and
+  // the pay owed for them, so the confirm sheet has to say so — approved work is
+  // already in choreHistory and survives the delete, but this does not.
+  const pendingOnChore = Object.values(existing?.childPendingCount ?? {}).reduce((a, b) => a + b, 0);
+  // Double-submit guard. handleSave mints a fresh id for a new chore, so two taps
+  // landing before the parent's state update unmounts this form used to create two
+  // separate chores. A ref, not state: it has to flip synchronously within the same
+  // handler, and this component is unmounting as it saves so a state update may
+  // never land. Reset on failure so a real error is still retryable.
+  const savingRef = useRef(false);
   // Completion mode is a household-level choice: always offered for "Everyone"
   // chores (it takes effect as soon as a 2nd kid joins) and for 2+ specific
   // kids. Hidden only when a single specific kid is assigned.
@@ -7982,6 +7997,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
       setSaveError('Please enter a chore name.');
       return;
     }
+    if (savingRef.current) return;
     setSaveError('');
     try {
       const chore: ManagedChore = {
@@ -8019,8 +8035,10 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         const maxKidDone = Math.max(0, ...Object.values(existing.childCompletions ?? {}));
         chore.weeklyCompletions = Math.max(chore.weeklyCompletions, maxKidDone);
       }
+      savingRef.current = true;
       onSave(chore);
     } catch (err) {
+      savingRef.current = false;
       setSaveError(err instanceof Error ? err.message : 'Failed to save chore. Please try again.');
     }
   };
@@ -8034,7 +8052,7 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
         title={isEdit ? 'Edit chore' : 'Add chore'}
         backgroundColor="#FAF9F4"
         trailing={isEdit ? (
-          <PressableShadow onPress={onDelete} depth={4} style={{ width: scale(44), height: scale(44) }}>
+          <PressableShadow onPress={() => setShowDeleteConfirm(true)} depth={4} style={{ width: scale(44), height: scale(44) }}>
             <View style={{ width: scale(44), height: scale(44), borderRadius: scale(22), backgroundColor: '#FFFFFF', borderWidth: 2.5, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: scale(18) }}>🗑️</Text>
             </View>
@@ -8212,6 +8230,43 @@ function AddEditChoreScreen({ existing, onBack, onSave, onDelete, kids, baseRate
           </Animated.View>
         </Animated.View>
       </Modal>
+
+      {/* Delete confirmation. The trash icon sits in the header next to the close
+          button, so a mis-tap used to delete the chore outright with no way back.
+          Mirrors the goal-delete sheet's shape (headline, consequence, dark
+          destructive CTA, cancel underneath) — and, like that one, a plain
+          absolutely-positioned overlay rather than a <Modal>. Confirming deletes the
+          chore, which unmounts this screen in the same tick the Modal would be
+          closing; iOS is then left holding a presented Modal with nothing behind it
+          and the app renders blank white. An overlay unmounts with its parent. */}
+      {showDeleteConfirm && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', paddingBottom: 32, paddingHorizontal: 16 }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowDeleteConfirm(false)} />
+          <View style={{ backgroundColor: '#F7F6F2', borderRadius: 24, borderWidth: 2, borderColor: '#1A1A1A', padding: 24, gap: 12 }}>
+            <Text style={{ fontSize: scale(22), fontFamily: 'Inter_900Black', color: '#1A1A1A', letterSpacing: -0.3 }}>
+              {`Delete "${existing?.name ?? name}"?`}
+            </Text>
+            <Text style={{ fontSize: scale(15), color: '#4A4A4A', lineHeight: scale(21) }}>
+              {pendingOnChore > 0
+                ? `${pendingOnChore} completion${pendingOnChore === 1 ? '' : 's'} still waiting on your review will be dropped, along with the pay owed for ${pendingOnChore === 1 ? 'it' : 'them'}. Already-approved work stays in History. This can't be undone.`
+                : `Already-approved work stays in History. This can't be undone.`}
+            </Text>
+            {/* Explicit markup rather than <Button>: Button forwards `style` to the
+                outer PressableShadow, so a colour override lands behind the pill
+                instead of on it. Dark destructive fill matches the goal-delete sheet. */}
+            <PressableShadow onPress={() => { setShowDeleteConfirm(false); onDelete?.(); }} depth={6} style={{ width: '100%', marginTop: 4 }}>
+              <View style={{ backgroundColor: '#1A1A1A', borderRadius: 80, borderWidth: 3, borderColor: '#1A1A1A', paddingVertical: 18, alignItems: 'center' }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(20), color: '#FFFFFF' }}>Yes, delete it</Text>
+              </View>
+            </PressableShadow>
+            <PressableShadow onPress={() => setShowDeleteConfirm(false)} depth={6} style={{ width: '100%' }}>
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 80, borderWidth: 3, borderColor: '#1A1A1A', paddingVertical: 18, alignItems: 'center' }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(20), color: '#1A1A1A' }}>Keep chore</Text>
+              </View>
+            </PressableShadow>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -10640,11 +10695,9 @@ const socialBtn = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      ios:     { shadowColor: '#1A1A1A', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 0 },
-      android: { elevation: 6 },
-      default: {},
-    }),
+    // Social sign-in is a CTA button, so it keeps the hard shadow — and via
+    // hardShadow() it now renders on web too, not just iOS/Android.
+    ...hardShadow(6),
   },
   apple:  { backgroundColor: '#1A1A1A' },
   google: { backgroundColor: '#FFFFFF' },
@@ -14964,13 +15017,13 @@ export default App;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Both retired: surfaces are flat on every platform now, and the hard shadow is
+// reserved for CTA buttons (PressableShadow's `hardShadow` prop, or hardShadow()).
+// Kept as empty spreads so the call sites don't all have to change.
 const SOLID_SHADOW = shadows.solid;
-// Smaller solid drop shadow (0px 3px 0px #111) — matches the design-system --shadow-sm
-const SOLID_SHADOW_SM = Platform.select({
-  ios:     { shadowColor: '#111111', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 1, shadowRadius: 0 },
-  android: { elevation: 3 },
-  default: {},
-})!;
+const SOLID_SHADOW_SM = {};
+/** The hard shadow, for CTA buttons only. Renders on web as well as iOS/Android. */
+const BTN_SHADOW = hardShadow(6);
 
 const s = StyleSheet.create({
   root:            { flex: 1, backgroundColor: C.surface },
@@ -15000,7 +15053,7 @@ const s = StyleSheet.create({
   choreCheckDone:  { backgroundColor: C.accent, borderColor: C.accent },
   checkDot:        { width: 7, height: 7, borderRadius: 4, backgroundColor: 'white' },
   tabBar:          { position: 'absolute', bottom: 36, left: 12, right: 12 },
-  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 8, justifyContent: 'space-between', alignItems: 'center', ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12 }, android: { elevation: 8 } }) },
+  tabBarInner:     { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingVertical: 8, paddingHorizontal: 8, justifyContent: 'space-between', alignItems: 'center' },
   tab:             { flex: 1, alignItems: 'center', gap: 4 },
   tabIconWrap:     { width: 86, borderRadius: 32, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 4 },
   tabIconWrapActive: { backgroundColor: '#EAE4FF' }, // legacy static highlight — superseded by the animated tabPill
@@ -15010,7 +15063,7 @@ const s = StyleSheet.create({
   tabLabelActive:  { color: '#6B35F0' },
   // home screen
   homeRoot:           { flex: 1, backgroundColor: 'transparent' },
-  homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(14), paddingVertical: scale(9), gap: 6, shadowColor: '#111111', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4 },
+  homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(14), paddingVertical: scale(9), gap: 6 },
   homeBalanceText:    { fontSize: scale(15), fontFamily: 'SpaceMono_700Bold', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 12 },
   homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW, overflow: 'visible' },
@@ -15083,7 +15136,7 @@ const s = StyleSheet.create({
   oddsCard:        { flex: 1, backgroundColor: C.bg, borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center', ...SOLID_SHADOW },
   oddsVal:         { fontSize: scale(18), fontFamily: 'Inter_900Black', color: C.text },
   oddsLbl:         { fontSize: scale(12), color: C.muted, fontFamily: 'Inter_700Bold', letterSpacing: 0.5, marginTop: 4 },
-  battleBtn:       { backgroundColor: '#1A1A1A', borderRadius: 100, paddingVertical: 20, alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  battleBtn:       { backgroundColor: '#1A1A1A', borderRadius: 100, paddingVertical: 20, alignItems: 'center', borderWidth: 2, borderColor: '#1A1A1A', ...BTN_SHADOW },
   battleBtnText:   { fontSize: scale(18), fontFamily: 'Inter_900Black', color: 'white', letterSpacing: -0.3 },
   debugBtn:        { backgroundColor: C.bg, borderWidth: 0.5, borderColor: C.border, borderRadius: 10, padding: 12, alignItems: 'center' },
   debugBtnText:    { fontSize: scale(12), fontFamily: 'Inter_700Bold', color: C.muted, letterSpacing: 0.3 },
@@ -15258,7 +15311,7 @@ const p = StyleSheet.create({
   formDropdownValue:{ fontSize: scale(16), color: '#1A1A1A' },
   rateDollarSign:   { fontSize: scale(18), fontFamily: 'Inter_600SemiBold', color: '#1A1A1A' },
   // Difficulty picker
-  difficultyBtn:        { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 12, borderWidth: 2, borderColor: '#ECEAE4', padding: 12, alignItems: 'center' as const, gap: 4 },
+  difficultyBtn:        { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 12, borderWidth: 2, borderColor: '#1A1A1A', padding: 12, alignItems: 'center' as const, gap: 4 },
   difficultyBtnActive:  { backgroundColor: '#EAE4FF', borderColor: '#6B35F0' },
   difficultyStars:      { fontSize: scale(12) },
   difficultyLabel:      { fontSize: scale(12), fontFamily: 'Inter_700Bold' as const, color: '#767676' },
@@ -15266,7 +15319,7 @@ const p = StyleSheet.create({
   difficultyPay:        { fontSize: scale(12), fontFamily: 'Inter_700Bold' as const, color: '#767676' },
   difficultyPayActive:  { color: '#3B8A3A' },
   // Kid assignment pills
-  kidPill:          { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100, borderWidth: 2, borderColor: '#ECEAE4', backgroundColor: '#F7F6F2' },
+  kidPill:          { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', backgroundColor: '#F7F6F2' },
   kidPillActive:    { backgroundColor: '#C5F215', borderColor: '#1A1A1A' },
   kidPillText:      { fontSize: scale(12), fontFamily: 'Inter_600SemiBold' as const, color: '#767676' },
   kidPillTextActive:{ color: '#1A1A1A' },
@@ -15275,7 +15328,7 @@ const p = StyleSheet.create({
   // (like the difficulty/frequency pickers elsewhere), not a plain field.
   completionSection: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, ...SOLID_SHADOW },
   // Completion-mode radio card
-  modeCard:         { borderWidth: 2, borderColor: '#ECEAE4', borderRadius: 14, overflow: 'hidden', backgroundColor: '#FFFFFF' },
+  modeCard:         { borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 14, overflow: 'hidden', backgroundColor: '#FFFFFF' },
   modeRow:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, backgroundColor: '#FFFFFF' },
   modeRowDivider:   { borderTopWidth: 1, borderTopColor: '#ECEAE4' },
   modeRowActive:    { backgroundColor: '#F4F9E3', borderLeftWidth: 4, borderLeftColor: '#7B3FF2', paddingLeft: 12 },
@@ -15336,7 +15389,7 @@ const p = StyleSheet.create({
   payoutBreakdownValue: { fontSize: scale(16), color: '#1A1A1A', fontFamily: 'Inter_700Bold' as const },
   payoutTotalLabel: { fontSize: scale(18), fontFamily: 'Inter_800ExtraBold' as const, color: '#1A1A1A' },
   payoutTotalValue: { fontSize: scale(18), fontFamily: 'Inter_900Black' as const, color: '#3B8A3A' },
-  payoutCta: { backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, alignItems: 'center' as const, ...SOLID_SHADOW },
+  payoutCta: { backgroundColor: '#C5F215', borderRadius: 16, borderWidth: 2, borderColor: '#1A1A1A', padding: 20, alignItems: 'center' as const, ...BTN_SHADOW },
   payoutCtaText: { fontSize: scale(18), fontFamily: 'Inter_900Black' as const, color: '#1A1A1A' },
 });
 
@@ -15377,13 +15430,13 @@ const ps = StyleSheet.create({
   apprBadgeText:    { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold' },
   apprToggleMain:   { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#111' },
   apprToggleSub:    { fontSize: scale(12), color: '#888', fontFamily: 'Inter_600SemiBold', lineHeight: scale(17), marginTop: 4 },
-  apprShortcutBtn:  { flex: 1, paddingVertical: 12, backgroundColor: '#FFFDF7', borderWidth: 2, borderColor: '#111', borderRadius: 12, alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW_SM },
+  apprShortcutBtn:  { flex: 1, paddingVertical: 12, backgroundColor: '#FFFDF7', borderWidth: 2, borderColor: '#111', borderRadius: 12, alignItems: 'center', justifyContent: 'center', ...BTN_SHADOW },
   apprShortcutText: { fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#111' },
   apprInfoBox:      { marginTop: 20, backgroundColor: '#F0E8FF', borderWidth: 2, borderColor: '#7B3FF2', borderRadius: 12, padding: 16, flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   apprInfoText:     { flex: 1, fontSize: scale(12), color: '#444', lineHeight: scale(19), fontFamily: 'Inter_600SemiBold' },
   sliderTrack:    { height: 6, backgroundColor: '#E0DCDC', borderRadius: 3, position: 'relative', marginBottom: 4 },
   sliderFill:     { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#6B35F0', borderRadius: 3 },
-  sliderThumb:    { position: 'absolute', top: -7, marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
+  sliderThumb:    { position: 'absolute', top: -7, marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#FFFFFF' },
   sliderTickLabel:{ fontSize: scale(12), color: '#767676' },
   impactRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   impactCell:     { flex: 1, backgroundColor: '#F7F6F2', borderRadius: 10, padding: 12, alignItems: 'center', borderWidth: 2, borderColor: '#111111' },
@@ -15396,7 +15449,7 @@ const ps = StyleSheet.create({
   cosmeticText:   { fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: '#6B35F0' },
   accountAvatar:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EAE4FF', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A1A1A' },
   accountAvatarText: { fontSize: scale(28), fontFamily: 'Inter_800ExtraBold', color: '#6B35F0' },
-  logoutBtn:      { margin: 16, marginTop: 20, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...SOLID_SHADOW },
+  logoutBtn:      { margin: 16, marginTop: 20, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 2, borderColor: '#1A1A1A', padding: 16, alignItems: 'center', ...BTN_SHADOW },
   logoutText:     { fontSize: scale(16), fontFamily: 'Inter_700Bold', color: '#E53935' },
 });
 
@@ -15644,7 +15697,7 @@ const b = StyleSheet.create({
   // ── Captured payoff (boss-in-jar, holds until tapped) ──────────────────────
   captureScrim:    { ...StyleSheet.absoluteFill, zIndex: 120, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,8,50,0.82)' },
   captureName:     { fontFamily: 'FredokaOne_400Regular', fontSize: scale(22), color: '#FFFFFF', textAlign: 'center' },
-  captureBtn:      { backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(36), paddingVertical: scale(14), marginTop: scale(4), ...SOLID_SHADOW },
+  captureBtn:      { backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(36), paddingVertical: scale(14), marginTop: scale(4), ...BTN_SHADOW },
   captureBtnText:  { fontFamily: 'Inter_900Black', fontSize: scale(18), color: '#1A1A1A' },
 
   // ── Mini-game shared ──────────────────────────────────────────────────────
@@ -15656,9 +15709,9 @@ const b = StyleSheet.create({
   mgTitleDanger:{ color: '#FF6B6B' },
   mgInstrPill:  { backgroundColor: '#FFF9E6', borderRadius: 100, borderWidth: 2, borderColor: '#1A1A1A', paddingHorizontal: scale(14), paddingVertical: scale(6), maxWidth: scale(320) },
   mgInstrText:  { fontFamily: 'Inter_700Bold', fontSize: scale(13), color: '#1A1A1A', textAlign: 'center' },
-  mgMainBtn:  { backgroundColor: '#6B35F0', borderRadius: 100, paddingHorizontal: scale(40), paddingVertical: scale(18), borderWidth: 2, borderColor: '#1A1A1A', ...SOLID_SHADOW },
+  mgMainBtn:  { backgroundColor: '#6B35F0', borderRadius: 100, paddingHorizontal: scale(40), paddingVertical: scale(18), borderWidth: 2, borderColor: '#1A1A1A', ...BTN_SHADOW },
   mgMainBtnText: { color: '#fff', fontFamily: 'Inter_900Black', fontSize: scale(18) },
-  mgBigTap:   { width: scale(130), height: scale(130), borderRadius: scale(65), backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...SOLID_SHADOW },
+  mgBigTap:   { width: scale(130), height: scale(130), borderRadius: scale(65), backgroundColor: '#6B35F0', borderWidth: 3, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', ...BTN_SHADOW },
 
   // ── Card hand ─────────────────────────────────────────────────────────────
   handGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
