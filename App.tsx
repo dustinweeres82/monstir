@@ -6301,31 +6301,63 @@ function MoneyScreen({
 
   // ── Derived for selected kid ──────────────────────────────────────────────
 
-  // MON-83: per-child "Mark paid" breakdown sheet. Opening it on a kid shows a
-  // per-week breakdown (one row per unpaid week) before confirming the payout.
-  const [payoutSheetKid, setPayoutSheetKid] = useState<string | null>(null);
-
-  // Global "Mark all as paid" (re-added to the hero). MON-75 Rev 5 had removed a
-  // global payout because it fired immediately; the objection was the missing
-  // confirmation, not the affordance. So it exists again, but only behind a
-  // confirm that itemises every kid and amount — marking paid asserts real cash
-  // changed hands, and a mis-tap here would silently do that for the whole
-  // family with no undo.
-  const [confirmAllOpen, setConfirmAllOpen] = useState(false);
+  // Payout confirmation. MON-83's separate per-child sheet is gone: both the
+  // per-kid "Mark paid" and the hero's "Mark all as paid" now open the same
+  // Confirm-payout sheet (M2), which is one row per kid. MON-83's per-week
+  // breakdown survives as sub-lines under any kid with more than one unpaid week,
+  // so a parent settling several weeks can still see which ones.
+  //
+  // Neither path writes until confirmed. MON-75 Rev 5 had removed the bulk
+  // payout because it fired on tap; the objection was the missing confirmation,
+  // not the affordance — marking paid asserts real cash changed hands and cannot
+  // be undone.
+  // One confirm sheet serves both entry points, per the M2 mock: 'all' from the
+  // hero, or a single kid's name from their row. A single kid is just the same
+  // sheet with one row.
+  const [payoutTarget, setPayoutTarget] = useState<'all' | string | null>(null);
   const owedKids = ledger.perKid.filter(k => k.owedCents > 0);
-  const payoutSheetLedger = payoutSheetKid
-    ? ledger.perKid.find(k => k.kidName === payoutSheetKid) ?? null
-    : null;
-  const payoutSheetProfile = payoutSheetKid
-    ? kidProfiles.find(k => k.name === payoutSheetKid) ?? null
-    : null;
-  // Slide-up sheet chrome: the scrim appears instantly (opacity set, not animated)
-  // while only the sheet itself slides up — see useSheet. Driven by payoutSheetKid.
-  const { open: payoutSheetOpen, openSheet: openPayoutSheet, closeSheet: closePayoutSheet, scrimOpacity: payoutScrimOpacity, sheetY: payoutSheetY } = useSheet(600);
-  const closePayoutSheet_ = () => closePayoutSheet(() => setPayoutSheetKid(null));
-  useEffect(() => {
-    if (payoutSheetKid) openPayoutSheet();
-  }, [payoutSheetKid]);
+  const payoutRows = payoutTarget === 'all'
+    ? owedKids
+    : payoutTarget
+      ? owedKids.filter(k => k.kidName === payoutTarget)
+      : [];
+  const payoutTotalCents = payoutRows.reduce((s, k) => s + k.owedCents, 0);
+
+  // M3 — post-payout receipt. Captured at confirm time rather than read from the
+  // ledger afterwards: the payout zeroes those balances, so by the time this
+  // renders the numbers it needs are gone.
+  const [paidReceipt, setPaidReceipt] = useState<{ names: string[]; totalCents: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  /** "Maya, Leo & Ava" — Oxford-comma-free serial list for the receipt copy. */
+  const nameList = (names: string[]) =>
+    names.length <= 1 ? (names[0] ?? '')
+      : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+
+  // M4 — payout history, grouped back into the batches the parent actually
+  // performed. Grouped by calendar day, NOT by exact timestamp: a bulk payout
+  // fires one onConfirm per kid, so their paidAt values differ by milliseconds
+  // and would otherwise render as one row per kid instead of "Paid 3 kids".
+  const payoutGroups = useMemo(() => {
+    const byDay = new Map<string, { day: string; names: string[]; totalCents: number; at: number }>();
+    for (const p of payoutLog) {
+      const d = new Date(p.paidAt);
+      const key = d.toDateString();
+      const g = byDay.get(key) ?? { day: key, names: [], totalCents: 0, at: d.getTime() };
+      g.totalCents += p.amount;
+      if (!g.names.includes(p.kidName)) g.names.push(p.kidName);
+      g.at = Math.max(g.at, d.getTime());
+      byDay.set(key, g);
+    }
+    return [...byDay.values()].sort((a, b) => b.at - a.at);
+  }, [payoutLog]);
+
+  const paidAllTimeCents = payoutLog.reduce((s, p) => s + p.amount, 0);
+  // Reuses the ledger's own Monday-key function rather than a second week
+  // implementation — a parallel one could disagree with the ledger, which is the
+  // class of bug MON-75 exists to prevent.
+  const paidWeeksCount = new Set(payoutLog.map(p => weekMondayKeyForDate(new Date(p.paidAt)))).size;
+  const paidKidsCount  = new Set(payoutLog.map(p => p.kidName)).size;
   // Reconcile the per-week rows to the live owed balance (the source of truth)
   // so the breakdown can never out-total what's actually owed, even if
   // choreHistory and the live balance drift apart (the "two witnesses" risk).
@@ -6333,19 +6365,21 @@ function MoneyScreen({
   // weeks: walk newest→oldest taking each week up to the remaining owed amount
   // (clamping the last partial week), then any leftover is non-chore credit
   // (battle bonus). Rows + bonus therefore always sum to exactly `owedCents`.
-  const payoutSheetRows: UnpaidWeek[] = [];
-  let payoutSheetBonus = 0;
-  if (payoutSheetLedger) {
-    let remaining = payoutSheetLedger.owedCents;
-    for (const w of [...payoutSheetLedger.unpaidWeeks].reverse()) {
+  // Generalised so the confirm sheet can show this breakdown for one kid or for
+  // every owed kid at once. Rows + bonus always sum to exactly slice.owedCents.
+  const weekRowsFor = (slice: (typeof ledger.perKid)[number]): { rows: UnpaidWeek[]; bonusCents: number } => {
+    const rows: UnpaidWeek[] = [];
+    let remaining = slice.owedCents;
+    for (const w of [...slice.unpaidWeeks].reverse()) {
       if (remaining <= 0) break;
       const amt = Math.min(w.earnedCents, remaining);
-      payoutSheetRows.push({ ...w, earnedCents: amt });
+      rows.push({ ...w, earnedCents: amt });
       remaining -= amt;
     }
-    payoutSheetRows.reverse();
-    payoutSheetBonus = remaining;
-  }
+    rows.reverse();
+    return { rows, bonusCents: remaining };
+  };
+
 
   // ── Avatar initial color ──────────────────────────────────────────────────
   const AVATAR_COLORS = ['#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444'];
@@ -6360,12 +6394,29 @@ function MoneyScreen({
         title="Money"
         backgroundColor="#F7F6F2"
         trailing={
-          <ViewSwitcher
-            selected="Switch"
-            options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
-            onSelect={(opt) => onSwitchToKid(opt.label)}
-            trigger={<SwitchPill />}
-          />
+          // Clipboard opens the payout History (M4). The Switch pill stays — it's
+          // how a parent reaches kid view and appears on every root screen, so
+          // dropping it to match the mock's header would lose real navigation.
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setHistoryOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{
+                width: 38, height: 38, borderRadius: 19,
+                backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1A1A',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Text style={{ fontSize: scale(17) }}>📋</Text>
+            </TouchableOpacity>
+            <ViewSwitcher
+              selected="Switch"
+              options={kidProfiles.map(k => ({ label: k.name, emoji: '🧒', bg: k.avatarColor || '#EAE4FF', image: getAvatarImage(k.avatarIdx) }))}
+              onSelect={(opt) => onSwitchToKid(opt.label)}
+              trigger={<SwitchPill />}
+            />
+          </View>
         }
       />
       <ScrollView
@@ -6431,7 +6482,7 @@ function MoneyScreen({
             {!settled && (
               <TouchableOpacity
                 activeOpacity={0.85}
-                onPress={() => setConfirmAllOpen(true)}
+                onPress={() => setPayoutTarget('all')}
                 style={{
                   backgroundColor: '#1A1A1A',
                   borderRadius: 22,
@@ -6509,7 +6560,7 @@ function MoneyScreen({
                         not an immediate payout. */}
                     <TouchableOpacity
                       activeOpacity={0.85}
-                      onPress={() => setPayoutSheetKid(slice.kidName)}
+                      onPress={() => setPayoutTarget(slice.kidName)}
                       style={{
                         backgroundColor: '#C5F215',
                         borderRadius: 100,
@@ -6746,14 +6797,21 @@ function MoneyScreen({
         </View>
       </ScrollView>
 
-      {/* ── "Mark all as paid" confirm ─────────────────────────────────────────
-          Itemises every kid and amount before anything is written. Marking paid
-          asserts that real cash changed hands; doing that for the whole family
-          on one tap with no undo is what made MON-75 Rev 5 drop the bulk action.
-          The affordance was never the problem — the missing confirmation was. */}
-      <Modal visible={confirmAllOpen} transparent animationType="fade" onRequestClose={() => setConfirmAllOpen(false)}>
+      {/* ── Confirm payout (M2) ────────────────────────────────────────────────
+          One sheet for both entry points: 'all' from the hero, or a single kid
+          from their row — a single kid is just this sheet with one row. Marking
+          paid asserts real cash changed hands and cannot be undone, which is why
+          neither path writes anything until this is confirmed (MON-75 Rev 5 had
+          dropped the bulk action precisely because it fired on tap).
+
+          Where a kid has more than one unpaid week, those weeks appear as
+          sub-lines under their row. The mock shows one row per kid, but MON-83
+          added the per-week breakdown so a parent settling several weeks can see
+          which ones — collapsing that away would hide it. Rows come from
+          weekRowsFor(), so they always sum to exactly what's owed. */}
+      <Modal visible={payoutTarget !== null} transparent animationType="fade" onRequestClose={() => setPayoutTarget(null)}>
         <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setConfirmAllOpen(false)} />
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPayoutTarget(null)} />
           <View style={{
             backgroundColor: '#FFFDF7',
             borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -6761,96 +6819,216 @@ function MoneyScreen({
             padding: 20, paddingBottom: 20 + insets.bottom,
           }}>
             <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9D5CC', marginBottom: 16 }} />
-            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(20), color: '#1A1A1A', marginBottom: 4 }}>
-              Mark all as paid?
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(22), color: '#1A1A1A', marginBottom: 4 }}>
+              Confirm payout
             </Text>
-            <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(14), color: '#767676', marginBottom: 12 }}>
+            <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(14), color: '#767676', marginBottom: 14 }}>
               This records that you’ve handed out the cash. It can’t be undone.
             </Text>
 
-            {owedKids.map(k => (
-              <View key={k.kidName} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#EDEAE1' }}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>{k.kidName}</Text>
-                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(k.owedCents)}</Text>
-              </View>
-            ))}
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderTopWidth: 2, borderTopColor: '#1A1A1A', marginBottom: 16 }}>
-              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#1A1A1A' }}>Total</Text>
-              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(18), color: '#1A1A1A' }}>{fmtDollars(owedCents)}</Text>
+            {/* Itemised card */}
+            <View style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 16,
+              borderWidth: 2.5, borderColor: '#1A1A1A',
+              paddingHorizontal: 16, paddingVertical: 6,
+              marginBottom: 18,
+              ...shadows.solid,
+            }}>
+              {payoutRows.map(k => {
+                const { rows, bonusCents } = weekRowsFor(k);
+                const chores = kidChoreCount(k);
+                return (
+                  <View key={k.kidName} style={{ paddingVertical: 10 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(17), color: '#1A1A1A' }}>
+                        {k.kidName} · {chores} chore{chores === 1 ? '' : 's'}
+                      </Text>
+                      <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(17), color: '#1A1A1A' }}>
+                        {fmtDollars(k.owedCents)}
+                      </Text>
+                    </View>
+                    {/* Only worth showing when there's more than one week to settle. */}
+                    {rows.length > 1 && rows.map(w => (
+                      <View key={`${k.kidName}-${w.weekKey}`} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, paddingLeft: 10 }}>
+                        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676' }}>{w.label}</Text>
+                        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(12), color: '#767676' }}>{fmtDollars(w.earnedCents)}</Text>
+                      </View>
+                    ))}
+                    {bonusCents > 0 && (
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, paddingLeft: 10 }}>
+                        <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676' }}>Battle bonus</Text>
+                        <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(12), color: '#767676' }}>{fmtDollars(bonusCents)}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </View>
 
-            <Button
-              label={`Mark all as paid — ${fmtDollars(owedCents)}`}
+            {/* Purple CTA, not lime: lime reads as the live-debt colour on this
+                screen (hero card, Mark paid pills), and this is the commit. */}
+            <TouchableOpacity
+              activeOpacity={0.85}
               onPress={() => {
-                // Snapshot the names first: onConfirm mutates the ledger, so
-                // iterating owedKids directly while it changes underneath would
-                // be reading a moving target.
-                const names = owedKids.map(k => k.kidName);
-                setConfirmAllOpen(false);
+                // Snapshot names first — onConfirm mutates the ledger, so
+                // iterating payoutRows as it changes underneath would be reading
+                // a moving target.
+                const names = payoutRows.map(k => k.kidName);
+                const total = payoutTotalCents;
+                setPayoutTarget(null);
                 names.forEach(n => onConfirm(n));
+                setPaidReceipt({ names, totalCents: total });
               }}
-            />
-            <TouchableOpacity onPress={() => setConfirmAllOpen(false)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 14 }}>
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(15), color: '#767676' }}>Cancel</Text>
+              style={{
+                backgroundColor: '#6B35F0',
+                borderRadius: 100,
+                borderWidth: 2.5, borderColor: '#1A1A1A',
+                paddingVertical: 18,
+                alignItems: 'center',
+                ...shadows.solid,
+              }}
+            >
+              <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(17), color: '#FFFFFF' }}>
+                Yes, mark {fmtDollars(payoutTotalCents)} paid
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => setPayoutTarget(null)} activeOpacity={0.7} style={{ alignItems: 'center', paddingVertical: 16 }}>
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#9A9A9A' }}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* ── Per-child "Mark paid" breakdown sheet (MON-83) ─────────────────────
-          Per-week breakdown for one child before confirming the payout. A bulk
-          "mark all as paid" now also exists on the hero, but it is likewise
-          confirm-gated (see the sheet above this one). */}
-      <Modal visible={payoutSheetOpen} transparent animationType="none" onRequestClose={closePayoutSheet_}>
-        <Animated.View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)', opacity: payoutScrimOpacity }}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closePayoutSheet_} />
-          {payoutSheetLedger && payoutSheetProfile && (
-            <Animated.View style={{ backgroundColor: '#FFFDF7', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 2.5, borderColor: '#1A1A1A', paddingHorizontal: 20, paddingTop: 16, paddingBottom: insets.bottom + 24, transform: [{ translateY: payoutSheetY }] }}>
-              {/* The transparent Modal's content frame stops at the bottom safe-area
-                  line, so the sheet's own padding can't reach the home-indicator zone.
-                  This filler overflows below the frame to bleed the cream into the safe
-                  area (overflow isn't clipped), eliminating the grey band underneath. */}
-              <View style={{ position: 'absolute', left: 0, right: 0, top: '100%', height: 120, backgroundColor: '#FFFDF7' }} pointerEvents="none" />
-              <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9D5CC', marginBottom: 16 }} />
-              {/* Header — child avatar + name */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: payoutSheetProfile.avatarColor, borderWidth: 2, borderColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
-                  <Image source={getAvatarImage(payoutSheetProfile.avatarIdx)} style={{ width: 36, height: 36, borderRadius: 18 }} resizeMode="cover" />
-                </View>
-                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(18), color: '#1A1A1A' }}>Pay {payoutSheetProfile.name}</Text>
-              </View>
-              {/* One row per unpaid week, reconciled to the owed total (zero-chore
-                  weeks are already excluded). */}
-              {payoutSheetRows.map(w => (
-                <View key={w.weekKey} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>{w.label}</Text>
-                    <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676', marginTop: 4 }}>{w.choreCount} chore{w.choreCount === 1 ? '' : 's'} completed</Text>
-                  </View>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(w.earnedCents)}</Text>
-                </View>
-              ))}
-              {/* Owed credit not tied to a chore week (battle bonus etc.) */}
-              {payoutSheetBonus > 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 }}>
-                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A' }}>Boss Battle bonus 🏆</Text>
-                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>{fmtDollars(payoutSheetBonus)}</Text>
-                </View>
-              )}
-              <View style={{ height: 1, backgroundColor: '#1A1A1A', opacity: 0.12, marginVertical: 8 }} />
-              {/* Total owed */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }}>Total owed</Text>
-                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(22), color: '#1A1A1A' }}>{fmtDollars(payoutSheetLedger.owedCents)}</Text>
-              </View>
-              <Button label="Mark as paid" onPress={() => { const k = payoutSheetKid; closePayoutSheet(() => { setPayoutSheetKid(null); if (k) onConfirm(k); }); }} />
-              <View style={{ height: 10 }} />
-              <Button label="Cancel" variant="secondary" onPress={closePayoutSheet_} />
-            </Animated.View>
-          )}
-        </Animated.View>
+      {/* ── Marked paid (M3) ───────────────────────────────────────────────────
+          The totals and names are read from `paidReceipt`, captured at confirm
+          time — the payout has already zeroed those balances, so the ledger no
+          longer holds the numbers this screen needs to report. */}
+      <Modal visible={paidReceipt !== null} animationType="fade" onRequestClose={() => setPaidReceipt(null)}>
+        <View style={{ flex: 1, backgroundColor: '#6B35F0', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, paddingBottom: insets.bottom + 16 }}>
+          <View style={{
+            width: 100, height: 100, borderRadius: 50,
+            backgroundColor: '#C5F215', borderWidth: 3, borderColor: '#1A1A1A',
+            alignItems: 'center', justifyContent: 'center', marginBottom: 22,
+          }}>
+            <Text style={{ fontSize: scale(46), lineHeight: scale(54), color: '#1A1A1A', fontFamily: 'Inter_900Black' }}>✓</Text>
+          </View>
+
+          <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(13), letterSpacing: 1.4, color: '#C5F215', marginBottom: 8 }}>
+            ALL SETTLED UP
+          </Text>
+          <Text style={{ fontFamily: 'FredokaOne_400Regular', fontSize: scale(32), color: '#FFFFFF', textAlign: 'center', lineHeight: scale(38) }}>
+            {fmtDollars(paidReceipt?.totalCents ?? 0)} marked paid
+          </Text>
+          <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(15), color: 'rgba(255,255,255,0.85)', textAlign: 'center', marginTop: 12, lineHeight: scale(22) }}>
+            {nameList(paidReceipt?.names ?? [])} {(paidReceipt?.names.length ?? 0) === 1 ? 'is' : 'are'} all squared away.{'\n'}Logged to your History.
+          </Text>
+
+          <Image
+            source={require('./assets/monstirs/slime/slimer_4.png')}
+            style={{ width: 150, height: 150, marginVertical: 26 }}
+            resizeMode="contain"
+          />
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            // Clears the receipt as well as opening History, so History's back
+            // arrow returns to Money (M1) rather than back into this screen.
+            onPress={() => { setPaidReceipt(null); setHistoryOpen(true); }}
+            style={{
+              alignSelf: 'stretch', backgroundColor: '#C5F215',
+              borderRadius: 100, borderWidth: 2.5, borderColor: '#1A1A1A',
+              paddingVertical: 18, alignItems: 'center', ...shadows.solid,
+            }}
+          >
+            <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(17), color: '#1A1A1A' }}>View history</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setPaidReceipt(null)}
+            style={{
+              alignSelf: 'stretch', marginTop: 12,
+              borderRadius: 100, borderWidth: 2, borderColor: 'rgba(255,255,255,0.45)',
+              paddingVertical: 16, alignItems: 'center',
+            }}
+          >
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#FFFFFF' }}>Done</Text>
+          </TouchableOpacity>
+        </View>
       </Modal>
+
+      {/* ── History (M4) ───────────────────────────────────────────────────────
+          Payout record, distinct from the Activity feed: Activity is approved
+          chores (money becoming owed), this is handoffs (money leaving). Lavender
+          rather than lime throughout — on this screen lime means live debt, so
+          reusing it for a settled record would misread. */}
+      <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: '#FAF9F4' }}>
+          <ScreenHeader variant="pushed" onBack={() => setHistoryOpen(false)} title="History" backgroundColor="#FAF9F4" />
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 + insets.bottom }} showsVerticalScrollIndicator={false}>
+            <View style={{
+              backgroundColor: '#EAE4FF',
+              borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A',
+              padding: 20, marginBottom: 24, ...shadows.solid,
+            }}>
+              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#6B35F0', marginBottom: 4 }}>
+                MARKED PAID, ALL TIME
+              </Text>
+              <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(40), color: '#6B35F0', lineHeight: scale(46) }}>
+                {fmtDollars(paidAllTimeCents)}
+              </Text>
+              <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: scale(14), color: '#6B35F0', opacity: 0.8, marginTop: 4 }}>
+                Across {paidWeeksCount} week{paidWeeksCount === 1 ? '' : 's'} · {paidKidsCount} kid{paidKidsCount === 1 ? '' : 's'}
+              </Text>
+            </View>
+
+            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(12), letterSpacing: 1.2, color: '#767676', marginBottom: 12 }}>
+              RECENT
+            </Text>
+
+            {payoutGroups.length === 0 ? (
+              <View style={{ alignItems: 'center', paddingTop: 40 }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: scale(16), color: '#1A1A1A', marginBottom: 6 }}>No payouts yet</Text>
+                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(13), color: '#767676', textAlign: 'center' }}>
+                  Once you mark a chore paid, it’s logged here.
+                </Text>
+              </View>
+            ) : payoutGroups.map(g => (
+              <View
+                key={g.day}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 16, borderWidth: 2.5, borderColor: '#1A1A1A',
+                  padding: 14, marginBottom: 12, ...shadows.solid,
+                }}
+              >
+                <View style={{
+                  width: 40, height: 40, borderRadius: 20,
+                  backgroundColor: '#F2F7F2', borderWidth: 2, borderColor: '#C9D8C9',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1E8E3E' }}>✓</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontFamily: 'Inter_800ExtraBold', fontSize: scale(16), color: '#1A1A1A' }} numberOfLines={1}>
+                    {g.names.length > 2 ? `Paid ${g.names.length} kids` : `Paid ${nameList(g.names)}`}
+                  </Text>
+                  <Text style={{ fontFamily: 'Inter_500Medium', fontSize: scale(12), color: '#767676', marginTop: 2 }}>
+                    {new Date(g.at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+                <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(17), color: '#1A1A1A' }}>
+                  {fmtDollars(g.totalCents)}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+
     </View>
   );
 }
