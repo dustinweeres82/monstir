@@ -45,8 +45,8 @@ export interface PaywallProps {
 export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
   const {
     ready, yearlyPlan, monthlyPlan, savingsPct,
-    purchasing, restoring, lastError,
-    purchase, restore,
+    purchasing, restoring,
+    purchase, restore, getLastError,
   } = useSubscription();
 
   const [selectedSku, setSelectedSku] = useState<string>(PREMIUM_YEARLY_SKU);
@@ -55,26 +55,36 @@ export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
   useEffect(() => { markPaywallSeen().catch(() => {}); }, []);
 
   const selectedPlan = selectedSku === PREMIUM_MONTHLY_SKU ? monthlyPlan : yearlyPlan;
+
+  // The single place the introductory offer's length is parsed. StoreKit reports
+  // Apple's own fixed durations, so a 14-day trial arrives as "2 weeks free" — we
+  // normalise to days once here so the CTA, the billing line and the trial-end date
+  // can't disagree. They used to read "Start 2 weeks free trial" above
+  // "14-day free trial", two units for one number, from two separate parses.
+  const trialDays = useMemo(() => {
+    if (!selectedPlan?.hasFreeTrial) return null;
+    const match = selectedPlan.trialLabel?.match(/(\d+)\s*(day|week)/i);
+    if (!match) return null;
+    const count = parseInt(match[1], 10);
+    return match[2].toLowerCase() === 'week' ? count * 7 : count;
+  }, [selectedPlan]);
+
   const trialCopy = useMemo(() => {
     if (!selectedPlan) return 'Start free trial';
-    // Fallback matches the trial length formalized in MON-86 (14 days). It only
-    // shows if StoreKit reports an introductory offer with no parseable label —
-    // the real string always comes from the product.
-    return selectedPlan.hasFreeTrial ? `Start ${selectedPlan.trialLabel ?? '14-day'} trial` : `Subscribe — ${selectedPlan.price}`;
-  }, [selectedPlan]);
+    if (!selectedPlan.hasFreeTrial) return `Subscribe — ${selectedPlan.price}`;
+    return trialDays ? `Start ${trialDays}-day free trial` : 'Start free trial';
+  }, [selectedPlan, trialDays]);
 
   // Derived from the live introductory offer, never hardcoded — this line is the
   // one concrete promise on the screen about when money leaves someone's account,
   // and it used to read "reminder on day 5 → billing starts day 7" against a trial
   // that MON-86 moved to 14 days. Deliberately makes no claim about a reminder:
   // nothing here schedules one, so promising it would be inventing a feature.
-  const trialTimeline = useMemo(() => {
-    const match = selectedPlan?.hasFreeTrial ? selectedPlan.trialLabel?.match(/(\d+)\s*(day|week)/i) : null;
-    if (!match) return '$0 today → billing starts when your free trial ends. Cancel anytime before.';
-    const count = parseInt(match[1], 10);
-    const days = match[2].toLowerCase() === 'week' ? count * 7 : count;
-    return `$0 today → billing starts when your ${days}-day free trial ends. Cancel anytime before.`;
-  }, [selectedPlan]);
+  const trialTimeline = useMemo(() => (
+    trialDays
+      ? `$0 today → billing starts when your ${trialDays}-day free trial ends. Cancel anytime before.`
+      : '$0 today → billing starts when your free trial ends. Cancel anytime before.'
+  ), [trialDays]);
 
   const handleDismiss = () => {
     recordPaywallDismissed().catch(() => {});
@@ -85,11 +95,11 @@ export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
     setInlineNote(null);
     const outcome: PurchaseOutcome = await purchase(selectedSku);
     if (outcome === 'purchased') {
-      onSubscribed({ productId: selectedSku, trialEndsAt: selectedPlan?.hasFreeTrial ? computeTrialEnd(selectedPlan.trialLabel) : null });
+      onSubscribed({ productId: selectedSku, trialEndsAt: trialEndFromDays(trialDays) });
     } else if (outcome === 'pending') {
       setInlineNote('Waiting on approval from your family organizer — you’ll get Premium as soon as it’s approved.');
     } else if (outcome === 'error') {
-      setInlineNote(lastError ?? 'Something went wrong. Please try again.');
+      setInlineNote(getLastError() ?? 'Something went wrong. Please try again.');
     }
     // 'cancelled' → silently stay on the paywall, per spec.
   };
@@ -185,12 +195,9 @@ export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
  *  (e.g. "7 days free") for the success screen's copy. The real entitlement
  *  expiry (used for anything that actually gates access) comes from
  *  useSubscription's live `trialEndsAt`/`subscriptionExpiresAt`, not this. */
-function computeTrialEnd(trialLabel: string | null): Date | null {
-  if (!trialLabel) return null;
-  const match = trialLabel.match(/(\d+)\s*(day|week)/);
-  if (!match) return null;
-  const amount = parseInt(match[1], 10);
-  const days = match[2] === 'week' ? amount * 7 : amount;
+/** Takes the already-normalised day count rather than re-parsing the label. */
+function trialEndFromDays(days: number | null): Date | null {
+  if (!days) return null;
   const end = new Date();
   end.setDate(end.getDate() + days);
   return end;

@@ -50,6 +50,14 @@ export interface UseSubscriptionResult {
   /** Hands off to StoreKit's restore flow. Returns whether an active Premium
    *  entitlement was found. */
   restore: () => Promise<boolean>;
+  /**
+   * The message for the most recent failure, readable immediately after
+   * `purchase()` resolves. Ref-backed on purpose: `lastError` is state, so a
+   * caller awaiting purchase() sees the value captured at render time — always
+   * the stale one — and ends up showing a generic "something went wrong"
+   * instead of what StoreKit actually said.
+   */
+  getLastError: () => string | null;
 }
 
 export function useSubscription(): UseSubscriptionResult {
@@ -62,6 +70,9 @@ export function useSubscription(): UseSubscriptionResult {
   // onPurchaseError callbacks below, which fire from expo-iap's own listeners
   // rather than as a direct return value of requestPurchase().
   const resolvePurchaseRef = useRef<((outcome: PurchaseOutcome) => void) | null>(null);
+  // Mirrors lastError so it can be read synchronously right after purchase()
+  // resolves — see getLastError in the interface above.
+  const lastErrorRef = useRef<string | null>(null);
 
   const {
     connected,
@@ -107,14 +118,27 @@ export function useSubscription(): UseSubscriptionResult {
     },
     onPurchaseError: (error) => {
       setPurchasing(false);
-      if (error.code === ErrorCode.UserCancelled) {
+      // Substring match as well as the enum compare. Dismissing Apple's sheet was
+      // surfacing "Something went wrong. Please try again." — a plain cancel being
+      // reported as a failure — because the code coming back didn't equal
+      // ErrorCode.UserCancelled ('user-cancelled') exactly. expo-iap has its own
+      // isUserCancelledError helper but doesn't export it from the package root,
+      // and reaching into build/utils/ would break on any upgrade.
+      const code = String(error.code ?? '');
+      if (code === ErrorCode.UserCancelled || /cancel/i.test(code)) {
         resolvePurchaseRef.current?.('cancelled');
-      } else if (error.code === ErrorCode.DeferredPayment) {
+      } else if (code === ErrorCode.DeferredPayment) {
         // Ask to Buy — a family organizer still needs to approve. Not an
         // error; the purchase will complete later via onPurchaseSuccess.
         resolvePurchaseRef.current?.('pending');
       } else {
-        setLastError(error.message);
+        // Ref as well as state: a caller awaiting purchase() reads the value it
+        // captured at render time, so state alone always hands it a stale null and
+        // the real StoreKit message gets swallowed. Keep the code in the message so
+        // an unmapped one is diagnosable instead of anonymous.
+        const message = error.message ? `${error.message}${code ? ` (${code})` : ''}` : `Purchase failed${code ? ` (${code})` : ''}`;
+        lastErrorRef.current = message;
+        setLastError(message);
         resolvePurchaseRef.current?.('error');
       }
       resolvePurchaseRef.current = null;
@@ -151,6 +175,7 @@ export function useSubscription(): UseSubscriptionResult {
   const savingsPct  = useMemo(() => computeSavingsPct(yearlyProduct, monthlyProduct), [yearlyProduct, monthlyProduct]);
 
   const purchase = useCallback(async (sku: string): Promise<PurchaseOutcome> => {
+    lastErrorRef.current = null;
     setLastError(null);
     setPurchasing(true);
     return new Promise<PurchaseOutcome>((resolve) => {
@@ -184,7 +209,9 @@ export function useSubscription(): UseSubscriptionResult {
       return found;
     } catch (e) {
       setRestoring(false);
-      setLastError(e instanceof Error ? e.message : 'Restore failed');
+      const message = e instanceof Error ? e.message : 'Restore failed';
+      lastErrorRef.current = message;
+      setLastError(message);
       return false;
     }
   }, [restorePurchases]);
@@ -202,5 +229,6 @@ export function useSubscription(): UseSubscriptionResult {
     lastError,
     purchase,
     restore,
+    getLastError: () => lastErrorRef.current,
   };
 }

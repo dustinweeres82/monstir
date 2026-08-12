@@ -32,7 +32,7 @@ export interface WinBackPaywallModalProps {
 }
 
 export function WinBackPaywallModal({ visible, winbackShownCount, hasLimitedTimeOffer, onDismiss, onSubscribed }: WinBackPaywallModalProps) {
-  const { ready, yearlyPlan, savingsPct, purchasing, lastError, purchase } = useSubscription();
+  const { ready, yearlyPlan, savingsPct, purchasing, purchase, getLastError } = useSubscription();
   const [inlineNote, setInlineNote] = useState<string | null>(null);
   const sheetY = useAnimatedSheet(visible);
 
@@ -54,7 +54,7 @@ export function WinBackPaywallModal({ visible, winbackShownCount, hasLimitedTime
     } else if (outcome === 'pending') {
       setInlineNote('Waiting on approval from your family organizer.');
     } else if (outcome === 'error') {
-      setInlineNote(lastError ?? 'Something went wrong. Please try again.');
+      setInlineNote(getLastError() ?? 'Something went wrong. Please try again.');
     }
   };
 
