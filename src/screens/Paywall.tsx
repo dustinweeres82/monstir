@@ -63,6 +63,19 @@ export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
     return selectedPlan.hasFreeTrial ? `Start ${selectedPlan.trialLabel ?? '14-day'} trial` : `Subscribe — ${selectedPlan.price}`;
   }, [selectedPlan]);
 
+  // Derived from the live introductory offer, never hardcoded — this line is the
+  // one concrete promise on the screen about when money leaves someone's account,
+  // and it used to read "reminder on day 5 → billing starts day 7" against a trial
+  // that MON-86 moved to 14 days. Deliberately makes no claim about a reminder:
+  // nothing here schedules one, so promising it would be inventing a feature.
+  const trialTimeline = useMemo(() => {
+    const match = selectedPlan?.hasFreeTrial ? selectedPlan.trialLabel?.match(/(\d+)\s*(day|week)/i) : null;
+    if (!match) return '$0 today → billing starts when your free trial ends. Cancel anytime before.';
+    const count = parseInt(match[1], 10);
+    const days = match[2].toLowerCase() === 'week' ? count * 7 : count;
+    return `$0 today → billing starts when your ${days}-day free trial ends. Cancel anytime before.`;
+  }, [selectedPlan]);
+
   const handleDismiss = () => {
     recordPaywallDismissed().catch(() => {});
     onDismiss();
@@ -100,10 +113,10 @@ export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
         <Image source={require('../../assets/monstirs/slime/slimer_8.png')} style={s.hero} resizeMode="contain" />
         <Text style={s.title}>Unlock the whole family adventure.</Text>
 
-        <View style={s.socialRow}>
-          <Text style={s.stars}>★★★★★</Text>
-          <Text style={s.socialText}>Loved by 40,000+ families</Text>
-        </View>
+        {/* Removed: a hardcoded "★★★★★ Loved by 40,000+ families". It was invented,
+            and an unsubstantiated ratings claim sitting next to a payment CTA is an
+            App Review and consumer-protection risk, not just a copy nit. Put it back
+            only with a real, citable number. */}
 
         <View style={s.planCardWrap}>
           {savingsPct != null && (
@@ -144,7 +157,7 @@ export function Paywall({ onDismiss, onSubscribed, onRestored }: PaywallProps) {
 
         <View style={s.reassurance}>
           <Text style={s.lock}>🔒</Text>
-          <Text style={s.reassuranceText}>$0 today → reminder on day 5 → billing starts day 7. Cancel anytime before.</Text>
+          <Text style={s.reassuranceText}>{trialTimeline}</Text>
         </View>
 
         {inlineNote && <Text style={s.inlineNote}>{inlineNote}</Text>}
@@ -200,9 +213,6 @@ const s = StyleSheet.create({
     color: INK, textAlign: 'center', marginBottom: scale(14),
   },
 
-  socialRow: { flexDirection: 'row', alignItems: 'center', gap: scale(8), marginBottom: scale(22) },
-  stars: { fontSize: scale(14), color: colors.gold, letterSpacing: 1 },
-  socialText: { fontFamily: 'Inter_600SemiBold', fontSize: scale(13), color: '#4A4A4A' },
 
   planCardWrap: { width: '100%', marginTop: scale(14), marginBottom: scale(18) },
   tab: {
