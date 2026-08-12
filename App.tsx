@@ -37,6 +37,8 @@ import { canonicalizeEmail } from './src/lib/email';
 import { ParentOnboarding, BASE_PAY_STEPS } from './src/screens/ParentOnboarding';
 import { KidWelcome, KwDebugValues, KW_DEBUG_DEFAULTS } from './src/screens/KidWelcome';
 import { Paywall, type PaywallResult } from './src/screens/Paywall';
+import { useSubscription } from './src/hooks/useSubscription';
+import { PREMIUM_YEARLY_SKU, PREMIUM_MONTHLY_SKU } from './src/lib/iap';
 import { TrialSuccess } from './src/screens/TrialSuccess';
 import { WinBackPaywallModal } from './src/components/WinBackPaywallModal';
 import { usePaywallTriggers } from './src/hooks/usePaywallTriggers';
@@ -2509,6 +2511,58 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
     ]).start();
   }, []);
 
+  // ── Poke your monstir ────────────────────────────────────────────────────
+  // Its own Animated.Values rather than reusing monsterScale, which belongs to the
+  // chore-complete pulse — sharing them would make a poke look like a reward.
+  // Applied to the monster only, not the platform, so it squishes while standing
+  // still. Squash → overshoot → settle, which reads as poking something soft.
+  const pokeScale  = useRef(new Animated.Value(1)).current;
+  const pokeRotate = useRef(new Animated.Value(0)).current;
+  const [pokeQuip, setPokeQuip] = useState<string | null>(null);
+  const pokeCountRef = useRef(0);
+  const pokeWindowRef = useRef(0);
+  const pokeQuipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pokeMonster = useCallback(() => {
+    const now = Date.now();
+    // Reset the burst counter when the taps stop for 3s.
+    if (now - pokeWindowRef.current > 3000) pokeCountRef.current = 0;
+    pokeWindowRef.current = now;
+    pokeCountRef.current += 1;
+    const spamming = pokeCountRef.current >= 5;
+
+    Haptics.impactAsync(
+      spamming ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light
+    ).catch(() => {});
+
+    pokeScale.stopAnimation();
+    Animated.sequence([
+      Animated.timing(pokeScale, { toValue: 0.9, duration: 70, useNativeDriver: true }),
+      Animated.spring(pokeScale, { toValue: 1.08, useNativeDriver: true, tension: 320, friction: 5 }),
+      Animated.spring(pokeScale, { toValue: 1, useNativeDriver: true, tension: 200, friction: 7 }),
+    ]).start();
+
+    // Wobble harder the more they mash.
+    const swing = spamming ? 1 : 0.5;
+    pokeRotate.setValue(0);
+    Animated.sequence([
+      Animated.timing(pokeRotate, { toValue: swing,      duration: 60, useNativeDriver: true }),
+      Animated.timing(pokeRotate, { toValue: -swing,     duration: 90, useNativeDriver: true }),
+      Animated.timing(pokeRotate, { toValue: swing * 0.4, duration: 80, useNativeDriver: true }),
+      Animated.spring(pokeRotate, { toValue: 0, useNativeDriver: true, tension: 220, friction: 6 }),
+    ]).start();
+
+    const pool = spamming ? MONSTER_SPAM_QUIPS : MONSTER_POKE_QUIPS;
+    setPokeQuip(pool[Math.floor(Math.random() * pool.length)]);
+    if (pokeQuipTimer.current) clearTimeout(pokeQuipTimer.current);
+    pokeQuipTimer.current = setTimeout(() => setPokeQuip(null), 1600);
+  }, []);
+
+  // Don't leave a pending bubble timer behind on unmount.
+  useEffect(() => () => { if (pokeQuipTimer.current) clearTimeout(pokeQuipTimer.current); }, []);
+
+  const pokeSpin = pokeRotate.interpolate({ inputRange: [-1, 1], outputRange: ['-7deg', '7deg'] });
+
   // XP bar animated width (0–100 interpolated to percentage string)
   const xpWidthAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => {
@@ -2632,6 +2686,7 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
         <View style={s.homeCharCard}>
           <TouchableOpacity
             activeOpacity={1}
+            onPress={pokeMonster}
             onLongPress={onOpenDebug}
             delayLongPress={600}
             style={{ overflow: 'visible' }}
@@ -2640,13 +2695,13 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
               {/* Outer bob wraps both monster + platform so they float together */}
               <Animated.View style={{ alignItems: 'center', opacity: evolving ? 0 : 1, transform: [{ translateY: bobTranslate }, { scale: monsterScale }] }} pointerEvents="none">
                 {/* Monster — independent Y offset */}
-                <View style={{ transform: [{ translateY: dbgMonsterY }], zIndex: 2 }}>
+                <Animated.View style={{ transform: [{ translateY: dbgMonsterY }, { scale: pokeScale }, { rotate: pokeSpin }], zIndex: 2 }}>
                   <Image
                     source={monsterImg}
                     style={{ width: dbgMonsterSize, height: dbgMonsterSize }}
                     resizeMode="contain"
                   />
-                </View>
+                </Animated.View>
                 {/* Platform — independent Y offset */}
                 <Image
                   source={platformImg}
@@ -2654,6 +2709,17 @@ function HomeScreen({ monsterIdx, monsterName, xp, coins, managedChores, onCompl
                   resizeMode="contain"
                 />
               </Animated.View>
+
+              {/* Poke bubble sits OUTSIDE the bob/poke transforms so it doesn't
+                  wobble and shrink with the monster, and is centred via left/right
+                  rather than alignSelf, which is ignored on absolute children. */}
+              {pokeQuip && (
+                <View style={s.pokeBubbleWrap} pointerEvents="none">
+                  <View style={s.pokeBubble}>
+                    <Text style={s.pokeBubbleText}>{pokeQuip}</Text>
+                  </View>
+                </View>
+              )}
             </View>
           </TouchableOpacity>
           <View style={[s.homeCharInfo, evolving && { opacity: 0 }]}>
@@ -4215,6 +4281,26 @@ const GROSSNESS: Record<string, number> = {
   cereal:   10,
   pancakes: 10,
 };
+
+// Tapping your own monstir on the home screen. Affectionate, not gross — these are
+// your buddy, unlike the boss taunts. Kept short so the bubble reads in one glance.
+const MONSTER_POKE_QUIPS = [
+  'Hehe, that tickles! 😄',
+  'Boop! 👉',
+  'Again! Again!',
+  "I'm squishy! 🫠",
+  'Ready for chores? 💪',
+  'Rawr! ...too much? 😅',
+  "You're my favourite. 💚",
+  '*happy wobble*',
+];
+// Five pokes inside three seconds — the kid is obviously just mashing, so lean in.
+const MONSTER_SPAM_QUIPS = [
+  "OKAY OKAY I'm awake! 😵‍💫",
+  'DIZZY! 🌀',
+  'Stop poking me! 😤 ...okay one more.',
+  'I am NOT a button! 🫠',
+];
 
 const FEED_GROSS_QUIPS   = ["BLECH! AWFUL! 🤢", "You tricked me! 😤", "What IS this?!", "I'm gonna be sick...", "DISGUSTING! 😫"];
 const FEED_MEDIUM_QUIPS  = ["Hmm... not bad.", "I've had worse.", "Could be grosser.", "Meh. 😐"];
@@ -8529,18 +8615,14 @@ function RateGuideScreen({ onBack }: { onBack: () => void }) {
 // would state a price Apple may not agree with (regional pricing, tax, tier
 // changes) — which is the exact trust failure the paywall strategy is built to
 // avoid.
-const PLAN_YEARLY_PRICE     = 79.99;
-const PLAN_MONTHLY_PRICE    = 9.99;
-// Trial length: 14 days, decided in MON-86 (two Sunday boss battles before any
-// charge). The real value comes from the StoreKit introductory offer — this is
-// display-only.
-const PLAN_TRIAL_DAYS_TOTAL = 14;
-// FABRICATED. A constant "days left" is not a countdown — every user would see
-// the same number forever, and END_LABEL is a fixed past date. Both must be
-// computed from the live trial (useSubscription's trialEndsAt) before this
-// screen is ever shown.
-const PLAN_TRIAL_DAYS_LEFT  = 5;
-const PLAN_TRIAL_END_LABEL  = 'Jul 22';
+// No hardcoded prices or trial length live here any more. MON-86 settled the
+// numbers ($9.99/mo, $79.99/yr, 14-day trial) but App Store Connect is the source
+// of truth, and every surface now derives them from the live StoreKit product via
+// describePlan(). Reintroducing a constant here is how the screens started quoting
+// a price and a trial end date that Apple never agreed to.
+// The fabricated PLAN_TRIAL_DAYS_LEFT / PLAN_TRIAL_END_LABEL constants that used to
+// live here are gone: every surface now reads the live subscription
+// (useSubscription's daysUntilExpiration / subscriptionExpiresAt / plan prices).
 const planCadenceLabel = (c: 'yearly' | 'monthly') => c === 'yearly' ? 'Yearly' : 'Monthly';
 
 type SettingsSubScreen = 'main' | 'kids' | 'battle' | 'account' | 'approval' | 'planBilling';
@@ -8599,6 +8681,21 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
   const [planCadence, setPlanCadence] = useState<'yearly' | 'monthly'>('yearly');
   const anyApproval = kids.some(k => kidApprovalSettings[k] !== false);
 
+  // Live subscription line for the "Your plan" card. Replaces a constant
+  // "Free trial · 5 days left" that never counted down, plus a progress bar driven
+  // by the same static number (dropped — a bar needs the period's start date, and
+  // StoreKit exposes no trial-vs-paid flag to anchor it to).
+  const { ready: planReady, isPremium: planIsPremium, daysUntilExpiration: planDaysLeft, willAutoRenew: planAutoRenew } = useSubscription();
+  const planSummaryLine = !planReady
+    ? 'Checking your subscription…'
+    : !planIsPremium
+      ? 'No active subscription'
+      : planDaysLeft == null
+        ? (planAutoRenew ? 'Active' : 'Cancelled')
+        : planAutoRenew
+          ? `Renews in ${planDaysLeft} ${planDaysLeft === 1 ? 'day' : 'days'}`
+          : `Cancelled · ${planDaysLeft} ${planDaysLeft === 1 ? 'day' : 'days'} left`;
+
   if (sub === 'kids')        return <SettingsKidsScreen        onBack={() => setSub('main')} onAddKid={onAddKid} onEditKid={onEditKid} onRotateCode={onRotateCode} kidProfiles={kidProfiles} />;
   if (sub === 'battle')      return <SettingsBattleScreen       onBack={() => setSub('main')} baseRate={baseRate} battleCoinBonusEnabled={battleCoinBonusEnabled} setBattleCoinBonusEnabled={setBattleCoinBonusEnabled} battleCoinBonusMultiplier={battleCoinBonusMultiplier} setBattleCoinBonusMultiplier={setBattleCoinBonusMultiplier} />;
   if (sub === 'account')     return <SettingsAccountScreen      onBack={() => setSub('main')} sessionUser={sessionUser} parentRole={parentRole} pinEnabled={pinEnabled} savedPin={savedPin} onSavePin={onSavePin} onDisablePin={onDisablePin} onSaveName={onSaveName} onSignOut={onSignOut} />;
@@ -8623,10 +8720,9 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
       />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-        {/* Your plan — hidden while BILLING_ENABLED is false (MON-31). The card
-            below renders PLAN_TRIAL_DAYS_LEFT / PLAN_* prices, which are static
-            placeholders, so showing it would state a fabricated trial countdown
-            and a price that is not the real StoreKit one. */}
+        {/* Your plan — hidden while BILLING_ENABLED is false (MON-31). Now reads
+            live StoreKit state; it used to render a constant "5 days left" plus a
+            progress bar driven by the same static number. */}
         {BILLING_ENABLED && (<>
         <Text style={ps.sectionLabel}>Your plan</Text>
         <TouchableOpacity
@@ -8640,10 +8736,9 @@ function ParentSettingsScreen({ onNav, baseRate, battleCoinBonusEnabled, setBatt
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: scale(16), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>Monstir Premium</Text>
-              <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#6B35F0' }}>Free trial · {PLAN_TRIAL_DAYS_LEFT} days left</Text>
+              <Text style={{ fontSize: scale(13), fontFamily: 'Inter_700Bold', color: '#6B35F0' }}>{planSummaryLine}</Text>
             </View>
           </View>
-          <ProgressBar value={PLAN_TRIAL_DAYS_TOTAL - PLAN_TRIAL_DAYS_LEFT} max={PLAN_TRIAL_DAYS_TOTAL} fillColor="#6B35F0" height={8} />
         </TouchableOpacity>
         </>)}
 
@@ -9405,6 +9500,29 @@ function SettingsPlanBillingScreen({ onBack, planCadence, onChangeCadence }: {
   const [sub, setSub] = useState<'main' | 'changePlan'>('main');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
+  // Live StoreKit state. Everything in the hero below used to be hardcoded — a
+  // constant "5 days left" that never counted down and a fixed "Trial ends Jul 22"
+  // three weeks in the past. Nothing recomputed them, so the screen stated the same
+  // thing forever regardless of what the user actually held.
+  const {
+    ready: subReady, isPremium, subscriptionExpiresAt,
+    daysUntilExpiration, willAutoRenew, activePlanId,
+    yearlyPlan, monthlyPlan,
+  } = useSubscription();
+
+  // The plan they actually hold wins over the local, unpersisted cadence state.
+  const heldCadence: 'yearly' | 'monthly' | null =
+    activePlanId === PREMIUM_YEARLY_SKU ? 'yearly'
+    : activePlanId === PREMIUM_MONTHLY_SKU ? 'monthly'
+    : null;
+  const shownCadence = heldCadence ?? planCadence;
+  const livePrice = shownCadence === 'yearly'
+    ? (yearlyPlan ? `${yearlyPlan.price}/yr` : null)
+    : (monthlyPlan ? `${monthlyPlan.price}/mo` : null);
+  const renewLabel = subscriptionExpiresAt
+    ? subscriptionExpiresAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null;
+
   if (sub === 'changePlan') {
     return (
       <ChangePlanScreen
@@ -9441,14 +9559,24 @@ function SettingsPlanBillingScreen({ onBack, planCadence, onChangeCadence }: {
               <Text style={{ fontSize: scale(12), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A' }}>{planCadenceLabel(planCadence)}</Text>
             </View>
           </View>
+          {/* Three honest states instead of one invented one. No progress bar: it
+              needs the period's start date, and a trial-vs-paid distinction that
+              StoreKit does not expose, so any bar here would be decoration. */}
           <Text style={{ fontSize: scale(14), fontFamily: 'Inter_700Bold', color: 'rgba(255,255,255,0.9)', marginBottom: 12 }}>
-            Free trial · {PLAN_TRIAL_DAYS_LEFT} days left
+            {!subReady
+              ? 'Checking your subscription…'
+              : !isPremium
+                ? 'No active subscription'
+                : willAutoRenew
+                  ? (daysUntilExpiration != null ? `Renews in ${daysUntilExpiration} ${daysUntilExpiration === 1 ? 'day' : 'days'}` : 'Active')
+                  : (daysUntilExpiration != null ? `Cancelled · ${daysUntilExpiration} ${daysUntilExpiration === 1 ? 'day' : 'days'} of access left` : 'Cancelled')}
           </Text>
-          <ProgressBar value={PLAN_TRIAL_DAYS_TOTAL - PLAN_TRIAL_DAYS_LEFT} max={PLAN_TRIAL_DAYS_TOTAL} fillColor="#C5F215" height={10} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: 'rgba(255,255,255,0.85)' }}>Trial ends {PLAN_TRIAL_END_LABEL}</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
             <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: 'rgba(255,255,255,0.85)' }}>
-              then ${planCadence === 'yearly' ? `${PLAN_YEARLY_PRICE.toFixed(2)}/yr` : `${PLAN_MONTHLY_PRICE.toFixed(2)}/mo`}
+              {isPremium && renewLabel ? `${willAutoRenew ? 'Renews' : 'Access ends'} ${renewLabel}` : ''}
+            </Text>
+            <Text style={{ fontSize: scale(12), fontFamily: 'Inter_600SemiBold', color: 'rgba(255,255,255,0.85)' }}>
+              {livePrice ? `${isPremium && willAutoRenew ? 'then ' : ''}${livePrice}` : ''}
             </Text>
           </View>
         </View>
@@ -9481,7 +9609,9 @@ function SettingsPlanBillingScreen({ onBack, planCadence, onChangeCadence }: {
         </TouchableOpacity>
 
         <Text style={{ fontSize: scale(12), fontFamily: 'Inter_500Medium', color: '#888888', textAlign: 'center', lineHeight: scale(18), paddingHorizontal: 32 }}>
-          Cancel anytime in the App Store at least 24 hrs before {PLAN_TRIAL_END_LABEL} and you won't be charged.
+          {renewLabel
+            ? `Cancel anytime in the App Store at least 24 hrs before ${renewLabel} and you won't be charged.`
+            : "Cancel anytime in the App Store at least 24 hrs before your period ends and you won't be charged."}
         </Text>
       </ScrollView>
 
@@ -9496,9 +9626,15 @@ function ChangePlanScreen({ onBack, currentCadence, onConfirm }: {
   onConfirm: (c: 'yearly' | 'monthly') => void;
 }) {
   const [selected, setSelected] = useState<'yearly' | 'monthly'>(currentCadence);
-  const yearlyMonthlyEquiv = (PLAN_YEARLY_PRICE / 12).toFixed(2);
-  const monthlyAnnualized  = (PLAN_MONTHLY_PRICE * 12).toFixed(2);
-  const savingsPct = Math.round((1 - PLAN_YEARLY_PRICE / (PLAN_MONTHLY_PRICE * 12)) * 100);
+  // Live products, so this screen can't quote a price Apple disagrees with.
+  // savingsPct comes from computeSavingsPct via the hook — same number the paywall
+  // shows — rather than being recomputed from local constants.
+  const { yearlyPlan: livePlanY, monthlyPlan: livePlanM, savingsPct: liveSavings } = useSubscription();
+  const yearlyTotal  = livePlanY ? parseFloat(livePlanY.price.replace(/[^0-9.]/g, '')) : null;
+  const monthlyTotal = livePlanM ? parseFloat(livePlanM.price.replace(/[^0-9.]/g, '')) : null;
+  const yearlyMonthlyEquiv = yearlyTotal != null ? (yearlyTotal / 12).toFixed(2) : null;
+  const monthlyAnnualized  = monthlyTotal != null ? (monthlyTotal * 12).toFixed(2) : null;
+  const savingsPct = liveSavings;
   const changed = selected !== currentCadence;
   const isDowngradeToMonthly = changed && selected === 'monthly';
 
@@ -9554,23 +9690,23 @@ function ChangePlanScreen({ onBack, currentCadence, onConfirm }: {
         {renderPlanCard({
           cadence: 'yearly',
           title: 'Yearly',
-          sub: `$${PLAN_YEARLY_PRICE.toFixed(2)}/yr${currentCadence === 'yearly' ? ' · current plan' : ''}`,
-          price: `$${yearlyMonthlyEquiv}`,
+          sub: `${livePlanY?.price ?? '—'}/yr${currentCadence === 'yearly' ? ' · current plan' : ''}`,
+          price: yearlyMonthlyEquiv != null ? `$${yearlyMonthlyEquiv}` : '—',
           priceUnit: '/mo',
-          badge: `SAVE ${savingsPct}%`,
+          badge: savingsPct != null ? `SAVE ${savingsPct}%` : undefined,
         })}
         {renderPlanCard({
           cadence: 'monthly',
           title: 'Monthly',
           sub: `Billed every month${currentCadence === 'monthly' ? ' · current plan' : ''}`,
-          price: `$${PLAN_MONTHLY_PRICE.toFixed(2)}`,
+          price: livePlanM?.price ?? '—',
           priceUnit: '/mo',
         })}
 
         {isDowngradeToMonthly && (
           <View style={{ marginHorizontal: 16, marginTop: 20, backgroundColor: '#EAE4FF', borderRadius: 12, padding: 16 }}>
             <Text style={{ fontSize: scale(14), fontFamily: 'Inter_600SemiBold', color: '#3D1FA3', lineHeight: scale(20) }}>
-              💡 Switching to monthly ends your {savingsPct}% yearly discount. You'd pay ${monthlyAnnualized} a year instead of ${PLAN_YEARLY_PRICE.toFixed(2)}.
+              💡 Switching to monthly ends your {savingsPct}% yearly discount. You'd pay ${monthlyAnnualized} a year instead of {livePlanY?.price ?? 'the yearly price'}.
             </Text>
           </View>
         )}
@@ -15147,6 +15283,9 @@ const s = StyleSheet.create({
   homeBalancePill:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: scale(14), paddingVertical: scale(9), gap: 6 },
   homeBalanceText:    { fontSize: scale(15), fontFamily: 'SpaceMono_700Bold', color: '#1A1A1A' },
   homeScroll:         { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 12 },
+  pokeBubbleWrap:  { position: 'absolute', top: 24, left: 0, right: 0, alignItems: 'center' as const, zIndex: 5 },
+  pokeBubble:      { backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1A1A', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8, maxWidth: 260 },
+  pokeBubbleText:  { fontSize: scale(13), fontFamily: 'Inter_800ExtraBold', color: '#1A1A1A', textAlign: 'center' as const },
   homeCharCard:       { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 2.5, borderColor: '#1A1A1A', marginBottom: 24, ...SOLID_SHADOW, overflow: 'visible' },
   homeCharImage:      { height: 340, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: 'visible' },
   homeCharInfo:       { padding: 16 },

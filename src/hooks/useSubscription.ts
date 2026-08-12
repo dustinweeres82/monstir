@@ -1,6 +1,6 @@
-// ─── Monstir Premium subscription state, wrapping expo-iap/StoreKit ──────────
+// ─── Monstir Premium subscription state, wrapping expo-iap ───────────────────
 // Thin wrapper around expo-iap's `useIAP` — this is the ONLY place the app
-// talks to StoreKit directly. Every purchase/restore call here hands off to
+// talks to StoreKit or Google Play Billing directly. Every purchase/restore call here hands off to
 // Apple's own system UI (the subscribe sheet, Face ID confirm, restore
 // spinner); nothing here renders a custom payment screen.
 //
@@ -16,6 +16,7 @@
 // pattern in supabase/functions/) before relying on this for anything
 // revenue-critical.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import {
   useIAP,
   ErrorCode,
@@ -24,7 +25,7 @@ import {
 } from 'expo-iap';
 import {
   PREMIUM_SKUS, PREMIUM_MONTHLY_SKU, PREMIUM_YEARLY_SKU,
-  describePlan, computeSavingsPct, type PlanDisplay,
+  describePlan, computeSavingsPct, androidOfferToken, hasFreeTrialOffer, type PlanDisplay,
 } from '../lib/iap';
 import { saveSubscriptionPurchase } from '../lib/db';
 
@@ -36,6 +37,12 @@ export interface UseSubscriptionResult {
   isPremium: boolean;
   trialEndsAt: Date | null;
   subscriptionExpiresAt: Date | null;
+  /** Real countdown straight from StoreKit — days until the current period ends. */
+  daysUntilExpiration: number | null;
+  /** false once the user cancels: access continues to expiry, then stops. */
+  willAutoRenew: boolean;
+  /** The subscribed product id, so UI shows the plan they actually hold. */
+  activePlanId: string | null;
   yearlyPlan: PlanDisplay | null;
   monthlyPlan: PlanDisplay | null;
   /** e.g. 33 for "SAVE 33%" — null until both plans have loaded. */
@@ -97,9 +104,12 @@ export function useSubscription(): UseSubscriptionResult {
         const fresh = await getActiveSubscriptionsDirect(PREMIUM_SKUS as unknown as string[]);
         const mine = fresh.find(s => s.productId === sku);
         const product = subscriptions.find(s => s.id === sku);
-        const hasFreeTrial = product && 'introductoryPricePaymentModeIOS' in product
-          ? product.introductoryPricePaymentModeIOS === 'free-trial'
-          : false;
+        // Cross-platform: this used to read introductoryPricePaymentModeIOS, which is
+        // undefined on Android, so a Play trial purchase was always persisted as
+        // 'active' and the trial was invisible to our own records.
+        const hasFreeTrial = product ? hasFreeTrialOffer(product) : false;
+        // Null on Android by design — Play gives no client-side expiry. Backfill it
+        // from the Play Developer API when MON-98 lands.
         const expiresAt = mine?.expirationDateIOS ? new Date(mine.expirationDateIOS).toISOString() : null;
         await saveSubscriptionPurchase({
           subscription_status: hasFreeTrial ? 'trialing' : 'active',
@@ -163,9 +173,30 @@ export function useSubscription(): UseSubscriptionResult {
     const mine = activeSubscriptions.find(
       s => (PREMIUM_SKUS as readonly string[]).includes(s.productId) && s.isActive
     );
-    if (!mine) return { isPremium: false, trialEndsAt: null, expiresAt: null };
+    if (!mine) {
+      return { isPremium: false, trialEndsAt: null, expiresAt: null, daysLeft: null, willAutoRenew: false, planId: null };
+    }
+    // expirationDateIOS / daysUntilExpirationIOS / renewalInfoIOS are iOS-only.
+    // Play does not hand the client an expiry date at all — it comes from the
+    // Play Developer API server-side (MON-98) — so on Android these stay null and
+    // the UI falls back to its undated wording rather than inventing a date.
     const expiresAt = mine.expirationDateIOS ? new Date(mine.expirationDateIOS) : null;
-    return { isPremium: true, trialEndsAt: expiresAt, expiresAt };
+    const daysLeft = mine.daysUntilExpirationIOS ?? (
+      expiresAt ? Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 86_400_000)) : null
+    );
+    return {
+      isPremium: true,
+      // NB: this is the end of the CURRENT period, which is the trial end only
+      // while the intro offer is running. Neither ActiveSubscription nor
+      // RenewalInfoIOS exposes "this period is a free trial", so nothing here can
+      // honestly claim trial framing — that needs our own persisted
+      // subscription_status, or App Store Server Notifications (MON-98).
+      trialEndsAt: expiresAt,
+      expiresAt,
+      daysLeft,
+      willAutoRenew: mine.renewalInfoIOS?.willAutoRenew ?? mine.autoRenewingAndroid ?? true,
+      planId: mine.currentPlanId ?? mine.productId,
+    };
   }, [activeSubscriptions]);
 
   const yearlyProduct  = useMemo(() => subscriptions.find(s => s.id === PREMIUM_YEARLY_SKU) ?? null, [subscriptions]);
@@ -178,9 +209,29 @@ export function useSubscription(): UseSubscriptionResult {
     lastErrorRef.current = null;
     setLastError(null);
     setPurchasing(true);
+
+    // Google Play rejects a subscription purchase without the base plan's offer
+    // token, so it has to be looked up from the fetched product. iOS needs only the
+    // sku. This branch is why Android could never purchase before: the request was
+    // hardcoded to `{ apple: { sku } }`.
+    const product = subscriptions.find(s => s.id === sku);
+    const offerToken = product ? androidOfferToken(product) : null;
+    const request = Platform.OS === 'android'
+      ? { google: { skus: [sku], ...(offerToken ? { subscriptionOffers: [{ sku, offerToken }] } : {}) } }
+      : { apple: { sku } };
+
+    if (Platform.OS === 'android' && !offerToken) {
+      // Better a named failure than Play's opaque rejection.
+      const message = 'This plan has no purchasable offer on Google Play yet.';
+      lastErrorRef.current = message;
+      setLastError(message);
+      setPurchasing(false);
+      return 'error';
+    }
+
     return new Promise<PurchaseOutcome>((resolve) => {
       resolvePurchaseRef.current = resolve;
-      requestPurchase({ request: { apple: { sku } }, type: 'subs' }).catch((e) => {
+      requestPurchase({ request, type: 'subs' }).catch((e) => {
         setPurchasing(false);
         setLastError(e instanceof Error ? e.message : 'Purchase failed');
         resolvePurchaseRef.current = null;
@@ -221,6 +272,9 @@ export function useSubscription(): UseSubscriptionResult {
     isPremium: entitlement.isPremium,
     trialEndsAt: entitlement.trialEndsAt,
     subscriptionExpiresAt: entitlement.expiresAt,
+    daysUntilExpiration: entitlement.daysLeft,
+    willAutoRenew: entitlement.willAutoRenew,
+    activePlanId: entitlement.planId,
     yearlyPlan,
     monthlyPlan,
     savingsPct,
