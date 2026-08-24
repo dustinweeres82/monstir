@@ -5624,10 +5624,11 @@ function KidPayoutScreen({ amount, completedCount, weeks, battleWon, battleBonus
   );
 }
 
-function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
+function GoalDetailScreen({ goal, onBack, onEdit, onPurchase, baseRate, monsterName }: {
   goal: SavedGoal;
   onBack: () => void;
   onEdit: () => void;
+  onPurchase?: () => void;
   baseRate: string;
   monsterName?: string;
 }) {
@@ -5865,6 +5866,27 @@ function GoalDetailScreen({ goal, onBack, onEdit, baseRate, monsterName }: {
           {statRows[1] && <View style={{ flexDirection: 'row', gap: 12 }}>{statRows[1]}</View>}
         </View>
 
+        {/* ── Bought it — the only way to spend down the balance and free up a
+             new goal. Confirmed, because it moves real money. ── */}
+        {pct >= 1 && onPurchase && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => Alert.alert(
+              'Did you buy it?',
+              `This takes ${fmtD(targetCents)} out of your balance for ${goal.name}.`,
+              [
+                { text: 'Not yet', style: 'cancel' },
+                { text: 'I bought it!', onPress: onPurchase },
+              ],
+            )}
+            style={{ alignSelf: 'stretch', backgroundColor: '#C5F215', borderRadius: scale(100), borderWidth: 2.5, borderColor: '#1A1A1A', paddingVertical: scale(18), alignItems: 'center', ...BTN_SHADOW }}
+          >
+            <Text style={{ fontFamily: 'Inter_900Black', fontSize: scale(16), color: '#1A1A1A' }}>
+              I bought it!
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* ── Mascot banner ── */}
         <MascotBanner message={mascotMsg} />
 
@@ -5895,7 +5917,7 @@ function Toast({ message, bgColor, textColor }: { message: string; bgColor?: str
   );
 }
 
-function WalletScreen({ coins, weeklyEarnedCents, weeklyHistory, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, onOpenTrophyRoom, onOpenRelicDetail, parentRole = '' }: {
+function WalletScreen({ coins, weeklyEarnedCents, weeklyHistory, done, battleResult, monsterIdx, baseRate, goals, onAddGoal, onOpenGoalFlow, currentStreak, onEditGoal, onDeleteGoal, onPurchaseGoal, monsterName, weeklyXp, onSwitchToParent, managedChores, kidProfiles, onSwitchToKid, currentKidName, initialAvatarIdx, onOpenTrophyRoom, onOpenRelicDetail, parentRole = '' }: {
   coins: number;
   weeklyEarnedCents: number;
   weeklyHistory: WeekHistoryRow[];
@@ -5908,6 +5930,7 @@ function WalletScreen({ coins, weeklyEarnedCents, weeklyHistory, done, battleRes
   onOpenGoalFlow: () => void;
   currentStreak: number;
   onEditGoal: (goal: SavedGoal) => void;
+  onPurchaseGoal?: (goal: SavedGoal) => void;
   onDeleteGoal: (id: string) => void;
   monsterName?: string;
   weeklyXp: number;
@@ -6162,6 +6185,7 @@ function WalletScreen({ coins, weeklyEarnedCents, weeklyHistory, done, battleRes
               goal={selectedGoal}
               onBack={() => setSelectedGoal(null)}
               onEdit={() => { setEditingGoal(selectedGoal); setSelectedGoal(null); setShowGoalModal(true); }}
+              onPurchase={onPurchaseGoal ? () => { const g = selectedGoal; setSelectedGoal(null); onPurchaseGoal(g); } : undefined}
               baseRate={baseRate}
               monsterName={monsterName}
             />
@@ -14059,6 +14083,22 @@ function AppInner() {
     setKidGoals(currentKidName, prev => prev.filter(g => g.id !== id));
   }, [currentKidName]);
 
+  // Spending the money is the ONLY event that reduces a kid's balance. Without it
+  // `coins` only ratchets upward, and since addGoal seeds a new goal with the whole
+  // balance, any goal cheaper than lifetime earnings is born already complete — the
+  // kid could never start a real second goal. Deduct the PRICE (the goal's target),
+  // not the balance: saving $120 toward a $25 card should leave $95, not $0.
+  const purchaseGoal = useCallback((goal: SavedGoal) => {
+    const priceCents = Math.round(parseFloat(goal.amount || '0') * 100);
+    if (!Number.isFinite(priceCents) || priceCents <= 0) return;
+    addKidCoins(currentKidName, -priceCents);
+    setKidGoals(currentKidName, prev => prev
+      .filter(g => g.id !== goal.id)
+      // Remaining goals mirror the balance (see the payout path), so they have to
+      // come down by the same amount or they'd stay inflated by money now spent.
+      .map(g => ({ ...g, savedCents: Math.max(0, g.savedCents - priceCents) })));
+  }, [currentKidName, addKidCoins]);
+
   // ── Parent PIN gate ─────────────────────────────────────────────────────
   // Switching from a kid into parent view; prompt for the PIN if one is set.
   const requestParentMode = useCallback(() => {
@@ -14583,7 +14623,7 @@ function AppInner() {
                 />
               </ErrorBoundary>
             )}
-            {screen === 'wallet'   && <ErrorBoundary key={`wallet-${currentKidName}`}><WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={getKidCoins(currentKidName)} weeklyEarnedCents={computeKidLedger(currentKidName, getKidCoins(currentKidName), choreHistory, payoutLog, debugDayOffset).earnedThisWeekCents} weeklyHistory={getKidWeeklyHistory(currentKidName, choreHistory, payoutLog, debugDayOffset)} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={getKidGoals(currentKidName)} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={liveCurrentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={requestParentMode} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} onOpenTrophyRoom={() => { setTrophyInitialKey(undefined); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }}
+            {screen === 'wallet'   && <ErrorBoundary key={`wallet-${currentKidName}`}><WalletScreen key={currentKidName} initialAvatarIdx={currentKidAvatarIdx} coins={getKidCoins(currentKidName)} weeklyEarnedCents={computeKidLedger(currentKidName, getKidCoins(currentKidName), choreHistory, payoutLog, debugDayOffset).earnedThisWeekCents} weeklyHistory={getKidWeeklyHistory(currentKidName, choreHistory, payoutLog, debugDayOffset)} done={done} battleResult={battleResult} monsterIdx={monsterIdx} baseRate={baseRate} goals={getKidGoals(currentKidName)} onAddGoal={addGoal} onOpenGoalFlow={() => setScreen('goalFlow')} currentStreak={liveCurrentStreak} onEditGoal={editGoal} onDeleteGoal={deleteGoal} onPurchaseGoal={purchaseGoal} monsterName={effectiveMonsterName} weeklyXp={weeklyXp} onSwitchToParent={requestParentMode} managedChores={managedChores} currentKidName={currentKidName} kidProfiles={kidSwitcherProfiles} onSwitchToKid={switchToKid} onOpenTrophyRoom={() => { setTrophyInitialKey(undefined); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }}
                 onOpenRelicDetail={(key) => { setTrophyInitialKey(key); setTrophyOrigin('wallet'); setScreen('trophyRoom'); }} parentRole={parentRole} /></ErrorBoundary>}
             {screen === 'trophies' && <ErrorBoundary key={`trophies-${currentKidName}`}><TrophyRoom monsterIdx={monsterIdx} monsterImg={currentMonsterImg} monsterName={effectiveMonsterName} xp={xp} currentKidName={currentKidName} isTab header={
                 <ScreenHeader
