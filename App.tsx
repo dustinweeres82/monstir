@@ -10063,7 +10063,7 @@ const GOAL_ICONS: Record<string, number> = {
   pizza:      require('./assets/icons/goalIcons/Pizza.png'),
   movie:      require('./assets/icons/goalIcons/Movie.png'),
   sleepover:  require('./assets/icons/goalIcons/Sleepover.png'),
-  icecream:   require('./assets/icons/goalIcons/Ice Ceam Party.png'),
+  icecream:   require('./assets/icons/goalIcons/IceCream.png'),
   money:      require('./assets/icons/goalIcons/Money.png'),
 };
 const DEFAULT_GOAL_ICON_KEY = 'money';
